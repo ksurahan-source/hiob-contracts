@@ -1,0 +1,39 @@
+"""HIOB 행성간 타입 계약 (Phase 0.1, D-15 폴리레포).
+
+계약 체인:
+    JanusBrief → BeatPlan[] → {MediaArtifact, AudioClip, KlingVideo}[] → EditDecisionList
+              → CompositionSnapshot → ReelMetric → FeedbackSignal
+
+신설 3종:
+    KlingVideo: 여성 아바타 입술싱크 (Athena → Hephaestus)
+    Heroine: 여성 주연 캐스팅 메타데이터 (Janus → 전 하위 행성)
+    FeedbackSignal: 측정 루프 피드백 (Metis → Janus/Ares)
+
+규칙:
+- 행성은 서로 import 하지 않고 이 계약 객체로만 주고받는다 (god-file/좌초 방지).
+- 모든 계약은 frozen(불변) — 새 객체를 만들지 기존 것을 변형하지 않는다.
+- 부재 필드는 None 허용(byte-identical 폴백). 단 결박 필수 필드는 validate()가 강제.
+- audio 클립은 beat_index 결박 필수 = P1(음소거 슬라이드쇼) 구조 봉쇄.
+"""
+from .janus_brief import Intake13Q, JanusBrief
+from .beat_plan import Beat, BeatPlan
+from .media_artifact import MediaArtifact
+from .audio_clip import AudioClip
+from .klingvideo import KlingVideo
+from .heroine import Heroine, HeroineArchetype
+from .feedback_signal import FeedbackSignal
+from .edit_decision_list import EditDecision, EditDecisionList
+from .composition_snapshot import CompositionSnapshot
+from .reel_metric import ReelMetric
+from .gate import RenderReadiness, assert_render_ready
+
+__all__ = [
+    "Intake13Q", "JanusBrief",
+    "Beat", "BeatPlan",
+    "MediaArtifact", "AudioClip",
+    "KlingVideo", "Heroine", "HeroineArchetype", "FeedbackSignal",
+    "EditDecision", "EditDecisionList",
+    "CompositionSnapshot", "ReelMetric",
+    "RenderReadiness", "assert_render_ready",
+]
+__version__ = "0.1.0"
