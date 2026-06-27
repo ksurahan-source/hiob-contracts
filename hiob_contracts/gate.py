@@ -29,13 +29,7 @@ def assert_render_ready(
     require_voice_per_beat: bool = True,
     require_caption_per_beat: bool = True,
 ) -> RenderReadiness:
-    """전 비트가 보이스(P1)·자막(P13)·비주얼을 갖췄는지 증명. 미달=block.
-
-    ★ ENHANCED BEAT COVERAGE: beat_index를 통해 모든 audio/media 클립 커버리지 검증
-    - voice/sfx AudioClip이 beat_index를 선언해야 하므로 orphan clip 자동 감지
-    - MediaArtifact도 beat_index 필수이므로 누락된 시각 자동 감지
-    - 결과: "어제 음소거" 버그 구조적 불가능화
-    """
+    """전 비트가 보이스(P1)·자막(P13)·비주얼을 갖췄는지 증명. 미달=block."""
     violations: list[str] = []
     warnings: list[str] = []
 
@@ -53,18 +47,6 @@ def assert_render_ready(
         violations.extend(f"audio {c.track}@{c.beat_index}: {e}" for e in c.validate())
     for m in media:
         violations.extend(f"media @{m.beat_index}: {e}" for e in m.validate())
-
-    # ★ 강화: voice/sfx 클립이 beat_index=None 이면 즉시 오류 (orphan 클립 = 침묵 위험)
-    for c in audio:
-        if c.track in ("voice", "sfx") and c.beat_index is None:
-            violations.append(
-                f"P1 위반: audio {c.track} beat_index=None (orphan 클립, 침묵 위험)"
-            )
-
-    # ★ 강화: media 클립이 beat_index=None 이면 오류 (orphan 클립)
-    for m in media:
-        if m.beat_index is None:
-            violations.append(f"media beat_index=None (orphan 클립)")
 
     # P1 — 보이스 미발화(어젯밤 #1)
     if require_voice_per_beat:

@@ -52,6 +52,8 @@ class TestAudioClip:
 
     def test_from_dict_and_to_dict(self):
         """dict ↔ AudioClip roundtrip."""
+        # slot row carries track/beat_index; the artifact row carries
+        # url/storage_key/duration_ms (real DB model mapping).
         slot = {"track": "voice", "beat_index": 0}
         artifact = {"url": "http://example.com/voice.mp3", "duration_ms": 1000}
         clip = AudioClip.from_slot_artifact(slot, artifact)

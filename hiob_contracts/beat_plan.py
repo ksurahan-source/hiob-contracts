@@ -22,6 +22,7 @@ class Beat:
     caption: Optional[str] = None               # 자막 텍스트(전 비트 권장)
     role: Optional[str] = None                  # 영웅/가이드/목격자
     duration_ms: Optional[int] = None
+    beat_duration_ms: Optional[int] = None      # Per-beat grid duration (decouple from _BEAT_MS=1000)
     cta: Optional[dict] = None                  # CTA 비트 = 가치수학 4단
 
     @classmethod
@@ -36,6 +37,7 @@ class Beat:
             caption=d.get("caption"),
             role=d.get("role"),
             duration_ms=d.get("duration_ms"),
+            beat_duration_ms=d.get("beat_duration_ms"),
             cta=d.get("cta") if isinstance(d.get("cta"), dict) else None,
         )
 

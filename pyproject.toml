@@ -1,13 +1,22 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "hiob-contracts"
 version = "0.1.0"
-description = "HIOB 행성간 타입 계약 — JanusBrief→BeatPlan→{MediaArtifact,AudioClip}→EditDecisionList→CompositionSnapshot→ReelMetric. 행성은 파일이 아니라 이 계약으로만 협업한다."
+description = "HIOB polyrepo · hiob-contracts"
+readme = "README.md"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = []
 
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "import-linter>=2.0"]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["hiob_contracts*"]
+[tool.setuptools]
+packages = ["hiob_contracts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+

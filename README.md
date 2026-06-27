@@ -1,81 +1,31 @@
-# hiob-contracts (발판)
+# hiob-contracts
 
-행성끼리 주고받는 데이터의 **타입 계약**. 7스키마 파이프라인: JanusBrief → BeatPlan → {MediaArtifact, AudioClip} → EditDecisionList → CompositionSnapshot → ReelMetric.
+HIOB 행성간 **타입 계약** (Phase 0.1, D-15 폴리레포). 행성은 서로 import 하지 않고 이 계약 객체로만 협업한다.
 
-## 핵심 규칙
-
-- **P1 봉쇄**: voice/sfx AudioClip은 `beat_index` 필수 (무음 릴 방지).
-- **gate 강화**: orphan clip (beat_index=None인 voice/sfx/media) 즉시 검출 → 렌더 금지.
-
-## 구조
-
-### Python 정전 소스
-`hiob_contracts/` — Pydantic-like dataclass 계약들
-- `janus_brief.py` — Intake13Q + JanusBrief
-- `beat_plan.py` — Beat + BeatPlan
-- `audio_clip.py` — AudioClip (P1 결박)
-- `media_artifact.py` — MediaArtifact
-- `edit_decision_list.py` — EditDecision + EditDecisionList
-- `composition_snapshot.py` — CompositionSnapshot
-- `reel_metric.py` — ReelMetric
-- `gate.py` — RenderReadiness + assert_render_ready() (강화됨)
-
-### TypeScript 미러
-`ts/` — Zod schema (선언문서만 제공)
-- `src/janus-brief.ts` ↔ `janus_brief.py`
-- `src/beat-plan.ts` ↔ `beat_plan.py`
-- `src/audio-clip.ts` ↔ `audio_clip.py`
-- `src/media-artifact.ts` ↔ `media_artifact.py`
-- `src/edit-decision-list.ts` ↔ `edit_decision_list.py`
-- `src/composition-snapshot.ts` ↔ `composition_snapshot.py`
-- `src/reel-metric.ts` ↔ `reel_metric.py`
-- `src/gate.ts` ↔ `gate.py` (강화됨)
-
-**⚠️ Authority**: Python 정전 소스. TypeScript는 미러일 뿐.
-모든 필드·유효성·부재값 동작이 일치해야 함. 차이 발생 시 Python을 정답으로 간주.
-
-## 설치 & 테스트
-
-### Python
-```bash
-pip install -e .
-pytest tests/test_contracts.py -v
+## 계약 체인
+```
+JanusBrief → BeatPlan[] → {MediaArtifact, AudioClip}[] → EditDecisionList
+          → CompositionSnapshot → ReelMetric
 ```
 
-### TypeScript
-```bash
-cd ts/
-npm install
-npm run build
-npm test  # (진행 중)
-```
+| 계약 | 생산 행성 | 핵심 |
+|---|---|---|
+| `JanusBrief` | Janus | 13Q + 직교축(locale/vertical/protagonist/style/reel_mode) |
+| `BeatPlan`/`Beat` | Ares | 대본이 지휘 — 비트가 다운스트림 전 필드 선언 |
+| `MediaArtifact` | Athena | 비트 결박 이미지/영상(still/video/avatar/carousel) |
+| `AudioClip` | Orpheus/Apollo | **voice/sfx = beat_index 결박 필수 (P1 봉쇄)** |
+| `EditDecisionList` | Artemis | 비트별 컷·전환·자막·타이밍 |
+| `CompositionSnapshot` | Atropos | selection + output_url + gate_passed 증명 |
+| `ReelMetric` | Metis | ROAS/CTR 파생 → 창작 피드백(해자) |
 
-## 사용
+## 설계 원칙
+- **불변(frozen)** — 새 객체 생성, 변형 금지.
+- **부재 필드 = None 폴백** (byte-identical). 단 결박 필수 필드는 `validate()`가 강제.
+- **`assert_render_ready()`** = 렌더前 invariant gate. 전 비트 보이스(P1)·비주얼·자막(P13) 증명 못하면 block → 어젯밤 "음소거 슬라이드쇼" 구조 차단.
+- `from_dict`/`from_row`/`from_slot_artifact` = 기존 dict/DB row와 backwards-compat.
 
-### Python
-```python
-from hiob_contracts import JanusBrief, BeatPlan, AudioClip, assert_render_ready
+## grounding
+필드는 실제 DB 스키마(`infra/migrations`: slot.beat_index·artifact·composition_snapshot·reel_metrics) + beat dict 키에서 추출. 데이터 모델: `run → slot(track+beat_index) → artifact → clip → composition_snapshot`.
 
-brief = JanusBrief(brand_slug="viewok", ...)
-plan = BeatPlan.from_list([...])
-audio = [AudioClip(track="voice", beat_index=0, url="..."), ...]
-result = assert_render_ready(plan, audio, media)
-assert result.ok, result.violations
-```
-
-### TypeScript
-```typescript
-import { JanusBriefSchema, BeatPlanSchema, assertRenderReady } from '@hiob/contracts';
-
-const brief = JanusBriefSchema.parse(briefData);
-const plan = BeatPlanSchema.parse(planData);
-const readiness = assertRenderReady(plan, audio, media);
-if (!readiness.ok) {
-  throw new Error(`Render blocked: ${readiness.violations.join(', ')}`);
-}
-```
-
-## 의존
-
-- Python: stdlib only
-- TypeScript: `zod` (runtime validation)
+## 상태
+Phase 0.1 — 모노레포 안 신규 패키지. 기존 코드 미수정(backwards-compat). 다음: hiob-core 추출 → hiob-data governor → god-file 분해 → 물리 분리.
