@@ -28,8 +28,12 @@ from .reel_metric import ReelMetric
 from .gate import RenderReadiness, assert_render_ready
 from .six_realm import SixDoPreset, get_realm_preset, get_sfx_cue_for_emotion
 from .locale_pack import LocalePack, resolve_locale_pack
+from .planet_envelopes import VisualContext, VisualRequest, AudioRequest, SFXRequest, RenderJobRequest, RenderJobResponse, ProcessInsightsRequest
+from .planet_io import PlanetIO, PLANET_IO, Conformance, io_for, needs_new_contract, dsl_ready
 
 __all__ = [
+    "VisualContext","VisualRequest","AudioRequest","SFXRequest","RenderJobRequest","RenderJobResponse","ProcessInsightsRequest",
+    "PlanetIO", "PLANET_IO", "Conformance", "io_for", "needs_new_contract", "dsl_ready",
     "Intake13Q", "JanusBrief",
     "Beat", "BeatPlan",
     "MediaArtifact", "AudioClip",
