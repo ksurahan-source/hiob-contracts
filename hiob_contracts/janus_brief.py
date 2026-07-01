@@ -54,11 +54,15 @@ class JanusBrief:
     protagonist: Optional[str] = None          # 남/여/everyman 등
     style: Optional[str] = None                 # photoreal | cute_illustration
     reel_mode: Optional[str] = None             # PROOF | SERIES | None(legacy)
-    # 제품/리스팅 그라운딩
+    # 제품/리스팅 그라운딩 (1층 = 캠페인: 무엇을 광고하나)
     product: Optional[str] = None
     listing_slug: Optional[str] = None
+    source_url: Optional[str] = None            # URL 출처 보존(스키마 경계에서 유실 방지)
     request_text: Optional[str] = None
     request_interpretation: dict = field(default_factory=dict)
+    # VoC (2층 = 광고 소재: 어떻게 말하나 — 리스팅별 진짜 후기·페인, Ares가 소비)
+    # shape: {source_url, core_pain, target_audience, pain_points[], real_reviews[], brand_identity{}}
+    voc: dict = field(default_factory=dict)
 
     def validate(self) -> list[str]:
         """완전성 점검. Janus의 책임 = brief의 완전성·일관성."""
@@ -82,8 +86,10 @@ class JanusBrief:
             reel_mode=d.get("reel_mode"),
             product=d.get("product"),
             listing_slug=d.get("listing_slug"),
+            source_url=d.get("source_url"),
             request_text=d.get("request_text"),
             request_interpretation=d.get("request_interpretation") or {},
+            voc=d.get("voc") or {},
         )
 
     def to_dict(self) -> dict:
