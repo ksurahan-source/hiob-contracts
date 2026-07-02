@@ -26,6 +26,11 @@ STORY_BUDGET_MIN = {"훅": 1, "배경": 2, "사건": 1, "인과": 1, "증거": 1
 
 TRAUMA_GRADES = ("A", "B", "C")  # A=타겟 전용 기억+관계 · B=감각 장면 · C=범용 경고
 
+# 감정 레지스터 (founder 2026-07-02 승인) — 훅의 문법. 형식은 레지스터가, 사실은 앵커가.
+# 비극=1인칭 몰락 · 가십=3자 전달(실존 글 인용) · 공포=기지의 고통 증폭(창작 금지) ·
+# 분노=부당함(과녁은 '방치된 문제'만). 가드: 실존 인용만·비방 금지·공포 과장 금지.
+EMOTION_REGISTERS = ("비극", "가십", "공포", "분노")
+
 
 @dataclass
 class AnchorVocPost:
@@ -71,16 +76,26 @@ class HookLogic:
     stop_reason: str = ""      # 왜 스크롤이 멈추나
     pain_mirror: str = ""      # 타겟이 "내 얘기"라고 느끼는 지점
     trauma_grade: str = ""     # "A|B|C — 근거"
+    register: str = ""         # "비극|가십|공포|분노 — 선택 근거" (2026-07-02)
 
     @classmethod
     def from_dict(cls, d: Optional[dict]) -> "HookLogic":
         d = d or {}
-        return cls(stop_reason=str(d.get("stop_reason") or ""), pain_mirror=str(d.get("pain_mirror") or ""), trauma_grade=str(d.get("trauma_grade") or ""))
+        return cls(
+            stop_reason=str(d.get("stop_reason") or ""),
+            pain_mirror=str(d.get("pain_mirror") or ""),
+            trauma_grade=str(d.get("trauma_grade") or ""),
+            register=str(d.get("register") or ""),
+        )
 
     @property
     def grade(self) -> str:
         g = self.trauma_grade.strip().upper()
         return g[0] if g and g[0] in TRAUMA_GRADES else ""
+
+    @property
+    def register_name(self) -> str:
+        return next((r for r in EMOTION_REGISTERS if r in self.register), "")
 
 
 @dataclass
