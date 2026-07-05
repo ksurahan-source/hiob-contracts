@@ -22,6 +22,7 @@ from .audio_clip import AudioClip
 from .klingvideo import KlingVideo
 from .heroine import Heroine, HeroineArchetype
 from .feedback_signal import FeedbackSignal
+from .defect_signal import DefectSignal
 from .edit_decision_list import EditDecision, EditDecisionList
 from .composition_snapshot import CompositionSnapshot
 from .reel_metric import ReelMetric
@@ -55,7 +56,7 @@ __all__ = [
     "Intake13Q", "JanusBrief",
     "Beat", "BeatPlan",
     "MediaArtifact", "AudioClip",
-    "KlingVideo", "Heroine", "HeroineArchetype", "FeedbackSignal",
+    "KlingVideo", "Heroine", "HeroineArchetype", "FeedbackSignal", "DefectSignal",
     "EditDecision", "EditDecisionList",
     "CompositionSnapshot", "ReelMetric",
     "RenderReadiness", "assert_render_ready",

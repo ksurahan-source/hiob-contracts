@@ -24,6 +24,7 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "KlingVideo": ("hiob_contracts.klingvideo", "KlingVideo"),
     "Heroine": ("hiob_contracts.heroine", "Heroine"),
     "FeedbackSignal": ("hiob_contracts.feedback_signal", "FeedbackSignal"),
+    "DefectSignal": ("hiob_contracts.defect_signal", "DefectSignal"),
     "ReelMetric": ("hiob_contracts.reel_metric", "ReelMetric"),
     "CompositionSnapshot": ("hiob_contracts.composition_snapshot", "CompositionSnapshot"),
     "EditDecisionList": ("hiob_contracts.edit_decision_list", "EditDecisionList"),
