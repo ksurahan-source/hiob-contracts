@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from .beat_plan import BeatPlan
 from .media_artifact import MediaArtifact
 from .audio_clip import AudioClip
+from .beat_personas import BeatPersonas
 
 
 # ── Athena 입력 컨텍스트 (BeatPlan과 함께) ──
@@ -30,9 +31,15 @@ class VisualContext:
 
 @dataclass(frozen=True)
 class VisualRequest:
-    """Athena 노드 입력 = BeatPlan + VisualContext (순수)."""
+    """Athena 노드 입력 = BeatPlan + VisualContext + (Ares→Athena seam) BeatPersonas·element_locks.
+
+    beat_personas = Ares 산출 인물·연출 메타(비트별) 정형화. element_locks = D-56 승인 도면
+    (status=approved만 소비). 둘 다 부재 허용(byte-identical 폴백) — 기존 소비자 무영향.
+    """
     beat_plan: BeatPlan
     context: VisualContext = field(default_factory=VisualContext)
+    beat_personas: BeatPersonas = field(default_factory=BeatPersonas)
+    element_locks: dict = field(default_factory=dict)
 
 
 # ── Orpheus 입력 (보이스/음악) — 순수 데이터(DB 0) ──
@@ -126,4 +133,8 @@ __all__ = [
     "AudioRequest", "SFXRequest",
     "RenderJobRequest", "RenderJobResponse",
     "ProcessInsightsRequest",
+    "BeatPersona", "BeatPersonas",
 ]
+
+# re-export seam contract for convenience (VisualRequest 합성 요소)
+from .beat_personas import BeatPersona  # noqa: E402

@@ -28,6 +28,11 @@ from .reel_metric import ReelMetric
 from .gate import RenderReadiness, assert_render_ready
 from .six_realm import SixDoPreset, get_realm_preset, get_sfx_cue_for_emotion
 from .locale_pack import LocalePack, resolve_locale_pack
+from .beat_personas import BeatPersona, BeatPersonas
+from .element_locks import (
+    ElementLocks, ElementRef, CharacterLock, ProductLock, BackgroundLock,
+    LOCK_STATUSES, ELEMENT_KINDS,
+)
 from .planet_envelopes import VisualContext, VisualRequest, AudioRequest, SFXRequest, RenderJobRequest, RenderJobResponse, ProcessInsightsRequest
 from .planet_io import PlanetIO, PLANET_IO, Conformance, io_for, needs_new_contract, dsl_ready
 from .envelope_validation import (
@@ -43,6 +48,9 @@ __all__ = [
     "ContractViolation", "ValidationResult", "validate_payload", "ensure_valid", "registered_contracts",
     "ReelKpiProvider",
     "VisualContext","VisualRequest","AudioRequest","SFXRequest","RenderJobRequest","RenderJobResponse","ProcessInsightsRequest",
+    "BeatPersona", "BeatPersonas",
+    "ElementLocks", "ElementRef", "CharacterLock", "ProductLock", "BackgroundLock",
+    "LOCK_STATUSES", "ELEMENT_KINDS",
     "PlanetIO", "PLANET_IO", "Conformance", "io_for", "needs_new_contract", "dsl_ready",
     "Intake13Q", "JanusBrief",
     "Beat", "BeatPlan",
