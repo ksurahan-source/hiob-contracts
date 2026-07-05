@@ -37,9 +37,11 @@ from .envelope_validation import (
     ensure_valid,
     registered_contracts,
 )
+from .reel_kpi_provider import ReelKpiProvider
 
 __all__ = [
     "ContractViolation", "ValidationResult", "validate_payload", "ensure_valid", "registered_contracts",
+    "ReelKpiProvider",
     "VisualContext","VisualRequest","AudioRequest","SFXRequest","RenderJobRequest","RenderJobResponse","ProcessInsightsRequest",
     "PlanetIO", "PLANET_IO", "Conformance", "io_for", "needs_new_contract", "dsl_ready",
     "Intake13Q", "JanusBrief",
