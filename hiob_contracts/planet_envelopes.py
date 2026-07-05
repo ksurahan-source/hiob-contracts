@@ -114,7 +114,8 @@ class RenderJobResponse:
             snapshot_id=str(r.get("snapshotId") or r.get("snapshot_id") or ""),
             render_status=str(r.get("status") or ("completed" if ok else "failed")),
             output_url=r.get("output_url") or r.get("outputUrl"),
-            duration_s=r.get("duration_s") or r.get("durationS"),
+            # 0.0초(프레임 렌더 등)를 falsy로 잃지 않게 명시 None 체크.
+            duration_s=(r.get("duration_s") if r.get("duration_s") is not None else r.get("durationS")),
             error=None if ok else ({"reason": r.get("error")} if r.get("error") else None),
         )
 

@@ -27,6 +27,18 @@ def _s(v: Any) -> str:
     return str(v or "").strip()
 
 
+def _safe_int(v: Any, default: int = 0) -> int:
+    """관대 int 강제 — DB payload의 '3'·3.0·'2.5'·'x' 모두 견딤(크래시 금지). 불가=default."""
+    if v is None or isinstance(v, bool):
+        return default
+    if isinstance(v, int):
+        return v
+    try:
+        return int(float(v)) if isinstance(v, float) else int(float(str(v).strip()))
+    except (ValueError, TypeError):
+        return default
+
+
 @dataclass(frozen=True)
 class ElementRef:
     """단일 히어로컷 참조(락 소스). storage_key=durable R2 키, url=서명/공개."""
@@ -210,7 +222,7 @@ class ElementLocks:
                 sheet=dict(bd.get("sheet") or {}),
             )
         return cls(
-            version=int(d.get("version") or 0),
+            version=_safe_int(d.get("version"), 0),
             status=_s(d.get("status")) or "draft",
             authored_by=_s(d.get("authored_by")),
             characters=chars,

@@ -33,6 +33,18 @@ def _s(v: Any) -> Optional[str]:
     return s or None
 
 
+def _safe_int(v: Any) -> Optional[int]:
+    """관대 int 강제 — DB/외부 payload의 '5'·5.0·'abc' 모두 견딤(크래시 금지). 불가=None."""
+    if v is None or isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    try:
+        return int(float(v)) if isinstance(v, float) else int(str(v).strip())
+    except (ValueError, TypeError):
+        return None
+
+
 @dataclass(frozen=True)
 class BeatPersona:
     """단일 비트의 인물·연출 메타 (Ares 산출 → Athena 소비). beat_index=결박 앵커(필수)."""
@@ -80,8 +92,9 @@ class BeatPersona:
         bi = d.get("beat_index")
         if bi is None:
             bi = beat_index
+        bi_int = _safe_int(bi)
         return cls(
-            beat_index=int(bi) if bi is not None else None,  # type: ignore[arg-type]
+            beat_index=bi_int if bi_int is not None else beat_index,  # 비정수 문자열도 위치 폴백
             persona_id=_s(d.get("persona_id") or d.get("id")),
             render_mode=_s(d.get("render_mode")),
             emotion=_s(d.get("emotion") or d.get("realm") or d.get("six_realm")),
