@@ -59,17 +59,20 @@ def _resolve(name: str):
 
 
 def _parse(cls: Any, payload: Any) -> Any:
-    """dict/list/인스턴스 → 계약 인스턴스. from_dict > from_list > ctor 순서."""
+    """dict/list/인스턴스 → 계약 인스턴스. 타입 우선(B3): list→from_list, dict→from_dict/ctor.
+
+    from_dict를 만능 폴백으로 쓰면 list payload가 from_dict(list)로 새서 TypeError → 타입을 먼저 본다.
+    """
     if isinstance(payload, cls):
         return payload
-    if isinstance(payload, list) and hasattr(cls, "from_list"):
-        return cls.from_list(payload)
+    if isinstance(payload, list):
+        if hasattr(cls, "from_list"):
+            return cls.from_list(payload)
+        raise TypeError(f"{cls.__name__}: list payload인데 from_list 없음")
+    if isinstance(payload, dict):
+        return cls.from_dict(payload) if hasattr(cls, "from_dict") else cls(**payload)
     if hasattr(cls, "from_dict"):
         return cls.from_dict(payload)
-    if isinstance(payload, dict):
-        return cls(**payload)
-    if isinstance(payload, list) and hasattr(cls, "from_list"):
-        return cls.from_list(payload)
     raise TypeError(f"{cls.__name__}: dict/list/from_dict 없이 파싱 불가 (payload type={type(payload).__name__})")
 
 

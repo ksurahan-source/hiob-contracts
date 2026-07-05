@@ -66,3 +66,44 @@ def test_beatplan_from_list_path():
     # 빈 비트는 validate가 잡을 수 있음(내용 무관, 파싱 경로가 죽지 않는지 확인)
     assert r.contract == "BeatPlan"
     assert r.obj is not None or r.errors
+
+
+# ── B3: _parse 타입 우선 분기 (list가 from_dict로 새지 않게, 2026-07-05 버그헌팅) ──
+from hiob_contracts.envelope_validation import _parse
+
+
+class _DictOnly:
+    """from_dict만 있고 from_list 없는 계약(대부분의 dict 계약 형태)."""
+    def __init__(self, v):
+        self.v = v
+
+    @classmethod
+    def from_dict(cls, d):
+        return cls(d["v"])
+
+
+class _ListOnly:
+    def __init__(self, items):
+        self.items = items
+
+    @classmethod
+    def from_list(cls, xs):
+        return cls(list(xs))
+
+
+def test_parse_list_payload_does_not_hit_from_dict():
+    # B3 회귀: list payload + from_dict-only → from_dict(list) 호출(TypeError)이 아니라
+    # 명시적 TypeError('from_list 없음')로 fail-loud.
+    with pytest.raises(TypeError) as ei:
+        _parse(_DictOnly, [{"v": 1}])
+    assert "from_list" in str(ei.value)
+
+
+def test_parse_dict_payload_uses_from_dict():
+    obj = _parse(_DictOnly, {"v": 7})
+    assert isinstance(obj, _DictOnly) and obj.v == 7
+
+
+def test_parse_list_payload_uses_from_list():
+    obj = _parse(_ListOnly, [1, 2, 3])
+    assert isinstance(obj, _ListOnly) and obj.items == [1, 2, 3]
