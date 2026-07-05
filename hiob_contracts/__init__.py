@@ -46,11 +46,17 @@ from .envelope_validation import (
 )
 from .reel_kpi_provider import ReelKpiProvider
 from .decision_callable import DecisionContext, DecisionCallable, resolve_decision
+from .parzifal_master_sheet import (
+    ParzifalMasterSheet, CharacterMasterSheet, ProductMasterSheet, SheetPanel,
+    CHARACTER_ANGLES, PRODUCT_ANGLES, EXPRESSIONS, SHEET_STATUSES,
+)
 
 __all__ = [
     "ContractViolation", "ValidationResult", "validate_payload", "ensure_valid", "registered_contracts",
     "ReelKpiProvider",
     "DecisionContext", "DecisionCallable", "resolve_decision",
+    "ParzifalMasterSheet", "CharacterMasterSheet", "ProductMasterSheet", "SheetPanel",
+    "CHARACTER_ANGLES", "PRODUCT_ANGLES", "EXPRESSIONS", "SHEET_STATUSES",
     "VisualContext","VisualRequest","AudioRequest","SFXRequest","RenderJobRequest","RenderJobResponse","ProcessInsightsRequest",
     "BeatPersona", "BeatPersonas",
     "ElementLocks", "ElementRef", "CharacterLock", "ProductLock", "BackgroundLock",
