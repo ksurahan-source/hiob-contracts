@@ -45,10 +45,12 @@ from .envelope_validation import (
     registered_contracts,
 )
 from .reel_kpi_provider import ReelKpiProvider
+from .decision_callable import DecisionContext, DecisionCallable, resolve_decision
 
 __all__ = [
     "ContractViolation", "ValidationResult", "validate_payload", "ensure_valid", "registered_contracts",
     "ReelKpiProvider",
+    "DecisionContext", "DecisionCallable", "resolve_decision",
     "VisualContext","VisualRequest","AudioRequest","SFXRequest","RenderJobRequest","RenderJobResponse","ProcessInsightsRequest",
     "BeatPersona", "BeatPersonas",
     "ElementLocks", "ElementRef", "CharacterLock", "ProductLock", "BackgroundLock",
