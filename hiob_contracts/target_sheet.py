@@ -231,6 +231,17 @@ class ElementLocksProfile:
     expressions: list = field(default_factory=list)  # [SheetPanel]
     wardrobe: list = field(default_factory=list)  # [dict]
 
+    def validate(self) -> list[str]:
+        """ElementLocksProfile 계약 검증 — gender_axis, gaze_mode, protagonist_role vocab."""
+        errs: list[str] = []
+        if self.protagonist_role and self.protagonist_role not in ("narrator", "hero", "heroine", "opponent"):
+            errs.append(f"ElementLocksProfile.protagonist_role 미지원: {self.protagonist_role}")
+        if self.gender_axis and self.gender_axis not in ("female_led", "hero", "neutral"):
+            errs.append(f"ElementLocksProfile.gender_axis 미지원: {self.gender_axis}")
+        if self.gaze_mode and self.gaze_mode not in ("female_gaze", "neutral"):
+            errs.append(f"ElementLocksProfile.gaze_mode 미지원: {self.gaze_mode}")
+        return errs
+
     def to_dict(self) -> dict:
         """JSON 직렬화 (Athena adapter 소비용)."""
         return {
