@@ -95,6 +95,7 @@ class IdentityLayer:
             id=str(d.get("id") or ""), name=str(d.get("name") or ""),
             age=int(d["age"]) if d.get("age") is not None else None,
             age_band=str(d.get("age_band") or ""),
+            gender_axis=str(d.get("gender_axis") or ""),
             gender=str(d.get("gender") or ""), region=str(d.get("region") or ""),
             background=str(d.get("background") or ""), language=str(d.get("language") or "ko"),
             confidence=str(d.get("confidence") or "approved")
@@ -369,6 +370,7 @@ class TargetProfile:
             "pain_points": self.pain_points, "blocker": self.blocker, "jtbd": self.jtbd,
             "narrative_arc": self.narrative_arc, "voice_persona": self.voice_persona,
             "speaking_style": self.speaking_style,
+            "gender_axis": self.gender_axis,
             "source_tags": [st.to_dict() for st in self.source_tags],
             "approval_status": self.approval_status
         }
