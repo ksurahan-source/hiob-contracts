@@ -332,6 +332,7 @@ class TargetProfile:
     narrative_arc: str = ""
     voice_persona: str = ""
     speaking_style: str = ""
+    gender_axis: str = ""  # additive(2026-07-08): ares protagonist_axis 어댑터 소비 — female_led/male_led
 
     source_tags: list = field(default_factory=list)  # [SourceTag]
     approval_status: str = "approved"  # ear_test_pending | approved
@@ -489,6 +490,8 @@ class TargetSheet:
 
         return TargetProfile(
             persona_id=self.persona_id,
+            gender_axis=(self.persona.gender_axis
+                         or ("female_led" if "여" in (self.identity.gender or "") else ("male_led" if "남" in (self.identity.gender or "") else ""))),
             name=self.identity.name,
             age=self.identity.age,
             age_band=self.identity.age_band,
