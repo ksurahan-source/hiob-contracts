@@ -117,6 +117,16 @@ class ElementLocks:
     def is_approved(self) -> bool:
         return self.status == "approved"
 
+    def approve(self, by: str = "") -> "ElementLocks":
+        """draft→approved 전이 — frozen이므로 새 인스턴스 반환 (2026-07-09 좀비 해소:
+        메서드 부재로 approved_refs() 소비자들이 영원히 빈 리스트를 받던 것)."""
+        import dataclasses
+        entry = {"version": self.version + 1, "action": "approve", "by": by}
+        return dataclasses.replace(
+            self, status="approved", version=self.version + 1,
+            version_history=(*self.version_history, entry),
+        )
+
     def character(self, persona_id: str) -> Optional[CharacterLock]:
         c = self.characters.get(persona_id)
         if c is None and self.characters:
