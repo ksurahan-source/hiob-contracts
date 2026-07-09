@@ -27,7 +27,6 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "DefectSignal": ("hiob_contracts.defect_signal", "DefectSignal"),
     "ReelMetric": ("hiob_contracts.reel_metric", "ReelMetric"),
     "CompositionSnapshot": ("hiob_contracts.composition_snapshot", "CompositionSnapshot"),
-    "EditDecisionList": ("hiob_contracts.edit_decision_list", "EditDecisionList"),
     "BeatPersona": ("hiob_contracts.beat_personas", "BeatPersona"),
     "BeatPersonas": ("hiob_contracts.beat_personas", "BeatPersonas"),
     "ElementLocks": ("hiob_contracts.element_locks", "ElementLocks"),
