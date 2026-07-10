@@ -91,11 +91,12 @@ class IdentityLayer:
     @classmethod
     def from_dict(cls, d: Optional[dict]) -> "IdentityLayer":
         d = d or {}
+        # gender_axis는 IdentityLayer 필드가 아니다(L3 PersonaLayer 소속) — 잘못 전달돼
+        # from_dict가 TypeError로 즉사하던 좀비 계약 (2026-07-11 QA 전수에서 발견·제거).
         return cls(
             id=str(d.get("id") or ""), name=str(d.get("name") or ""),
             age=int(d["age"]) if d.get("age") is not None else None,
             age_band=str(d.get("age_band") or ""),
-            gender_axis=str(d.get("gender_axis") or ""),
             gender=str(d.get("gender") or ""), region=str(d.get("region") or ""),
             background=str(d.get("background") or ""), language=str(d.get("language") or "ko"),
             confidence=str(d.get("confidence") or "approved")

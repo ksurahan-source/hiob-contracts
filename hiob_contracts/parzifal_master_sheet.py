@@ -110,6 +110,30 @@ class CharacterMasterSheet:
             errs.extend(p.validate())
         return errs
 
+    def to_dict(self) -> dict:
+        """JSON 직렬화 — TargetSheet.to_dict()가 visual 층으로 호출하는 계약
+        (2026-07-11 실사고: 이 메서드 부재로 생산 경로의 4층 SSOT persist가
+        AttributeError → fail-soft에 삼켜져 전량 조용히 실패했다)."""
+        def _pl(panels):
+            return [{"slot": p.slot, "label": p.label, "storage_key": p.storage_key,
+                     "url": p.url, "engine": p.engine, "derived_from": p.derived_from}
+                    for p in _panels(panels)]
+        return {"persona_id": self.persona_id, "identity": dict(self.identity or {}),
+                "narrow_target": dict(self.narrow_target or {}),
+                "angles": _pl(self.angles), "expressions": _pl(self.expressions),
+                "wardrobe": dict(self.wardrobe or {})}
+
+    @classmethod
+    def from_dict(cls, d: Optional[dict]) -> "CharacterMasterSheet":
+        """to_dict 역방향 — TargetSheet.from_dict()가 visual 층으로 호출하는 계약."""
+        d = d or {}
+        return cls(persona_id=str(d.get("persona_id") or ""),
+                   identity=d.get("identity") or {},
+                   narrow_target=d.get("narrow_target") or {},
+                   angles=_panels(d.get("angles")),
+                   expressions=_panels(d.get("expressions")),
+                   wardrobe=d.get("wardrobe") or {})
+
 
 @dataclass(frozen=True)
 class ProductMasterSheet:
