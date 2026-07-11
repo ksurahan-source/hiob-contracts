@@ -1,7 +1,7 @@
 """HIOB 행성간 타입 계약 (Phase 0.1, D-15 폴리레포).
 
 계약 체인:
-    JanusBrief → BeatPlan[] → {MediaArtifact, AudioClip, KlingVideo}[] → EditDecisionList
+    JanusBrief → BeatPlan[] → {MediaArtifact, AudioClip, KlingVideo}[]
               → CompositionSnapshot → ReelMetric → FeedbackSignal
 
 신설 3종:

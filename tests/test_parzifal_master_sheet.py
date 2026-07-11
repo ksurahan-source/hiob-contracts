@@ -68,3 +68,22 @@ def test_validate_approved_requires_hero():
     empty = ParzifalMasterSheet(status="approved", characters={"x": CharacterMasterSheet(persona_id="x")})
     assert any("hero" in e for e in empty.validate())        # 승인인데 hero 패널 없음 → 에러
     assert _approved().validate() == []
+
+
+def test_character_master_sheet_roundtrip():
+    """CharacterMasterSheet.to_dict ↔ from_dict — TargetSheet visual 층이 호출하는 계약.
+
+    2026-07-11 실사고: to_dict 부재가 fail-soft에 삼켜져 4층 SSOT persist 전량 조용히 실패.
+    """
+    ch = _approved().character("heroine")
+    again = CharacterMasterSheet.from_dict(ch.to_dict())
+    assert again == ch                                       # 패널·identity·narrow_target 무손실
+    assert again.to_dict() == ch.to_dict()                   # 재직렬화 안정성(idempotent)
+    assert again.hero_panel().label == "front"
+
+
+def test_character_master_sheet_from_dict_none():
+    empty = CharacterMasterSheet.from_dict(None)
+    assert empty.persona_id == ""
+    assert empty.hero_panel() is None
+    assert empty.to_dict()["angles"] == []

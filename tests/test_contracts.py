@@ -7,7 +7,6 @@ from hiob_contracts import (
     Beat, BeatPlan,
     MediaArtifact, AudioClip,
     KlingVideo, Heroine, FeedbackSignal,
-    EditDecision, EditDecisionList,
     CompositionSnapshot, ReelMetric,
     RenderReadiness, assert_render_ready,
 )
