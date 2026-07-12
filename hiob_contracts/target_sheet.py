@@ -649,10 +649,20 @@ def persona_from_ares_character(
     protagonist_gender_axis: Brief.protagonist_gender에서 전달 (female_led | hero | neutral).
 
     변경 0, 순수 함수.
+
+    L3 Persona 채우기 (co_star 지원, 2026-07-13):
+    - protagonist_role이 "narrator"|"opponent"(co_star)이면 gaze_mode 기본 = "neutral" (명시값 우선).
     """
     character_dict = character_dict or {}
+    protagonist_role = str(character_dict.get("protagonist_role") or "")
+
+    # co_star(narrator, opponent)이면 gaze_mode 기본="neutral"
+    gaze_mode = str(character_dict.get("gaze_mode") or "")
+    if not gaze_mode and protagonist_role in ("narrator", "opponent"):
+        gaze_mode = "neutral"
+
     return PersonaLayer(
-        protagonist_role=str(character_dict.get("protagonist_role") or ""),
+        protagonist_role=protagonist_role,
         actor_archetype=str(character_dict.get("actor_archetype") or ""),
         narrative_arc=str(character_dict.get("narrative_arc") or ""),
         voice_persona=str(character_dict.get("voice_persona") or ""),
@@ -662,7 +672,7 @@ def persona_from_ares_character(
         tone_and_manner=str(character_dict.get("tone_and_manner") or ""),
         backstory=str(character_dict.get("backstory") or ""),
         gender_axis=str(protagonist_gender_axis or ""),
-        gaze_mode=str(character_dict.get("gaze_mode") or "")
+        gaze_mode=gaze_mode
     )
 
 
