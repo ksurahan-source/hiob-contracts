@@ -30,6 +30,14 @@ export { MediaKindType } from './media-artifact';
 export { EditDecisionListSchema, EditDecisionSchema, validateEditDecisionList } from './edit-decision-list';
 export type { EditDecisionList, EditDecision } from './edit-decision-list';
 
+// ParzifalTargetInput
+export { ParzifalTargetInputSchema, validateParzifalTargetInput } from './parzifal-target-input';
+export type { ParzifalTargetInput } from './parzifal-target-input';
+
+// AresScriptInput
+export { AresScriptInputSchema, validateAresScriptInput } from './ares-script-input';
+export type { AresScriptInput } from './ares-script-input';
+
 // CompositionSnapshot
 export { CompositionSnapshotSchema, validateCompositionSnapshot } from './composition-snapshot';
 export type { CompositionSnapshot } from './composition-snapshot';

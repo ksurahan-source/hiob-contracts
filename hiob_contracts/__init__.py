@@ -56,6 +56,8 @@ from .parzifal_master_sheet import (
     ParzifalMasterSheet, CharacterMasterSheet, ProductMasterSheet, SheetPanel,
     CHARACTER_ANGLES, PRODUCT_ANGLES, EXPRESSIONS, SHEET_STATUSES,
 )
+from .parzifal_target_input import ParzifalTargetInput
+from .ares_script_input import AresScriptInput
 from .factory import (
     Digest, DigestError, canonical_json, sha256_digest, is_digest, assert_digest,
     PlanetOutput, ArtifactRef, ContractRef,
@@ -79,6 +81,7 @@ __all__ = [
     "DecisionContext", "DecisionCallable", "resolve_decision",
     "ParzifalMasterSheet", "CharacterMasterSheet", "ProductMasterSheet", "SheetPanel",
     "CHARACTER_ANGLES", "PRODUCT_ANGLES", "EXPRESSIONS", "SHEET_STATUSES",
+    "ParzifalTargetInput", "AresScriptInput",
     "VisualContext","VisualRequest","AudioRequest","SFXRequest","RenderJobRequest","RenderJobResponse","ProcessInsightsRequest",
     "BeatPersona", "BeatPersonas",
     "ElementLocks", "ElementRef", "CharacterLock", "ProductLock", "BackgroundLock",
