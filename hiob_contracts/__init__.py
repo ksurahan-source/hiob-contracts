@@ -56,6 +56,17 @@ from .parzifal_master_sheet import (
     ParzifalMasterSheet, CharacterMasterSheet, ProductMasterSheet, SheetPanel,
     CHARACTER_ANGLES, PRODUCT_ANGLES, EXPRESSIONS, SHEET_STATUSES,
 )
+from .factory import (
+    Digest, DigestError, canonical_json, sha256_digest, is_digest, assert_digest,
+    PlanetOutput, ArtifactRef, ContractRef,
+    KarmaRefineRequest, KarmaEdgeReceipt, TargetRef, PolicyRef,
+    TransformLogEntry, EdgeViolation, MapperRef, derive_idempotency_key,
+    StageReceipt, StageError, TERMINAL_STAGE_STATUSES,
+    ApprovalReceipt, DegradationReceipt,
+    FactoryState, TERMINAL_STATES, can_transition, assert_transition,
+    StageExecutionState, EdgeExecutionState,
+    SemanticEdge, EDGES, get_edge, is_registered_edge, required_edges,
+)
 
 __all__ = [
     "ExecutionBackend", "OperationRef", "OperationStatus", "CancelResult",
@@ -81,5 +92,15 @@ __all__ = [
     "RenderReadiness", "assert_render_ready",
     "SixDoPreset", "get_realm_preset", "get_sfx_cue_for_emotion",
     "LocalePack", "resolve_locale_pack",
+    # ── Creative Factory Harmony kernel (PRD 2026-07-14 §6–§7) ──
+    "Digest", "DigestError", "canonical_json", "sha256_digest", "is_digest", "assert_digest",
+    "PlanetOutput", "ArtifactRef", "ContractRef",
+    "KarmaRefineRequest", "KarmaEdgeReceipt", "TargetRef", "PolicyRef",
+    "TransformLogEntry", "EdgeViolation", "MapperRef", "derive_idempotency_key",
+    "StageReceipt", "StageError", "TERMINAL_STAGE_STATUSES",
+    "ApprovalReceipt", "DegradationReceipt",
+    "FactoryState", "TERMINAL_STATES", "can_transition", "assert_transition",
+    "StageExecutionState", "EdgeExecutionState",
+    "SemanticEdge", "EDGES", "get_edge", "is_registered_edge", "required_edges",
 ]
 __version__ = "0.1.0"
