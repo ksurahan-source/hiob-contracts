@@ -65,9 +65,11 @@ class SFXRequest:
 
     cues: [{beat_index, text, duration_ms}, ...] (비트별 효과음 요청)
     asset_pool: [{storage_key, url, name, tags}, ...] (후보 효과음 자산)
+    shot_list_digest: 선택사항 Athena ShotList 다이제스트 (음정 정렬 시 필수)
     """
     cues: tuple[dict, ...] = ()
     asset_pool: tuple[dict, ...] = ()
+    shot_list_digest: str = ""
 
 
 # ── Hephaestus 입출력 (렌더 — 패키지 부재, 계약이 순수 노드 transform을 보유) ──
