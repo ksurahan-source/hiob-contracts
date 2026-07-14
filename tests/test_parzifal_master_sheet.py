@@ -45,9 +45,13 @@ def test_constraint_prompt_wardrobe_forbidden_narrow():
     assert "버건디 폴로" in p and "로고" in p and "물놀이" in p
 
 
-def test_single_heroine_fallback():
+def test_persona_mismatch_zero_fallback():
+    """BW·T22: persona_id 미스매치/부재 시 단일 히로인 상속 금지 (폴백 0)."""
     ms = _approved()
-    assert ms.character(None) is not None                    # persona_id 없어도 단일 폴백
+    assert ms.character(None) is None
+    assert ms.character("") is None
+    assert ms.character("someone_else") is None
+    assert ms.character("heroine") is not None
 
 
 def test_to_element_locks_bridge():

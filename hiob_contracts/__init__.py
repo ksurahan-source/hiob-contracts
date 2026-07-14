@@ -39,7 +39,7 @@ from .locale_pack import LocalePack, resolve_locale_pack
 from .beat_personas import BeatPersona, BeatPersonas
 from .element_locks import (
     ElementLocks, ElementRef, CharacterLock, ProductLock, BackgroundLock,
-    LOCK_STATUSES, ELEMENT_KINDS,
+    LOCK_STATUSES, ELEMENT_KINDS, standing_lookup,
 )
 from .planet_envelopes import VisualContext, VisualRequest, AudioRequest, SFXRequest, RenderJobRequest, RenderJobResponse, ProcessInsightsRequest
 from .planet_io import PlanetIO, PLANET_IO, Conformance, io_for, needs_new_contract, dsl_ready
@@ -85,7 +85,7 @@ __all__ = [
     "VisualContext","VisualRequest","AudioRequest","SFXRequest","RenderJobRequest","RenderJobResponse","ProcessInsightsRequest",
     "BeatPersona", "BeatPersonas",
     "ElementLocks", "ElementRef", "CharacterLock", "ProductLock", "BackgroundLock",
-    "LOCK_STATUSES", "ELEMENT_KINDS",
+    "LOCK_STATUSES", "ELEMENT_KINDS", "standing_lookup",
     "PlanetIO", "PLANET_IO", "Conformance", "io_for", "needs_new_contract", "dsl_ready",
     "Intake13Q", "JanusBrief",
     "Beat", "BeatPlan",

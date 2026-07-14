@@ -1,15 +1,17 @@
-"""ElementLocks 계약 테스트 — 도면 락·히어로컷·3-ref 소비 API (E-1)."""
+"""ElementLocks 계약 테스트 — 도면 락·히어로컷·3-ref 소비 API (E-1) + BW·T22 스코프."""
 from __future__ import annotations
 
 from hiob_contracts import (
     ElementLocks, ElementRef, CharacterLock, ProductLock, BackgroundLock,
-    ensure_valid, validate_payload, registered_contracts,
+    ensure_valid, validate_payload, registered_contracts, standing_lookup,
 )
 
 APPROVED = {
     "version": 3,
     "status": "approved",
     "authored_by": "claude-fable-5",
+    "workspace_id": "ws-viewok",
+    "brand_slug": "viewok",
     "characters": {
         "heroine": {
             "hero_cut": {"storage_key": "viewok/el/heroine_v3.png", "derived_from": "master v3"},
@@ -36,8 +38,11 @@ def test_registered():
 def test_from_dict_roundtrip():
     el = ElementLocks.from_dict(APPROVED)
     assert el.version == 3 and el.is_approved
+    assert el.workspace_id == "ws-viewok" and el.brand_slug == "viewok"
     assert el.character("heroine").voice_persona == "female1"
     assert el.to_dict()["characters"]["heroine"]["hero_cut"]["storage_key"] == "viewok/el/heroine_v3.png"
+    assert el.to_dict()["workspace_id"] == "ws-viewok"
+    assert el.to_dict()["brand_slug"] == "viewok"
 
 
 def test_approved_refs_returns_three_hero_cuts_in_order():
@@ -64,11 +69,75 @@ def test_constraint_prompt_includes_wardrobe_product_background():
     assert "배경 락" in p                       # background
 
 
-def test_single_character_fallback_on_persona_mismatch():
+def test_persona_mismatch_zero_fallback():
+    """BW·T22: persona_id 미스매치 시 단일 히로인 상속 금지 (폴백 0)."""
     el = ElementLocks.from_dict(APPROVED)
-    # unknown persona_id → single-character fallback
+    assert el.character("someone_else") is None
     refs = el.approved_refs("someone_else")
-    assert refs and refs[0].kind == "character"
+    # character ref 없음; product/background만 (persona-scoped 아님)
+    assert all(r.kind != "character" for r in refs)
+    assert [r.kind for r in refs] == ["product", "background"]
+
+
+def test_standing_lookup_scope_mismatch_empty():
+    """LP2-4 VERIFY: 불일치 스코프 조회 → 빈 결과 (None)."""
+    store = [
+        ElementLocks.from_dict(APPROVED),
+        ElementLocks.from_dict({
+            **APPROVED,
+            "workspace_id": "ws-other",
+            "brand_slug": "alive",
+            "characters": {
+                "heroine": {
+                    "hero_cut": {"storage_key": "alive/el/leak.png"},
+                    "voice_persona": "female2",
+                }
+            },
+        }),
+    ]
+    # wrong brand
+    assert standing_lookup(store, workspace_id="ws-viewok", brand_slug="alive") is None
+    # wrong workspace
+    assert standing_lookup(store, workspace_id="ws-other", brand_slug="viewok") is None
+    # empty scope args
+    assert standing_lookup(store, workspace_id="", brand_slug="viewok") is None
+    assert standing_lookup(store, workspace_id="ws-viewok", brand_slug="") is None
+    # for_scope / approved_refs kwargs also empty on mismatch
+    el = ElementLocks.from_dict(APPROVED)
+    assert el.for_scope("ws-other", "viewok") is None
+    assert el.approved_refs("heroine", workspace_id="ws-viewok", brand_slug="alive") == []
+    assert el.constraint_prompt("heroine", workspace_id="ws-other", brand_slug="viewok") == ""
+
+
+def test_standing_lookup_exact_scope_hit():
+    """Exact (workspace_id, brand_slug) dual-key hit returns the matching record only."""
+    viewok = ElementLocks.from_dict(APPROVED)
+    alive = ElementLocks.from_dict({
+        **APPROVED,
+        "workspace_id": "ws-alive",
+        "brand_slug": "alive",
+        "characters": {
+            "heroine": {
+                "hero_cut": {"storage_key": "alive/el/heroine.png"},
+                "voice_persona": "female2",
+            }
+        },
+    })
+    store = [viewok, alive]
+    hit = standing_lookup(store, workspace_id="ws-viewok", brand_slug="viewok")
+    assert hit is not None
+    assert hit.brand_slug == "viewok"
+    assert hit.character("heroine").hero_cut.storage_key == "viewok/el/heroine_v3.png"
+    hit2 = standing_lookup(store, workspace_id="ws-alive", brand_slug="alive")
+    assert hit2 is not None and hit2.brand_slug == "alive"
+    # unscoped record never matches (no inheritance of bare standing data)
+    bare = ElementLocks.from_dict({**APPROVED, "workspace_id": "", "brand_slug": ""})
+    assert standing_lookup([bare], workspace_id="ws-viewok", brand_slug="viewok") is None
+    # scoped approved_refs green path
+    refs = viewok.approved_refs(
+        "heroine", workspace_id="ws-viewok", brand_slug="viewok",
+    )
+    assert [r.kind for r in refs] == ["character", "product", "background"]
 
 
 def test_validate_approved_requires_a_hero_cut():

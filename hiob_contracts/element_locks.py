@@ -7,17 +7,21 @@
 ★ V2 원칙(참고 워크플로 실증): 멀티패널 마스터시트를 통째로 락에 걸면 정체성 전이가 흔들린다.
 → 마스터시트(sheet)는 사람 검토용, **락 소스는 각 대상의 단일 히어로컷(hero_cut) 1장.**
 
+★ BW·T22 / LP2-4: standing-data 조회는 (workspace_id, brand_slug) 이중키 정합만 허용.
+폴백 0 — 크로스-테넌트/크로스-브랜드/페르소나 상속 금지 (07-14 페르소나 상속병 클래스 종결).
+
 저장: `listing.attributes.element_locks`(기존 JSONB, 신규 테이블 0·리스팅 스코프·버전드).
 status="approved"만 소비(draft는 byte-identical no-op). D-51: 원료 read-only, 구현=Athena·star·studio.
 
 소비 시그니처(Athena 비트 edit):
-    refs = locks.approved_refs(persona_id)   # [character, product, background] hero_cut 중 존재분
-    prompt += locks.constraint_prompt(persona_id)
+    locks = standing_lookup(store, workspace_id=ws, brand_slug=brand)  # 미스매치=None
+    refs = locks.approved_refs(persona_id) if locks else []            # [character, product, background]
+    prompt += locks.constraint_prompt(persona_id) if locks else ""
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Any, Optional
+from typing import Any, Iterable, Optional, Union
 
 LOCK_STATUSES = ("draft", "approved")
 ELEMENT_KINDS = ("character", "product", "background")
@@ -103,10 +107,16 @@ class BackgroundLock:
 
 @dataclass(frozen=True)
 class ElementLocks:
-    """리스팅 스코프 정체성 락 묶음. status='approved'만 소비."""
+    """리스팅 스코프 정체성 락 묶음. status='approved'만 소비.
+
+    standing-data 스코프(BW·T22): workspace_id + brand_slug 이중키.
+    조회는 standing_lookup()/for_scope()만 사용 — 폴백·상속 0.
+    """
     version: int = 0
     status: str = "draft"                       # draft | approved
     authored_by: str = ""
+    workspace_id: str = ""                      # tenancy scope (BW·T22)
+    brand_slug: str = ""                        # brand scope (BW·T22)
     characters: dict = field(default_factory=dict)   # {persona_id: CharacterLock}
     product: Optional[ProductLock] = None
     background: Optional[BackgroundLock] = None
@@ -127,21 +137,43 @@ class ElementLocks:
             version_history=(*self.version_history, entry),
         )
 
-    def character(self, persona_id: str) -> Optional[CharacterLock]:
-        c = self.characters.get(persona_id)
-        if c is None and self.characters:
-            # 단일 히로인 폴백: persona_id 미스매치여도 유일 캐릭터 사용
-            if len(self.characters) == 1:
-                return next(iter(self.characters.values()))
-        return c
+    def matches_scope(self, workspace_id: str, brand_slug: str) -> bool:
+        """Strict dual-key equality. Empty self fields never match (no unscoped inheritance)."""
+        ws = _s(workspace_id)
+        br = _s(brand_slug)
+        self_ws = _s(self.workspace_id)
+        self_br = _s(self.brand_slug)
+        if not ws or not br or not self_ws or not self_br:
+            return False
+        return self_ws == ws and self_br == br
 
-    def approved_refs(self, persona_id: str = "") -> list[ElementRef]:
+    def for_scope(self, workspace_id: str, brand_slug: str) -> Optional["ElementLocks"]:
+        """Standing-data gate. Scope mismatch → None (empty). Zero fallback."""
+        return self if self.matches_scope(workspace_id, brand_slug) else None
+
+    def character(self, persona_id: str) -> Optional[CharacterLock]:
+        """Exact persona_id only. ZERO fallback — no single-heroine inheritance on mismatch."""
+        if not persona_id:
+            return None
+        return self.characters.get(persona_id)
+
+    def approved_refs(
+        self,
+        persona_id: str = "",
+        *,
+        workspace_id: str = "",
+        brand_slug: str = "",
+    ) -> list[ElementRef]:
         """승인된 [character, product, background] 히어로컷(존재분만). 미승인=빈 리스트.
 
         3-ref edit 소스. 순서 = character(base 후보)·product·background.
+        workspace_id/brand_slug 제공 시 스코프 불일치 → [] (폴백 0).
         """
         if not self.is_approved:
             return []
+        if workspace_id or brand_slug:
+            if not self.matches_scope(workspace_id, brand_slug):
+                return []
         out: list[ElementRef] = []
         ch = self.character(persona_id)
         if ch and ch.hero_cut and ch.hero_cut.has_image():
@@ -152,10 +184,22 @@ class ElementLocks:
             out.append(self.background.hero_cut)
         return out
 
-    def constraint_prompt(self, persona_id: str = "") -> str:
-        """승인 락의 프롬프트 제약 블록(비주얼 edit 최후미 주입). 미승인=''."""
+    def constraint_prompt(
+        self,
+        persona_id: str = "",
+        *,
+        workspace_id: str = "",
+        brand_slug: str = "",
+    ) -> str:
+        """승인 락의 프롬프트 제약 블록(비주얼 edit 최후미 주입). 미승인=''.
+
+        workspace_id/brand_slug 제공 시 스코프 불일치 → '' (폴백 0).
+        """
         if not self.is_approved:
             return ""
+        if workspace_id or brand_slug:
+            if not self.matches_scope(workspace_id, brand_slug):
+                return ""
         parts: list[str] = []
         ch = self.character(persona_id)
         if ch:
@@ -235,6 +279,8 @@ class ElementLocks:
             version=_safe_int(d.get("version"), 0),
             status=_s(d.get("status")) or "draft",
             authored_by=_s(d.get("authored_by")),
+            workspace_id=_s(d.get("workspace_id")),
+            brand_slug=_s(d.get("brand_slug")),
             characters=chars,
             product=prod,
             background=bg,
@@ -246,6 +292,8 @@ class ElementLocks:
             "version": self.version,
             "status": self.status,
             "authored_by": self.authored_by,
+            "workspace_id": self.workspace_id,
+            "brand_slug": self.brand_slug,
             "characters": {
                 pid: {
                     "hero_cut": c.hero_cut.to_dict() if c.hero_cut else None,
@@ -267,6 +315,31 @@ class ElementLocks:
             },
             "version_history": list(self.version_history),
         }
+
+
+def standing_lookup(
+    records: Iterable[Union["ElementLocks", dict, None]],
+    *,
+    workspace_id: str,
+    brand_slug: str,
+) -> Optional[ElementLocks]:
+    """Standing-data read for element locks (BW·T22 / LP2-4).
+
+    Exact (workspace_id, brand_slug) dual-key match only.
+    ZERO fallback: no cross-tenant / cross-brand / default / single-heroine inheritance.
+    Missing scope args, empty records, or mismatch → None (empty result).
+    """
+    ws = _s(workspace_id)
+    br = _s(brand_slug)
+    if not ws or not br:
+        return None
+    for rec in records:
+        if rec is None:
+            continue
+        el = rec if isinstance(rec, ElementLocks) else ElementLocks.from_dict(rec if isinstance(rec, dict) else None)
+        if el.matches_scope(ws, br):
+            return el
+    return None
 
 
 def _ref_from(d: Any, kind: str) -> Optional[ElementRef]:

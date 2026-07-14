@@ -174,9 +174,10 @@ class ParzifalMasterSheet:
         return self.status == "approved"
 
     def character(self, persona_id: str) -> Optional[CharacterMasterSheet]:
-        c = self.characters.get(persona_id) if persona_id else None
-        if c is None and len(self.characters) == 1:       # 단일 히로인 폴백(element_locks 계약과 동일)
-            c = next(iter(self.characters.values()))
+        """Exact persona_id only. ZERO fallback — no single-heroine inheritance (BW·T22 / LP2-4)."""
+        if not persona_id:
+            return None
+        c = self.characters.get(persona_id)
         return c if isinstance(c, CharacterMasterSheet) else None
 
     def approved_refs(self, persona_id: str = "") -> list[ElementRef]:
