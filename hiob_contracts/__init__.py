@@ -15,6 +15,13 @@
 - 부재 필드는 None 허용(byte-identical 폴백). 단 결박 필수 필드는 validate()가 강제.
 - audio 클립은 beat_index 결박 필수 = P1(음소거 슬라이드쇼) 구조 봉쇄.
 """
+from .execution_backend import (
+    ExecutionBackend, OperationRef, OperationStatus, CancelResult,
+    JobEnvelope, RouteSnapshot, ExecutionAttempt, OutboxEntry,
+    ExecutionContractError, ProviderError, IdempotencyError,
+    DeadlineExceededError, UnknownOperationError,
+    OperationStatusType,
+)
 from .janus_brief import Intake13Q, JanusBrief
 from .beat_plan import Beat, BeatPlan
 from .media_artifact import MediaArtifact
@@ -51,6 +58,11 @@ from .parzifal_master_sheet import (
 )
 
 __all__ = [
+    "ExecutionBackend", "OperationRef", "OperationStatus", "CancelResult",
+    "JobEnvelope", "RouteSnapshot", "ExecutionAttempt", "OutboxEntry",
+    "ExecutionContractError", "ProviderError", "IdempotencyError",
+    "DeadlineExceededError", "UnknownOperationError",
+    "OperationStatusType",
     "ContractViolation", "ValidationResult", "validate_payload", "ensure_valid", "registered_contracts",
     "ReelKpiProvider",
     "DecisionContext", "DecisionCallable", "resolve_decision",
