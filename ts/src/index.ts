@@ -42,3 +42,6 @@ export type { ReelMetric } from './reel-metric';
 // Gate
 export { assertRenderReady } from './gate';
 export type { RenderReadiness } from './gate';
+
+// Creative Factory Harmony kernel (PRD 2026-07-14 §6–§7)
+export * from './factory/index.js';
