@@ -52,3 +52,19 @@ class AudioClip:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict | None) -> "AudioClip":
+        """dict → AudioClip (envelope_validation path; not DB slot mapping)."""
+        d = d or {}
+        track = d.get("track", "")
+        track = _TRACK_ALIASES.get(track, track)  # type: ignore[arg-type]
+        return cls(
+            track=track,  # type: ignore[arg-type]
+            beat_index=d.get("beat_index"),
+            url=d.get("url"),
+            storage_key=d.get("storage_key"),
+            duration_ms=d.get("duration_ms"),
+            voice_concept=d.get("voice_concept"),
+            affinity=d.get("affinity"),
+        )

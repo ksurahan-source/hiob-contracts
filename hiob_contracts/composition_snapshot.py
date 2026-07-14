@@ -52,3 +52,19 @@ class CompositionSnapshot:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict | None) -> "CompositionSnapshot":
+        """dict → CompositionSnapshot (envelope_validation path)."""
+        d = d or {}
+        return cls(
+            run_id=str(d.get("run_id") or ""),
+            selection=dict(d.get("selection") or {}),
+            render_status=str(d.get("render_status") or "pending"),
+            output_url=d.get("output_url"),
+            preview_artifact_id=d.get("preview_artifact_id"),
+            final_artifact_id=d.get("final_artifact_id"),
+            share_token=d.get("share_token"),
+            gate_passed=bool(d.get("gate_passed", False)),
+            rendered_at=d.get("rendered_at"),
+        )

@@ -107,3 +107,278 @@ def test_parse_dict_payload_uses_from_dict():
 def test_parse_list_payload_uses_from_list():
     obj = _parse(_ListOnly, [1, 2, 3])
     assert isinstance(obj, _ListOnly) and obj.items == [1, 2, 3]
+
+
+# ── LP1-7 / UM-1 residual: 9/9 edge targets + orpheus/apollo/metis/hermes ──
+from hiob_contracts import (
+    EDGES,
+    OrpheusPlanInput,
+    ApolloPlanInput,
+    CAPIEvent,
+    edge_target_contracts,
+    ensure_edge_target,
+    ensure_karma_edge_receipt,
+    unvalidated_edge_targets,
+    validate_edge_target,
+    verify_karma_edge_receipt,
+)
+from hiob_contracts.factory import (
+    ContractRef,
+    KarmaEdgeReceipt,
+    MapperRef,
+    sha256_digest,
+)
+
+_POLICY = sha256_digest({"policy": "p1"})
+_SRC = sha256_digest({"src": "ares"})
+
+
+def _edge_payloads() -> dict[str, dict]:
+    """Minimal valid target_input dicts for each of the 9 registry edges."""
+    return {
+        "j2p": {
+            "brand_slug": "viewok",
+            "target_audience": "초등 부모",
+        },
+        "p2a": {
+            "brand_slug": "viewok",
+            "protagonist_name": "정원이",
+            "target_pain": "수영 공포",
+        },
+        "a2athena": {
+            "beat_plan": {"beats": [{"beat_index": 0, "text": "hook"}]},
+            "context": {"brand_slug": "viewok"},
+        },
+        "a2orpheus": {
+            "music_vibe": "bright uplifting",
+            "target_ms": 15000,
+        },
+        "a2apollo": {
+            "cues": [{"beat_index": 0, "text": "splash"}],
+            "asset_pool": [],
+        },
+        "media2atropos": {
+            "run_id": "run-1",
+            "media": [{"kind": "still", "beat_index": 0, "url": "https://x/a.jpg"}],
+            "audio": [],
+        },
+        "atropos2artemis": {
+            "run_id": "run-1",
+            "render_status": "pending",
+            "gate_passed": False,
+            "beat_count": 3,
+        },
+        "artemis2atropos": {
+            "run_id": "run-1",
+            "accepted_proposals": [{"kind": "pace", "delta_ms": -100}],
+        },
+        "atropos2hephaestus": {
+            "run_id": "run-1",
+            "snapshot": {"run_id": "run-1", "render_status": "pending", "gate_passed": False},
+            "approval_receipt_ref": "apr:g3-1",
+            "mode": "final",
+        },
+    }
+
+
+def test_all_nine_edges_have_registered_target_contracts():
+    """UM-1: every SemanticEdge target_contract is in the validation registry."""
+    mapping = edge_target_contracts()
+    assert len(mapping) == 9
+    assert set(mapping) == {e.edge_id for e in EDGES}
+    missing = unvalidated_edge_targets()
+    assert missing == (), f"unvalidated edges: {missing}"
+
+
+def test_validate_edge_target_ok_for_all_nine():
+    payloads = _edge_payloads()
+    for edge_id, payload in payloads.items():
+        r = validate_edge_target(edge_id, payload)
+        assert r.ok, f"{edge_id}: {r.errors}"
+        assert edge_id in r.contract
+
+
+def test_validate_edge_target_unknown_edge_fail_loud():
+    r = validate_edge_target("not_an_edge", {"x": 1})
+    assert not r.ok
+    assert any("unknown edge" in e for e in r.errors)
+
+
+def test_validate_edge_target_orpheus_incomplete_fail_loud():
+    """Previously-unvalidated a2orpheus: empty plan must not silently pass."""
+    r = validate_edge_target("a2orpheus", {})
+    assert not r.ok
+    assert r.errors
+
+
+def test_validate_edge_target_apollo_bad_cue_fail_loud():
+    r = validate_edge_target("a2apollo", {"cues": ["not-a-dict"], "asset_pool": []})
+    assert not r.ok
+
+
+def test_ensure_edge_target_raises_on_forged_orpheus():
+    with pytest.raises(ContractViolation) as ei:
+        ensure_edge_target("a2orpheus", {"noise": True})
+    assert "a2orpheus" in ei.value.contract or "Orpheus" in ei.value.contract
+
+
+def test_orpheus_apollo_planet_envelopes_registered():
+    reg = registered_contracts()
+    for name in ("AudioRequest", "SFXRequest", "AudioClip", "OrpheusPlanInput", "ApolloPlanInput"):
+        assert name in reg
+
+
+def test_metis_process_insights_envelope():
+    r = validate_payload(
+        "ProcessInsightsRequest",
+        {"raw_insights": [{"impressions": 1}], "run_brand_map": {"run-1": "viewok"}, "window_days": 7},
+    )
+    assert r.ok, r.errors
+    bad = validate_payload("ProcessInsightsRequest", {"window_days": 0})
+    assert not bad.ok
+
+
+def test_hermes_capi_event_and_payload():
+    ok = validate_payload(
+        "CAPIEvent",
+        {
+            "event_name": "Purchase",
+            "event_id": "ord-1",
+            "event_time": 1_700_000_000,
+            "user_data": {"em": "hash"},
+            "custom_data": {"value": 1000},
+        },
+    )
+    assert ok.ok, ok.errors
+    assert isinstance(ok.obj, CAPIEvent)
+
+    missing = validate_payload("CAPIEvent", {"event_name": "Purchase"})
+    assert not missing.ok
+
+    payload = validate_payload(
+        "CAPIPayload",
+        {
+            "install_id": "inst-1",
+            "event_name": "Purchase",
+            "event_id": "ord-1",
+            "matched_session": True,
+            "params_sent": ["em", "ph"],
+            "pipa_consent": True,
+        },
+    )
+    assert payload.ok, payload.errors
+
+
+def test_hephaestus_final_requires_g3_approval():
+    r = validate_edge_target(
+        "atropos2hephaestus",
+        {
+            "run_id": "run-1",
+            "snapshot": {"run_id": "run-1"},
+            "approval_receipt_ref": None,
+            "mode": "final",
+        },
+    )
+    assert not r.ok
+    assert any("approval_receipt_ref" in e for e in r.errors)
+
+
+def _accepted_receipt(*, edge_id: str, target_input: dict, created_at: str) -> KarmaEdgeReceipt:
+    from hiob_contracts.factory.edge_registry import get_edge
+
+    edge = get_edge(edge_id)
+    assert edge is not None
+    digest = sha256_digest(target_input)
+    return KarmaEdgeReceipt(
+        receipt_id="rcpt-1",
+        edge_id=edge_id,
+        run_id="run-1",
+        factory_revision=0,
+        source_output_digests=(_SRC,),
+        target_contract=ContractRef(
+            name=edge.target_contract, version="v1", schema_digest=_POLICY
+        ),
+        decision="accepted",
+        target_input=target_input,
+        target_input_digest=digest,
+        mapper=MapperRef(
+            node_id="karma.edge.refine", revision="r1", policy_digest=_POLICY
+        ),
+        created_at=created_at,
+    )
+
+
+def test_verify_karma_edge_receipt_origin_ok():
+    ti = _edge_payloads()["a2orpheus"]
+    receipt = _accepted_receipt(
+        edge_id="a2orpheus",
+        target_input=ti,
+        created_at="2026-07-15T00:00:00+00:00",
+    )
+    r = verify_karma_edge_receipt(
+        receipt,
+        expected_edge_id="a2orpheus",
+        expected_source_digests=(_SRC,),
+        max_age_seconds=86_400,
+        now="2026-07-15T01:00:00+00:00",
+    )
+    assert r.ok, r.errors
+
+
+def test_verify_karma_edge_receipt_stale_fail_loud():
+    ti = _edge_payloads()["a2apollo"]
+    receipt = _accepted_receipt(
+        edge_id="a2apollo",
+        target_input=ti,
+        created_at="2026-07-01T00:00:00+00:00",
+    )
+    r = verify_karma_edge_receipt(
+        receipt,
+        max_age_seconds=3600,
+        now="2026-07-15T00:00:00+00:00",
+    )
+    assert not r.ok
+    assert any("stale" in e for e in r.errors)
+
+
+def test_verify_karma_edge_receipt_bad_mapper_fail_loud():
+    ti = _edge_payloads()["a2orpheus"]
+    digest = sha256_digest(ti)
+    receipt = KarmaEdgeReceipt(
+        receipt_id="rcpt-x",
+        edge_id="a2orpheus",
+        run_id="run-1",
+        factory_revision=0,
+        source_output_digests=(_SRC,),
+        target_contract=ContractRef(
+            name="OrpheusPlanInput", version="v1", schema_digest=_POLICY
+        ),
+        decision="accepted",
+        target_input=ti,
+        target_input_digest=digest,
+        mapper=MapperRef(
+            node_id="evil.forge", revision="r1", policy_digest=_POLICY
+        ),
+        created_at="2026-07-15T00:00:00+00:00",
+    )
+    r = verify_karma_edge_receipt(receipt, max_age_seconds=None)
+    assert not r.ok
+    assert any("karma.edge.refine" in e for e in r.errors)
+
+
+def test_ensure_karma_edge_receipt_raises():
+    with pytest.raises(ContractViolation):
+        ensure_karma_edge_receipt({"not": "a receipt"})
+
+
+def test_orpheus_plan_input_roundtrip():
+    obj = OrpheusPlanInput.from_dict({"music_vibe": "warm", "target_ms": 1000})
+    assert obj.validate() == []
+    again = OrpheusPlanInput.from_dict(obj.to_dict())
+    assert again.music_vibe == "warm"
+
+
+def test_apollo_plan_input_roundtrip():
+    obj = ApolloPlanInput.from_dict({"cues": [{"beat_index": 1, "text": "boom"}]})
+    assert obj.validate() == []
+    assert ApolloPlanInput.from_dict(obj.to_dict()).cues[0]["text"] == "boom"

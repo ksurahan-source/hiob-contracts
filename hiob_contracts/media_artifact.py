@@ -52,3 +52,19 @@ class MediaArtifact:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict | None) -> "MediaArtifact":
+        """dict → MediaArtifact (envelope_validation path)."""
+        d = d or {}
+        return cls(
+            kind=d.get("kind") or "still",  # type: ignore[arg-type]
+            beat_index=int(d["beat_index"]) if d.get("beat_index") is not None else 0,
+            url=d.get("url"),
+            storage_key=d.get("storage_key"),
+            duration_ms=d.get("duration_ms"),
+            width=d.get("width"),
+            height=d.get("height"),
+            mime=d.get("mime"),
+            style=d.get("style"),
+        )

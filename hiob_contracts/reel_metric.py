@@ -65,3 +65,8 @@ class ReelMetric:
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict | None) -> "ReelMetric":
+        """dict → ReelMetric (envelope_validation alias of from_row)."""
+        return cls.from_row(d or {})
