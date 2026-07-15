@@ -12,6 +12,7 @@ import {
   deriveEditorApprovalDigestV2,
   deriveEffectKeyV2,
   editorReceiptBindsScriptApproval,
+  paidEffectAttemptAllowsNewAttempt,
   paidEffectAttemptBindsIntent,
   scriptReceiptBindsOrder,
   verifiedReceiptBindsEditorApproval,
@@ -87,6 +88,7 @@ const editorApprovalData = () => ({
     ORDER_KEY, SCRIPT_DIGEST, TIMELINE_DIGEST, MEDIA_DIGEST, POLICY_DIGEST,
   ),
   approved_at_utc: '2026-07-16T00:02:00Z',
+  transaction_audit_id: 'tx-editor-1',
 });
 
 const effectIntentData = () => ({
@@ -233,6 +235,11 @@ test('paid effect intent and attempt share stable identity and enforce state enu
   assert(!PaidEffectIntentV2Schema.safeParse({ ...effectIntentData(), currency: 'usd' }).success, 'three-letter uppercase currency');
   assert(!PaidEffectAttemptV2Schema.safeParse({ ...effectAttemptData(), state: 'UNKNOWN' }).success, 'state enum');
   assert(!PaidEffectAttemptV2Schema.safeParse({ ...effectAttemptData(), state: 'PROVIDER_STARTED' }).success, 'started needs job id');
+  const reconcile = PaidEffectAttemptV2Schema.parse({
+    ...effectAttemptData(), state: 'RECONCILE_REQUIRED', provider_job_id: null,
+    lease_owner: null, lease_expires_at_utc: null,
+  });
+  assert(!paidEffectAttemptAllowsNewAttempt(reconcile), 'reconcile ambiguity cannot retry');
   assert(!PaidEffectAttemptV2Schema.safeParse({ ...effectAttemptData(), state: 'SUCCEEDED', provider_job_id: 'job-1' }).success, 'success needs response');
   assert(!PaidEffectAttemptV2Schema.safeParse({ ...effectAttemptData(), cost_currency: 'USD', cost_amount: 3 }).success, 'cost cannot exceed signed ceiling');
 
@@ -241,6 +248,17 @@ test('paid effect intent and attempt share stable identity and enforce state enu
     provider: 'piapi', provider_idempotency_key: 'provider-key-2', fencing_token: 2,
   });
   assert(retry.effect_key === intent.effect_key, 'attempt/provider do not change effect key');
+  const differentCap = PaidEffectAttemptV2Schema.parse({ ...effectAttemptData(), spend_ceiling: 3 });
+  assert(!paidEffectAttemptBindsIntent(differentCap, intent), 'attempt binds signed spend ceiling');
+});
+
+test('attempt timestamp ordering compares instants with fractional seconds', () => {
+  const fractional = PaidEffectAttemptV2Schema.safeParse({
+    ...effectAttemptData(),
+    created_at_utc: '2026-07-16T00:03:00Z',
+    updated_at_utc: '2026-07-16T00:03:00.1Z',
+  });
+  assert(fractional.success, 'fractional timestamp after whole second must be accepted');
 });
 
 test('verified receipt requires QA PASS, exact lowercase sha, and exact editor binding', () => {

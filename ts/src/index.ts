@@ -53,3 +53,6 @@ export type { RenderReadiness } from './gate';
 
 // Creative Factory Harmony kernel (PRD 2026-07-14 §6–§7)
 export * from './factory/index.js';
+
+// First-customer durable order / approval / paid effect / verified render v2.
+export * from './overnight-first-customer-v2.js';

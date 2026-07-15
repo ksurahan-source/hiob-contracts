@@ -91,6 +91,7 @@ def editor_approval_data() -> dict:
         "render_policy_digest": POLICY_DIGEST,
         "editor_approval_digest": editor_digest,
         "approved_at_utc": "2026-07-16T00:02:00Z",
+        "transaction_audit_id": "tx-editor-1",
     }
 
 
@@ -316,6 +317,10 @@ def test_effect_identity_is_stable_across_attempts_and_attempt_binds_intent():
     )
     assert PaidEffectAttemptV2.model_validate(retry).effect_key == intent.effect_key
 
+    different_cap = effect_attempt_data()
+    different_cap["spend_ceiling"] = 3.0
+    assert not PaidEffectAttemptV2.model_validate(different_cap).binds(intent)
+
 
 def test_effect_contracts_reject_wrong_identity_enum_and_terminal_shape():
     wrong_key = effect_intent_data()
@@ -349,6 +354,16 @@ def test_effect_contracts_reject_wrong_identity_enum_and_terminal_shape():
     with pytest.raises(ValidationError):
         PaidEffectAttemptV2.model_validate(started_without_job)
 
+    reconcile_without_observed_job = effect_attempt_data()
+    reconcile_without_observed_job.update(
+        state="RECONCILE_REQUIRED",
+        provider_job_id=None,
+        lease_owner=None,
+        lease_expires_at_utc=None,
+    )
+    reconcile = PaidEffectAttemptV2.model_validate(reconcile_without_observed_job)
+    assert not reconcile.allows_new_attempt()
+
     succeeded_without_response = effect_attempt_data()
     succeeded_without_response.update(state="SUCCEEDED", provider_job_id="job-1")
     with pytest.raises(ValidationError):
@@ -358,6 +373,13 @@ def test_effect_contracts_reject_wrong_identity_enum_and_terminal_shape():
     overspend.update(cost_currency="USD", cost_amount=3.0)
     with pytest.raises(ValidationError):
         PaidEffectAttemptV2.model_validate(overspend)
+
+
+def test_attempt_timestamp_order_uses_instants_not_lexical_text():
+    fractional = effect_attempt_data()
+    fractional["created_at_utc"] = "2026-07-16T00:03:00Z"
+    fractional["updated_at_utc"] = "2026-07-16T00:03:00.1Z"
+    assert PaidEffectAttemptV2.model_validate(fractional).updated_at_utc.endswith(".1Z")
 
 
 def test_verified_receipt_requires_pass_exact_sha_and_exact_editor_binding():
