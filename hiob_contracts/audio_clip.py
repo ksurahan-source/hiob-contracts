@@ -24,6 +24,8 @@ class AudioClip:
     duration_ms: Optional[int] = None
     voice_concept: Optional[str] = None
     affinity: Optional[str] = None     # 六道 affinity 등
+    bpm: Optional[int] = None          # music tempo (optional; LP5-1)
+    beat_markers: Optional[list] = None  # ms offsets or beat timestamps (optional)
 
     def validate(self) -> list[str]:
         errs: list[str] = []
@@ -34,20 +36,28 @@ class AudioClip:
             errs.append(f"{self.track} 클립에 beat_index 없음 (P1 침묵 위험)")
         if not (self.url or self.storage_key):
             errs.append("url/storage_key 둘 다 없음 (재생 불가)")
+        if self.bpm is not None and self.bpm <= 0:
+            errs.append(f"bpm must be > 0 when set (got {self.bpm})")
         return errs
 
     @classmethod
     def from_slot_artifact(cls, slot: dict, artifact: Optional[dict]) -> "AudioClip":
         """slot row + 그 current artifact row → AudioClip (실 DB 모델 매핑)."""
         artifact = artifact or {}
+        attrs = artifact.get("attributes") or {}
+        # Prefer top-level artifact keys, fall back to attributes (DB JSONB).
+        bpm = artifact.get("bpm", attrs.get("bpm"))
+        beat_markers = artifact.get("beat_markers", attrs.get("beat_markers"))
         return cls(
             track=_TRACK_ALIASES.get(slot.get("track", ""), slot.get("track", "")),  # type: ignore
             beat_index=slot.get("beat_index"),
             url=artifact.get("url"),
             storage_key=artifact.get("storage_key"),
             duration_ms=artifact.get("duration_ms"),
-            voice_concept=(artifact.get("attributes") or {}).get("voice_concept"),
-            affinity=(artifact.get("attributes") or {}).get("affinity"),
+            voice_concept=attrs.get("voice_concept"),
+            affinity=attrs.get("affinity"),
+            bpm=bpm,
+            beat_markers=list(beat_markers) if beat_markers is not None else None,
         )
 
     def to_dict(self) -> dict:
@@ -59,6 +69,7 @@ class AudioClip:
         d = d or {}
         track = d.get("track", "")
         track = _TRACK_ALIASES.get(track, track)  # type: ignore[arg-type]
+        beat_markers = d.get("beat_markers")
         return cls(
             track=track,  # type: ignore[arg-type]
             beat_index=d.get("beat_index"),
@@ -67,4 +78,6 @@ class AudioClip:
             duration_ms=d.get("duration_ms"),
             voice_concept=d.get("voice_concept"),
             affinity=d.get("affinity"),
+            bpm=d.get("bpm"),
+            beat_markers=list(beat_markers) if beat_markers is not None else None,
         )

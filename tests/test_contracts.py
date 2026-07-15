@@ -61,6 +61,41 @@ class TestAudioClip:
         assert result["track"] == "voice"
         assert result["url"] == "http://example.com/voice.mp3"
 
+    def test_audio_clip_bpm_must_be_positive(self):
+        """bpm if set must be > 0."""
+        bad = AudioClip(track="music", beat_index=None, url="http://example.com/m.mp3", bpm=0)
+        assert any("bpm" in e for e in bad.validate())
+        bad_neg = AudioClip(track="music", beat_index=None, url="http://example.com/m.mp3", bpm=-10)
+        assert any("bpm" in e for e in bad_neg.validate())
+        good = AudioClip(track="music", beat_index=None, url="http://example.com/m.mp3", bpm=120)
+        assert not any("bpm" in e for e in good.validate())
+        unset = AudioClip(track="music", beat_index=None, url="http://example.com/m.mp3", bpm=None)
+        assert not any("bpm" in e for e in unset.validate())
+
+    def test_audio_clip_bpm_and_beat_markers_roundtrip(self):
+        """bpm + beat_markers survive from_dict/to_dict and from_slot_artifact."""
+        d = {
+            "track": "music",
+            "beat_index": None,
+            "url": "http://example.com/m.mp3",
+            "bpm": 128,
+            "beat_markers": [0, 469, 938],
+        }
+        clip = AudioClip.from_dict(d)
+        assert clip.bpm == 128
+        assert clip.beat_markers == [0, 469, 938]
+        assert clip.to_dict()["bpm"] == 128
+        assert clip.to_dict()["beat_markers"] == [0, 469, 938]
+
+        slot = {"track": "music", "beat_index": None}
+        artifact = {
+            "url": "http://example.com/m.mp3",
+            "attributes": {"bpm": 90, "beat_markers": [0, 666]},
+        }
+        from_slot = AudioClip.from_slot_artifact(slot, artifact)
+        assert from_slot.bpm == 90
+        assert from_slot.beat_markers == [0, 666]
+
 
 class TestBeatPlan:
     """BeatPlan — 대본 척추."""
