@@ -94,3 +94,6 @@ __all__ = [
     "SemanticEdge", "EDGES", "Criticality", "get_edge", "is_registered_edge",
     "required_edges",
 ]
+
+from .lock_registry import LockEntry, LockRegistry, lock_registry_from_dict  # BFA-2
+
