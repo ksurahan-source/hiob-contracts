@@ -29,7 +29,7 @@ from hiob_contracts import (
 
 PAYLOAD = {"brief_id": "brief-1", "format": "reel"}
 ORDER_DIGEST = sha256_digest(PAYLOAD)
-ORDER_KEY = derive_customer_order_key_v2("ws-1", "EXT-1", ORDER_DIGEST)
+ORDER_KEY = derive_customer_order_key_v2("ws-1", "EXT-1")
 SCRIPT_DIGEST = "sha256:f713d17db5aba230e0b9226632b19d9ea6c2e3f7d6e1b1a8ae7e16aab0e1e4a4"
 TIMELINE_DIGEST = "sha256:94d192b3a326be1f019b71ef13ea5a367ffe939c5e9a88f1b270e53753d9569a"
 MEDIA_DIGEST = "sha256:721c9525ade2ea8903d343ef25cf68b9bf4ab0aad56bb7b01fbe48d09bc7fcf4"
@@ -110,6 +110,8 @@ def effect_intent_data() -> dict:
         "effect_kind": "visual",
         "asset_slot": "hero",
         "request_digest": REQUEST_DIGEST,
+        "spend_ceiling": 2.5,
+        "currency": "USD",
         "created_at_utc": "2026-07-16T00:03:00Z",
     }
 
@@ -134,6 +136,8 @@ def effect_attempt_data() -> dict:
         "lease_expires_at_utc": "2026-07-16T00:08:00Z",
         "fencing_token": 1,
         "request_digest": REQUEST_DIGEST,
+        "spend_ceiling": 2.5,
+        "currency": "USD",
         "response_digest": None,
         "cost_currency": None,
         "cost_amount": None,
@@ -226,17 +230,26 @@ def test_order_key_and_payload_digest_are_stable_and_runtime_identity_free():
     assert ORDER_DIGEST == (
         "sha256:235052d5f6e3ceb0cabdb7144e651c1c548eff5a3d896b9ab1975c4075c2d842"
     )
-    assert ORDER_KEY == "f2a6e7dafc76325698d5067912a8e5d782697713185113b5351af65405ac157f"
-    assert ORDER_KEY == derive_customer_order_key_v2("ws-1", "EXT-1", ORDER_DIGEST)
+    assert ORDER_KEY == "de0148e8df681a168f9bccf19c155e6f2f69d092377221cd23e66b8c4b23758a"
+    assert ORDER_KEY == derive_customer_order_key_v2("ws-1", "EXT-1")
+
+    changed_payload = {"brief_id": "brief-1", "format": "story"}
+    changed_digest = sha256_digest(changed_payload)
+    assert changed_digest != ORDER_DIGEST
+    assert derive_customer_order_key_v2("ws-1", "EXT-1") == ORDER_KEY
+    changed = order_data()
+    changed["canonical_order_payload"] = changed_payload
+    changed["canonical_order_digest"] = changed_digest
+    # The model validates one candidate. The persistence RPC compares this digest
+    # with the stored row and returns CONFLICT instead of minting a second key.
+    assert CreativeOrderV2.model_validate(changed).customer_order_key == ORDER_KEY
 
     for forbidden in ("run_id", "attempt_id"):
         data = order_data()
         data["canonical_order_payload"][forbidden] = "ephemeral"
         data["canonical_order_digest"] = sha256_digest(data["canonical_order_payload"])
         data["customer_order_key"] = derive_customer_order_key_v2(
-            data["workspace_id"],
-            data["customer_external_order_id"],
-            data["canonical_order_digest"],
+            data["workspace_id"], data["customer_external_order_id"]
         )
         with pytest.raises(ValidationError):
             CreativeOrderV2.model_validate(data)
@@ -271,7 +284,7 @@ def test_editor_receipt_digest_is_exact_and_has_no_future_output():
     receipt = EditorApprovalReceiptV2.model_validate(editor_approval_data())
     assert receipt.binds(script_receipt)
     assert receipt.editor_approval_digest == (
-        "sha256:1afb08f6c8e431ad5b8372b8431d0e0d177c20bfd368fa49ca22864b4723924b"
+        "sha256:fbb0a245357cbcd3cbccaec9d513a0b202bf07f5814b2f1bcf86cc48fbd440d0"
     )
 
     tampered = editor_approval_data()
@@ -289,7 +302,7 @@ def test_effect_identity_is_stable_across_attempts_and_attempt_binds_intent():
     intent = PaidEffectIntentV2.model_validate(effect_intent_data())
     attempt = PaidEffectAttemptV2.model_validate(effect_attempt_data())
     assert intent.effect_key == (
-        "5607e46e2c98961b634bc64a76871609932a104debbb86244df5cb460a18f1b4"
+        "49f64ea6899239360a7b8b5e92d6c12fd40e3519d34c7d38e080a414d3675968"
     )
     assert attempt.binds(intent)
 
@@ -315,6 +328,17 @@ def test_effect_contracts_reject_wrong_identity_enum_and_terminal_shape():
     with pytest.raises(ValidationError):
         PaidEffectIntentV2.model_validate(wrong_kind)
 
+    for bad_cap in (0, -0.01):
+        bad_spend = effect_intent_data()
+        bad_spend["spend_ceiling"] = bad_cap
+        with pytest.raises(ValidationError):
+            PaidEffectIntentV2.model_validate(bad_spend)
+
+    bad_currency = effect_intent_data()
+    bad_currency["currency"] = "usd"
+    with pytest.raises(ValidationError):
+        PaidEffectIntentV2.model_validate(bad_currency)
+
     wrong_state = effect_attempt_data()
     wrong_state["state"] = "UNKNOWN"
     with pytest.raises(ValidationError):
@@ -329,6 +353,11 @@ def test_effect_contracts_reject_wrong_identity_enum_and_terminal_shape():
     succeeded_without_response.update(state="SUCCEEDED", provider_job_id="job-1")
     with pytest.raises(ValidationError):
         PaidEffectAttemptV2.model_validate(succeeded_without_response)
+
+    overspend = effect_attempt_data()
+    overspend.update(cost_currency="USD", cost_amount=3.0)
+    with pytest.raises(ValidationError):
+        PaidEffectAttemptV2.model_validate(overspend)
 
 
 def test_verified_receipt_requires_pass_exact_sha_and_exact_editor_binding():
@@ -353,4 +382,3 @@ def test_verified_receipt_requires_pass_exact_sha_and_exact_editor_binding():
     mismatched_editor["editor_approval_digest"] = ORDER_DIGEST
     parsed = VerifiedRenderReceiptV2.model_validate(mismatched_editor)
     assert not parsed.binds(editor)
-

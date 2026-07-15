@@ -36,7 +36,7 @@ function assert(condition: boolean, message: string): asserts condition {
 
 const PAYLOAD = { brief_id: 'brief-1', format: 'reel' };
 const ORDER_DIGEST = sha256Digest(PAYLOAD);
-const ORDER_KEY = deriveCustomerOrderKeyV2('ws-1', 'EXT-1', ORDER_DIGEST);
+const ORDER_KEY = deriveCustomerOrderKeyV2('ws-1', 'EXT-1');
 const SCRIPT_DIGEST = 'sha256:f713d17db5aba230e0b9226632b19d9ea6c2e3f7d6e1b1a8ae7e16aab0e1e4a4';
 const TIMELINE_DIGEST = 'sha256:94d192b3a326be1f019b71ef13ea5a367ffe939c5e9a88f1b270e53753d9569a';
 const MEDIA_DIGEST = 'sha256:721c9525ade2ea8903d343ef25cf68b9bf4ab0aad56bb7b01fbe48d09bc7fcf4';
@@ -98,6 +98,8 @@ const effectIntentData = () => ({
   effect_kind: 'visual',
   asset_slot: 'hero',
   request_digest: REQUEST_DIGEST,
+  spend_ceiling: 2.5,
+  currency: 'USD',
   created_at_utc: '2026-07-16T00:03:00Z',
 });
 
@@ -119,6 +121,8 @@ const effectAttemptData = () => ({
   lease_expires_at_utc: '2026-07-16T00:08:00Z',
   fencing_token: 1,
   request_digest: REQUEST_DIGEST,
+  spend_ceiling: 2.5,
+  currency: 'USD',
   response_digest: null,
   cost_currency: null,
   cost_amount: null,
@@ -182,8 +186,16 @@ test('v2 schemas accept exact objects and reject missing/extra/wrong-type/versio
 
 test('Python/TypeScript stable identity parity excludes runtime attempt identity', () => {
   assert(ORDER_DIGEST === 'sha256:235052d5f6e3ceb0cabdb7144e651c1c548eff5a3d896b9ab1975c4075c2d842', 'order digest parity');
-  assert(ORDER_KEY === 'f2a6e7dafc76325698d5067912a8e5d782697713185113b5351af65405ac157f', 'order key parity');
-  assert(effectIntentData().effect_key === '5607e46e2c98961b634bc64a76871609932a104debbb86244df5cb460a18f1b4', 'effect key parity');
+  assert(ORDER_KEY === 'de0148e8df681a168f9bccf19c155e6f2f69d092377221cd23e66b8c4b23758a', 'order key parity');
+  assert(effectIntentData().effect_key === '49f64ea6899239360a7b8b5e92d6c12fd40e3519d34c7d38e080a414d3675968', 'effect key parity');
+
+  const changedPayload = { brief_id: 'brief-1', format: 'story' };
+  const changedDigest = sha256Digest(changedPayload);
+  assert(changedDigest !== ORDER_DIGEST, 'changed payload changes only the conflict digest');
+  assert(deriveCustomerOrderKeyV2('ws-1', 'EXT-1') === ORDER_KEY, 'same external identity keeps one key');
+  assert(CreativeOrderV2Schema.safeParse({
+    ...orderData(), canonical_order_payload: changedPayload, canonical_order_digest: changedDigest,
+  }).success, 'individual candidate is valid; persistence compares stored digest for conflict');
 
   for (const forbidden of ['run_id', 'attempt_id']) {
     const payload = { ...PAYLOAD, [forbidden]: 'ephemeral' };
@@ -192,7 +204,7 @@ test('Python/TypeScript stable identity parity excludes runtime attempt identity
       ...orderData(),
       canonical_order_payload: payload,
       canonical_order_digest: digest,
-      customer_order_key: deriveCustomerOrderKeyV2('ws-1', 'EXT-1', digest),
+      customer_order_key: deriveCustomerOrderKeyV2('ws-1', 'EXT-1'),
     };
     assert(!CreativeOrderV2Schema.safeParse(bad).success, `${forbidden} must not enter order identity`);
   }
@@ -205,7 +217,7 @@ test('approval receipts bind exact digests and editor receipt forbids future out
   assert(scriptReceiptBindsOrder(script, order, SCRIPT_DIGEST, POLICY_DIGEST), 'script receipt binds');
   assert(!scriptReceiptBindsOrder(script, order, TIMELINE_DIGEST, POLICY_DIGEST), 'script mismatch denied');
   assert(editorReceiptBindsScriptApproval(editor, script), 'editor receipt binds');
-  assert(editor.editor_approval_digest === 'sha256:1afb08f6c8e431ad5b8372b8431d0e0d177c20bfd368fa49ca22864b4723924b', 'editor parity');
+  assert(editor.editor_approval_digest === 'sha256:fbb0a245357cbcd3cbccaec9d513a0b202bf07f5814b2f1bcf86cc48fbd440d0', 'editor parity');
   assert(!EditorApprovalReceiptV2Schema.safeParse({ ...editorApprovalData(), output_sha256: VIDEO_SHA256 }).success, 'future output must be extra');
   assert(!ScriptApprovalReceiptV2Schema.safeParse({ ...scriptApprovalData(), approval_kind: 'editor' }).success, 'wrong approval kind');
 });
@@ -215,9 +227,14 @@ test('paid effect intent and attempt share stable identity and enforce state enu
   const attempt = PaidEffectAttemptV2Schema.parse(effectAttemptData());
   assert(paidEffectAttemptBindsIntent(attempt, intent), 'attempt binds intent');
   assert(!PaidEffectIntentV2Schema.safeParse({ ...effectIntentData(), effect_kind: 'unknown' }).success, 'effect enum');
+  for (const badCap of [0, -0.01]) {
+    assert(!PaidEffectIntentV2Schema.safeParse({ ...effectIntentData(), spend_ceiling: badCap }).success, 'positive spend ceiling');
+  }
+  assert(!PaidEffectIntentV2Schema.safeParse({ ...effectIntentData(), currency: 'usd' }).success, 'three-letter uppercase currency');
   assert(!PaidEffectAttemptV2Schema.safeParse({ ...effectAttemptData(), state: 'UNKNOWN' }).success, 'state enum');
   assert(!PaidEffectAttemptV2Schema.safeParse({ ...effectAttemptData(), state: 'PROVIDER_STARTED' }).success, 'started needs job id');
   assert(!PaidEffectAttemptV2Schema.safeParse({ ...effectAttemptData(), state: 'SUCCEEDED', provider_job_id: 'job-1' }).success, 'success needs response');
+  assert(!PaidEffectAttemptV2Schema.safeParse({ ...effectAttemptData(), cost_currency: 'USD', cost_amount: 3 }).success, 'cost cannot exceed signed ceiling');
 
   const retry = PaidEffectAttemptV2Schema.parse({
     ...effectAttemptData(), attempt_id: 'attempt-2', attempt_number: 2,
@@ -237,4 +254,3 @@ test('verified receipt requires QA PASS, exact lowercase sha, and exact editor b
     assert(!VerifiedRenderReceiptV2Schema.safeParse({ ...verifiedRenderData(), output_sha256: badSha }).success, 'bad sha shape');
   }
 });
-
