@@ -32,6 +32,15 @@ ShotAngle = Literal["eye", "low", "high", "three_quarter", "over_shoulder"]
 ShotLens = Literal["35", "50", "85", "macro"]
 ShotLighting = Literal["soft", "rembrandt", "rim", "golden", "split", "clinical"]
 ShotComposition = Literal["thirds", "center", "negative", "layered"]
+FrameDirection = Literal[
+    "camera_left", "camera_right", "toward_camera", "away_camera", "none"
+]
+GestureIntent = Literal[
+    "talking", "holding_product", "demonstrating_product", "interacting", "none"
+]
+ProductIntent = Literal[
+    "absent", "background", "held", "demonstrated", "hero", "evidence"
+]
 
 
 @dataclass(frozen=True)
@@ -49,6 +58,9 @@ class ShotMetadata:
     lens: Optional[ShotLens] = None       # 35|50|85|macro
     lighting: Optional[ShotLighting] = None  # soft|rembrandt|rim|golden|split|clinical
     composition: Optional[ShotComposition] = None  # thirds|center|negative|layered
+    direction: Optional[FrameDirection] = None  # subject/object screen direction
+    gesture: Optional[GestureIntent] = None  # declared physical action
+    product_intent: Optional[ProductIntent] = None  # product placement/use in frame
 
     # Movement (Seedance/Kling i2v 입력)
     camera_move: Optional[CameraMove] = None  # static|pan_right|dolly_in|... (정규화 필수)
@@ -96,6 +108,21 @@ class ShotList:
                 errs.append("shot.beat_index 없음 (정렬 결박 필수)")
             elif not isinstance(shot.beat_index, int):
                 errs.append(f"shot.beat_index 정수 아님: {shot.beat_index!r}")
+            if shot.duration_ms is not None and shot.duration_ms <= 0:
+                errs.append(f"beat {shot.beat_index}: duration_ms must be positive")
+            if shot.lens == "macro" and shot.shot_size not in {"ecu", "cu", "insert"}:
+                errs.append(
+                    f"beat {shot.beat_index}: macro lens conflicts with shot_size={shot.shot_size}"
+                )
+            if shot.shot_size == "wide" and shot.lens in {"85", "macro"}:
+                errs.append(
+                    f"beat {shot.beat_index}: wide shot conflicts with lens={shot.lens}"
+                )
+            cue = str(shot.continuity_cue or "").lower()
+            if shot.direction == "camera_left" and "from_right" in cue:
+                errs.append(f"beat {shot.beat_index}: direction conflicts with continuity cue")
+            if shot.direction == "camera_right" and "from_left" in cue:
+                errs.append(f"beat {shot.beat_index}: direction conflicts with continuity cue")
 
         idxs = [s.beat_index for s in self.shots if s.beat_index is not None]
         if len(idxs) != len(set(idxs)):
@@ -122,6 +149,9 @@ class ShotList:
                     lens=d.get("lens"),
                     lighting=d.get("lighting"),
                     composition=d.get("composition"),
+                    direction=d.get("direction"),
+                    gesture=d.get("gesture"),
+                    product_intent=d.get("product_intent"),
                     camera_move=d.get("camera_move"),
                     camera_clause=d.get("camera_clause"),
                     continuity_cue=d.get("continuity_cue"),
