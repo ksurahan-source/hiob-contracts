@@ -26,6 +26,10 @@ VISUAL_CONTRACT_VERSION_V1 = "visual-materialization.v1"
 SEEDREAM_V1_MAX_REFS = 5
 # PiAPI Seedream 5.0 Pro task_type (not BytePlus ModelArk — business registration required).
 SEEDREAM_5_PRO_MODEL_ID = "seedream-5-pro"
+# Production transport SSOT: PiAPI. Legacy ModelArk receipts remain parseable but
+# are not the allowed committed-path transport after founder transport lock.
+SEEDREAM_V1_TRANSPORT = "piapi"
+ALLOWED_V1_TRANSPORTS = frozenset({SEEDREAM_V1_TRANSPORT})
 
 
 @dataclass(frozen=True)
@@ -319,7 +323,7 @@ class VisualMaterializationReceiptV1:
     requested_model: str
     resolved_provider: str
     resolved_model: str
-    transport: str = "byteplus_modelark"
+    transport: str = SEEDREAM_V1_TRANSPORT
     planned_refs: tuple[dict[str, Any], ...] = ()
     downloaded_refs: tuple[dict[str, Any], ...] = ()
     sent_refs: tuple[dict[str, Any], ...] = ()
@@ -341,8 +345,11 @@ class VisualMaterializationReceiptV1:
             errors.append("provider fallback is forbidden")
         if self.requested_model != self.resolved_model:
             errors.append("model fallback is forbidden")
-        if self.transport != "byteplus_modelark":
-            errors.append("V1 transport must be byteplus_modelark")
+        if self.transport not in ALLOWED_V1_TRANSPORTS:
+            errors.append(
+                f"V1 transport must be one of {sorted(ALLOWED_V1_TRANSPORTS)}; "
+                f"got {self.transport!r}"
+            )
         if self.status == "committed":
             if self.planned_refs != self.downloaded_refs or self.planned_refs != self.sent_refs:
                 errors.append("committed receipt requires exact reference lineage")
@@ -374,9 +381,10 @@ class VisualMaterializationReceiptV1:
 
 
 __all__ = [
-    "ApprovalStatus", "BeatCastIntentV1", "BeatFramePlanV1", "CastRole",
-    "CastRoleIntentV1", "MaterializationStatus", "PlannedReferenceV1",
+    "ALLOWED_V1_TRANSPORTS", "ApprovalStatus", "BeatCastIntentV1", "BeatFramePlanV1",
+    "CastRole", "CastRoleIntentV1", "MaterializationStatus", "PlannedReferenceV1",
     "ReferenceKind", "ReferenceOwner", "ReferenceSnapshotV1", "RoleRequirement",
-    "SEEDREAM_5_PRO_MODEL_ID", "SEEDREAM_V1_MAX_REFS", "VISUAL_CONTRACT_VERSION_V1",
+    "SEEDREAM_5_PRO_MODEL_ID", "SEEDREAM_V1_MAX_REFS", "SEEDREAM_V1_TRANSPORT",
+    "VISUAL_CONTRACT_VERSION_V1",
     "VisualMaterializationRequestV1", "VisualMaterializationReceiptV1",
 ]

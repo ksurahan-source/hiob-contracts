@@ -83,6 +83,7 @@ from .parzifal_master_sheet import (
 from .parzifal_target_input import ParzifalTargetInput
 from .ares_script_input import AresScriptInput
 from .visual_materialization import (
+    ALLOWED_V1_TRANSPORTS,
     BeatCastIntentV1,
     BeatFramePlanV1,
     CastRoleIntentV1,
@@ -90,6 +91,7 @@ from .visual_materialization import (
     ReferenceSnapshotV1,
     SEEDREAM_5_PRO_MODEL_ID,
     SEEDREAM_V1_MAX_REFS,
+    SEEDREAM_V1_TRANSPORT,
     VISUAL_CONTRACT_VERSION_V1,
     VisualMaterializationRequestV1,
     VisualMaterializationReceiptV1,
@@ -138,8 +140,9 @@ __all__ = [
     "ParzifalMasterSheet", "CharacterMasterSheet", "ProductMasterSheet", "SheetPanel",
     "CHARACTER_ANGLES", "PRODUCT_ANGLES", "EXPRESSIONS", "SHEET_STATUSES",
     "ParzifalTargetInput", "AresScriptInput",
-    "BeatCastIntentV1", "BeatFramePlanV1", "CastRoleIntentV1",
-    "PlannedReferenceV1", "ReferenceSnapshotV1", "SEEDREAM_5_PRO_MODEL_ID", "SEEDREAM_V1_MAX_REFS",
+    "ALLOWED_V1_TRANSPORTS", "BeatCastIntentV1", "BeatFramePlanV1", "CastRoleIntentV1",
+    "PlannedReferenceV1", "ReferenceSnapshotV1", "SEEDREAM_5_PRO_MODEL_ID",
+    "SEEDREAM_V1_MAX_REFS", "SEEDREAM_V1_TRANSPORT",
     "VISUAL_CONTRACT_VERSION_V1", "VisualMaterializationRequestV1",
     "VisualMaterializationReceiptV1",
     "FIRST_CUSTOMER_CONTRACT_VERSIONS_V2",

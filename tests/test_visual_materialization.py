@@ -80,8 +80,77 @@ def test_receipt_rejects_fallback_and_false_green():
         requested_model=SEEDREAM_5_PRO_MODEL_ID,
         resolved_provider="openai",
         resolved_model="gpt-image-2",
+        transport="piapi",
     )
     errors = receipt.validate()
     assert any("fallback" in error for error in errors)
     assert any("artifact_sha256" in error for error in errors)
     assert any("semantic_validation" in error for error in errors)
+
+
+def _production_piapi_receipt(**overrides):
+    """Production-shaped committed receipt matching live Seedream worker fields."""
+    refs = (
+        {"role": "lead", "storage_key": "sealed/mom/front.png", "content_digest": sha256_digest("mom")},
+        {"role": "co_star", "storage_key": "sealed/child/front.png", "content_digest": sha256_digest("child")},
+        {"role": "product", "storage_key": "sealed/sku/hero.png", "content_digest": sha256_digest("sku")},
+    )
+    base = dict(
+        idempotency_key=sha256_digest("request-live"),
+        plan_digest=sha256_digest("plan-live"),
+        status="committed",
+        requested_provider="seedream",
+        requested_model=SEEDREAM_5_PRO_MODEL_ID,
+        resolved_provider="seedream",
+        resolved_model=SEEDREAM_5_PRO_MODEL_ID,
+        transport="piapi",
+        planned_refs=refs,
+        downloaded_refs=refs,
+        sent_refs=refs,
+        provider_task_id="ddce02d0-d7ec-42e8-a69c-6fd68e91ab7d",
+        actual_width=1440,
+        actual_height=2560,
+        artifact_sha256=sha256_digest("artifact-bytes"),
+        semantic_validation={"ok": True, "roles_matched": True},
+        human_review_status="not_required",
+    )
+    base.update(overrides)
+    return VisualMaterializationReceiptV1(**base)
+
+
+def test_production_piapi_receipt_validates_when_lineage_and_semantic_ok():
+    from hiob_contracts import SEEDREAM_V1_TRANSPORT
+
+    receipt = _production_piapi_receipt()
+    assert receipt.transport == SEEDREAM_V1_TRANSPORT == "piapi"
+    assert receipt.validate() == []
+    # Round-trip must preserve transport so consumers see piapi SSOT.
+    assert VisualMaterializationReceiptV1.from_dict(receipt.to_dict()).validate() == []
+
+
+def test_receipt_rejects_byteplus_and_wrong_engine_transports():
+    errors = _production_piapi_receipt(transport="byteplus_modelark").validate()
+    assert any("transport" in e and "piapi" in e for e in errors)
+
+    errors = _production_piapi_receipt(transport="openai").validate()
+    assert any("transport" in e for e in errors)
+
+
+def test_receipt_rejects_degrade_and_lineage_drift():
+    errors = _production_piapi_receipt(degraded_reason="used_neighbor_beat").validate()
+    assert any("degraded" in e for e in errors)
+
+    drifted = (
+        {"role": "lead", "storage_key": "other.png", "content_digest": sha256_digest("x")},
+    )
+    errors = _production_piapi_receipt(sent_refs=drifted).validate()
+    assert any("lineage" in e for e in errors)
+
+    errors = _production_piapi_receipt(
+        requested_model=SEEDREAM_5_PRO_MODEL_ID,
+        resolved_model="gpt-image-1",
+    ).validate()
+    assert any("fallback" in e or "model" in e for e in errors)
+
+    errors = _production_piapi_receipt(human_review_status="pending").validate()
+    assert any("human" in e for e in errors)
