@@ -24,7 +24,8 @@ MaterializationStatus = Literal[
 
 VISUAL_CONTRACT_VERSION_V1 = "visual-materialization.v1"
 SEEDREAM_V1_MAX_REFS = 5
-SEEDREAM_5_PRO_MODEL_ID = "dola-seedream-5-0-pro-260628"
+# PiAPI Seedream 5.0 Pro task_type (not BytePlus ModelArk — business registration required).
+SEEDREAM_5_PRO_MODEL_ID = "seedream-5-pro"
 
 
 @dataclass(frozen=True)
