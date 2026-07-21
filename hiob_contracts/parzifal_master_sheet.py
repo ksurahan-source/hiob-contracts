@@ -36,6 +36,7 @@ class SheetPanel:
     url: Optional[str] = None
     engine: str = ""                            # 다모델 라우팅 결과(qwen-image/gpt-image/...)
     derived_from: str = ""
+    content_digest: Optional[str] = None        # sha256:<64hex> image bytes (seal SSOT)
 
     @property
     def has_image(self) -> bool:
@@ -61,10 +62,14 @@ def _panels(raw) -> list[SheetPanel]:
         if isinstance(p, SheetPanel):
             out.append(p)
         elif isinstance(p, dict):
+            digest = p.get("content_digest") or p.get("sha256") or p.get("digest")
+            if digest and not str(digest).startswith("sha256:"):
+                digest = f"sha256:{digest}"
             out.append(SheetPanel(
                 slot=str(p.get("slot") or "angle"), label=str(p.get("label") or ""),
                 storage_key=p.get("storage_key"), url=p.get("url"),
-                engine=str(p.get("engine") or ""), derived_from=str(p.get("derived_from") or "")))
+                engine=str(p.get("engine") or ""), derived_from=str(p.get("derived_from") or ""),
+                content_digest=str(digest) if digest else None))
     return out
 
 
@@ -253,9 +258,17 @@ class ParzifalMasterSheet:
 
     def to_dict(self) -> dict:
         def _pl(panels):
-            return [{"slot": p.slot, "label": p.label, "storage_key": p.storage_key,
-                     "url": p.url, "engine": p.engine, "derived_from": p.derived_from}
-                    for p in _panels(panels)]
+            rows = []
+            for p in _panels(panels):
+                row = {
+                    "slot": p.slot, "label": p.label, "storage_key": p.storage_key,
+                    "url": p.url, "engine": p.engine, "derived_from": p.derived_from,
+                }
+                if p.content_digest:
+                    row["content_digest"] = p.content_digest
+                    row["sha256"] = p.content_digest
+                rows.append(row)
+            return rows
         return {
             "listing_slug": self.listing_slug, "master_id": self.master_id,
             "version": self.version, "status": self.status, "authored_by": self.authored_by,
