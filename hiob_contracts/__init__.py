@@ -23,7 +23,7 @@ from .execution_backend import (
     OperationStatusType,
 )
 from .janus_brief import Intake13Q, JanusBrief
-from .beat_plan import Beat, BeatPlan
+from .beat_plan import Beat, BeatPlan, normalize_scene_direction
 from .media_artifact import MediaArtifact
 from .audio_clip import AudioClip
 from .klingvideo import KlingVideo
@@ -164,7 +164,7 @@ __all__ = [
     "LOCK_STATUSES", "ELEMENT_KINDS", "standing_lookup",
     "PlanetIO", "PLANET_IO", "Conformance", "io_for", "needs_new_contract", "dsl_ready",
     "Intake13Q", "JanusBrief",
-    "Beat", "BeatPlan",
+    "Beat", "BeatPlan", "normalize_scene_direction",
     "MediaArtifact", "AudioClip",
     "KlingVideo", "Heroine", "HeroineArchetype", "FeedbackSignal", "DefectSignal", "DefectSignalProvider",
      "CompositionSnapshot", "ReelMetric",
