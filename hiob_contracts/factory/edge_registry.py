@@ -75,16 +75,19 @@ EDGES: tuple[SemanticEdge, ...] = (
         45_000, "required",
         "Required-media fan-in refined into an Atropos draft snapshot input",
     ),
-    # Editorial loop (Phase 4).
+    # Editorial loop (Phase 4) — SUNSET 2026-07-21.
+    # Artemis identity is product/evidence seal only (artemis.references.snapshot).
+    # Edges kept for contract validation / historical receipts; criticality optional
+    # so they never block F1. Hard-delete after consumer cleanup (see hiob-artemis/docs/SUNSET.md S7).
     SemanticEdge(
         "atropos2artemis", "atropos", "CompositionSnapshot", "artemis", "artemis.review",
-        "ArtemisReviewInput", "policy.atropos2artemis", 45_000, "required",
-        "Draft snapshot refined for Artemis editorial proposal + QA report",
+        "ArtemisReviewInput", "policy.atropos2artemis", 45_000, "optional",
+        "SUNSET: not on F1 spine; Artemis = product/evidence seal only (was editorial QA)",
     ),
     SemanticEdge(
         "artemis2atropos", "artemis", "EditorialProposal", "atropos", "atropos.apply",
         "AtroposApplyInput", "policy.artemis2atropos", 30_000, "optional",
-        "Human-accepted proposals refined into typed edit commands (only if accepted)",
+        "SUNSET: human-accepted editorial proposals (optional; not live produce path)",
     ),
     # Final render (Phase 5): carries the G3 ApprovalReceipt reference, not a boolean.
     SemanticEdge(

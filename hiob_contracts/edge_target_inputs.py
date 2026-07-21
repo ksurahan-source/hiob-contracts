@@ -9,8 +9,8 @@ Shapes track the live F1 chain (star planning_command) and planet node inputs:
   a2orpheus     → OrpheusPlanInput  (orpheus.audio.select_music / AudioRequest-ish)
   a2apollo      → ApolloPlanInput   (apollo.sfx.select / SFXRequest-ish)
   media2atropos → AtroposDraftInput (atropos.draft fan-in)
-  atropos2artemis → ArtemisReviewInput
-  artemis2atropos → AtroposApplyInput (optional human-accepted proposals)
+  atropos2artemis → ArtemisReviewInput  (SUNSET — not on F1; Artemis = product/evidence seal)
+  artemis2atropos → AtroposApplyInput   (SUNSET — optional historical editorial apply)
   atropos2hephaestus → HephaestusRenderInput (G3 approval ref + snapshot)
 
 Validation is structural completeness only — Karma still owns grounding policy.
@@ -197,10 +197,14 @@ class AtroposDraftInput:
         )
 
 
-# ── atropos2artemis ────────────────────────────────────────────────────────
+# ── atropos2artemis (SUNSET — registry optional; not live F1) ──────────────
 @dataclass(frozen=True)
 class ArtemisReviewInput:
-    """Karma-refined editorial review input for Artemis (atropos2artemis)."""
+    """SUNSET: was Karma-refined editorial review input (atropos2artemis).
+
+    Artemis live identity is product/evidence sealing via
+    artemis.references.snapshot — not this contract.
+    """
 
     run_id: str
     selection: dict = field(default_factory=dict)
