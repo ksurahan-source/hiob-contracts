@@ -83,6 +83,10 @@ class CharacterMasterSheet:
     angles: list = field(default_factory=list)        # SheetPanel[] (front/3-4/side/back/full/detail)
     expressions: list = field(default_factory=list)   # SheetPanel[] (neutral/happy/...)
     wardrobe: dict = field(default_factory=dict)      # {outfit, palette, forbidden[]}
+    # Seal authority (organic): role lead|co_star; kind lead_link|co_star|support|...
+    # Without these, persona_id "target" normalizes to co_star and seal needs role_stamp adapters.
+    role: str = ""
+    kind: str = ""
 
     def hero_panel(self) -> Optional[SheetPanel]:
         """대표 컷 = front 앵글 우선, 없으면 첫 앵글."""
@@ -123,10 +127,15 @@ class CharacterMasterSheet:
             return [{"slot": p.slot, "label": p.label, "storage_key": p.storage_key,
                      "url": p.url, "engine": p.engine, "derived_from": p.derived_from}
                     for p in _panels(panels)]
-        return {"persona_id": self.persona_id, "identity": dict(self.identity or {}),
-                "narrow_target": dict(self.narrow_target or {}),
-                "angles": _pl(self.angles), "expressions": _pl(self.expressions),
-                "wardrobe": dict(self.wardrobe or {})}
+        out = {"persona_id": self.persona_id, "identity": dict(self.identity or {}),
+               "narrow_target": dict(self.narrow_target or {}),
+               "angles": _pl(self.angles), "expressions": _pl(self.expressions),
+               "wardrobe": dict(self.wardrobe or {})}
+        if self.role:
+            out["role"] = str(self.role)
+        if self.kind:
+            out["kind"] = str(self.kind)
+        return out
 
     @classmethod
     def from_dict(cls, d: Optional[dict]) -> "CharacterMasterSheet":
@@ -137,7 +146,9 @@ class CharacterMasterSheet:
                    narrow_target=d.get("narrow_target") or {},
                    angles=_panels(d.get("angles")),
                    expressions=_panels(d.get("expressions")),
-                   wardrobe=d.get("wardrobe") or {})
+                   wardrobe=d.get("wardrobe") or {},
+                   role=str(d.get("role") or ""),
+                   kind=str(d.get("kind") or ""))
 
 
 @dataclass(frozen=True)
@@ -173,6 +184,10 @@ class ParzifalMasterSheet:
     product: Optional[ProductMasterSheet] = None
     background: dict = field(default_factory=dict)    # {ref: SheetPanel, text_lock: str}
     version_history: list = field(default_factory=list)
+    # Seal scope (organic): required by reference_snapshots before sealing.
+    # Without these, seal needs scope_stamp adapters (forge-adjacent).
+    workspace_id: str = ""
+    run_id: str = ""
 
     @property
     def is_approved(self) -> bool:
@@ -269,19 +284,35 @@ class ParzifalMasterSheet:
                     row["sha256"] = p.content_digest
                 rows.append(row)
             return rows
-        return {
+        chars_out: dict = {}
+        for pid, c in self.characters.items():
+            if not isinstance(c, CharacterMasterSheet):
+                continue
+            row = {
+                "persona_id": c.persona_id, "identity": c.identity,
+                "narrow_target": c.narrow_target, "angles": _pl(c.angles),
+                "expressions": _pl(c.expressions), "wardrobe": c.wardrobe,
+            }
+            if c.role:
+                row["role"] = str(c.role)
+            if c.kind:
+                row["kind"] = str(c.kind)
+            chars_out[pid] = row
+        out = {
             "listing_slug": self.listing_slug, "master_id": self.master_id,
             "version": self.version, "status": self.status, "authored_by": self.authored_by,
             "engine": self.engine,
-            "characters": {pid: {"persona_id": c.persona_id, "identity": c.identity,
-                                 "narrow_target": c.narrow_target, "angles": _pl(c.angles),
-                                 "expressions": _pl(c.expressions), "wardrobe": c.wardrobe}
-                           for pid, c in self.characters.items() if isinstance(c, CharacterMasterSheet)},
+            "characters": chars_out,
             "product": ({"sku": self.product.sku, "angles": _pl(self.product.angles),
                          "sheet": self.product.sheet} if self.product is not None else None),
             "background": _bg_to_dict(self.background),
             "version_history": list(self.version_history or []),
         }
+        if self.workspace_id:
+            out["workspace_id"] = str(self.workspace_id)
+        if self.run_id:
+            out["run_id"] = str(self.run_id)
+        return out
 
     @classmethod
     def from_dict(cls, d: Optional[dict]) -> "ParzifalMasterSheet":
@@ -292,7 +323,8 @@ class ParzifalMasterSheet:
             chars[str(pid)] = CharacterMasterSheet(
                 persona_id=str(c.get("persona_id") or pid), identity=c.get("identity") or {},
                 narrow_target=c.get("narrow_target") or {}, angles=_panels(c.get("angles")),
-                expressions=_panels(c.get("expressions")), wardrobe=c.get("wardrobe") or {})
+                expressions=_panels(c.get("expressions")), wardrobe=c.get("wardrobe") or {},
+                role=str(c.get("role") or ""), kind=str(c.get("kind") or ""))
         prod = None
         if isinstance(d.get("product"), dict):
             pr = d["product"]
@@ -303,7 +335,9 @@ class ParzifalMasterSheet:
             version=int(d.get("version") or 0), status=str(d.get("status") or "draft"),
             authored_by=str(d.get("authored_by") or ""), engine=str(d.get("engine") or ""),
             characters=chars, product=prod, background=_bg_from_dict(d.get("background")),
-            version_history=list(d.get("version_history") or []))
+            version_history=list(d.get("version_history") or []),
+            workspace_id=str(d.get("workspace_id") or ""),
+            run_id=str(d.get("run_id") or ""))
 
 
 def _bg_to_dict(bg) -> dict:

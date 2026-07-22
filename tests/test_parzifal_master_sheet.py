@@ -91,3 +91,40 @@ def test_character_master_sheet_from_dict_none():
     assert empty.persona_id == ""
     assert empty.hero_panel() is None
     assert empty.to_dict()["angles"] == []
+
+
+def test_organic_role_and_scope_roundtrip():
+    """N3 / T13 G3+G5: role + workspace_id/run_id must survive to_dict/from_dict.
+
+    Without this, materialize→approve typed round-trip drops authority and seal
+    needs role_stamp/scope_stamp adapters (forge-adjacent).
+    """
+    ch = CharacterMasterSheet(
+        persona_id="target",
+        identity={"name": "김수아"},
+        angles=[_panel("front")],
+        role="lead",
+        kind="lead_link",
+    )
+    ms = ParzifalMasterSheet(
+        listing_slug="viewok",
+        master_id="m1",
+        version=1,
+        status="draft",
+        characters={"target": ch},
+        workspace_id="ws-viewok",
+        run_id="run-f244",
+    )
+    d = ms.to_dict()
+    assert d["workspace_id"] == "ws-viewok"
+    assert d["run_id"] == "run-f244"
+    assert d["characters"]["target"]["role"] == "lead"
+    assert d["characters"]["target"]["kind"] == "lead_link"
+    again = ParzifalMasterSheet.from_dict(d)
+    assert again.workspace_id == "ws-viewok"
+    assert again.run_id == "run-f244"
+    assert again.character("target").role == "lead"
+    assert again.character("target").kind == "lead_link"
+    # CharacterMasterSheet standalone roundtrip
+    ch2 = CharacterMasterSheet.from_dict(ch.to_dict())
+    assert ch2.role == "lead" and ch2.kind == "lead_link"
