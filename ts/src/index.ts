@@ -26,9 +26,8 @@ export { MediaArtifactSchema, validateMediaArtifact } from './media-artifact';
 export type { MediaArtifact } from './media-artifact';
 export { MediaKindType } from './media-artifact';
 
-// EditDecisionList
-export { EditDecisionListSchema, EditDecisionSchema, validateEditDecisionList } from './edit-decision-list';
-export type { EditDecisionList, EditDecision } from './edit-decision-list';
+// EditDecisionList — SUNSET (D-66): Python deleted; do not re-export TS.
+// Live editorial state = run.attributes.editing_decisions dict (not this type).
 
 // ParzifalTargetInput
 export { ParzifalTargetInputSchema, validateParzifalTargetInput } from './parzifal-target-input';
