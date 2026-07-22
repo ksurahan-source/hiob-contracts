@@ -413,8 +413,14 @@ def test_unregistered_edge_rejected():
     assert not is_registered_edge("ares", "atropos")
 
 
-def test_apollo_edge_is_optional_rest_required():
+def test_optional_and_required_edge_criticality():
+    # Optional: Apollo SFX enhancement + SUNSET editorial loop (not on F1 spine).
     assert get_edge("a2apollo").criticality == "optional"
-    assert get_edge("j2p").criticality == "required"
+    assert get_edge("atropos2artemis").criticality == "optional"
+    assert get_edge("artemis2atropos").criticality == "optional"
     assert get_edge("a2apollo") not in required_edges()
+    assert get_edge("atropos2artemis") not in required_edges()
+    assert get_edge("artemis2atropos") not in required_edges()
+    # Required spine still blocks without these.
+    assert get_edge("j2p").criticality == "required"
     assert get_edge("j2p") in required_edges()

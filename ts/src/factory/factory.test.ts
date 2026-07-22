@@ -211,8 +211,12 @@ test('edge registry matches Python', () => {
   assert(isRegisteredEdge('apollo', 'atropos'), 'fan-in apollo');
   assert(!isRegisteredEdge('janus', 'hephaestus'), 'unregistered rejected');
   assert(getEdge('a2apollo')!.criticality === 'optional', 'apollo optional');
+  // SUNSET: editorial loop optional — must never block F1 (parity with Python edge_registry).
+  assert(getEdge('atropos2artemis')!.criticality === 'optional', 'atropos2artemis optional');
+  assert(getEdge('artemis2atropos')!.criticality === 'optional', 'artemis2atropos optional');
   assert(requiredEdges().some((e) => e.edge_id === 'j2p'), 'j2p required');
   assert(!requiredEdges().some((e) => e.edge_id === 'a2apollo'), 'apollo not required');
+  assert(!requiredEdges().some((e) => e.edge_id === 'atropos2artemis'), 'atropos2artemis not required');
 });
 
 console.log('\nAll factory kernel tests passed!');
