@@ -7,6 +7,7 @@ from hiob_contracts import (
     VisualMaterializationRequestV1,
     VisualMaterializationReceiptV1,
     SEEDREAM_5_PRO_MODEL_ID,
+    VISUAL_RENDER_MODES_V1,
 )
 from hiob_contracts.factory import sha256_digest
 
@@ -43,6 +44,19 @@ def test_reference_ownership_and_cast_roundtrip():
     assert ReferenceSnapshotV1.from_dict({
         **product.to_dict(), "compatibility_metadata": {"legacy": True}
     }) == product
+
+
+def test_v1_render_modes_are_one_shared_contract():
+    assert VISUAL_RENDER_MODES_V1 == frozenset({
+        "persona_talk",
+        "duet",
+        "hands_demo",
+        "product_solo",
+        "social_proof",
+        "scene_no_person",
+        "situation_pov",
+        "before_after",
+    })
 
 
 def test_plan_digest_request_idempotency_and_roundtrip():

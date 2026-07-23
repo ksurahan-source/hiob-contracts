@@ -93,6 +93,7 @@ from .visual_materialization import (
     SEEDREAM_V1_MAX_REFS,
     SEEDREAM_V1_TRANSPORT,
     VISUAL_CONTRACT_VERSION_V1,
+    VISUAL_RENDER_MODES_V1,
     VisualMaterializationRequestV1,
     VisualMaterializationReceiptV1,
 )
@@ -159,7 +160,8 @@ __all__ = [
     "ALLOWED_V1_TRANSPORTS", "BeatCastIntentV1", "BeatFramePlanV1", "CastRoleIntentV1",
     "PlannedReferenceV1", "ReferenceSnapshotV1", "SEEDREAM_5_PRO_MODEL_ID",
     "SEEDREAM_V1_MAX_REFS", "SEEDREAM_V1_TRANSPORT",
-    "VISUAL_CONTRACT_VERSION_V1", "VisualMaterializationRequestV1",
+    "VISUAL_CONTRACT_VERSION_V1", "VISUAL_RENDER_MODES_V1",
+    "VisualMaterializationRequestV1",
     "VisualMaterializationReceiptV1",
     "AresApprovalBeginCommandV1", "AresApprovalCommandV1",
     "AresApprovalReceiptV1", "AresApprovalResolverV1",
