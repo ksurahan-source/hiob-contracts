@@ -3,6 +3,10 @@ name = "hiob-contracts"
 version = "0.1.0"
 description = "HIOB 행성간 타입 계약 — JanusBrief→BeatPlan→{MediaArtifact,AudioClip}→CompositionSnapshot→ReelMetric. 행성은 파일이 아니라 이 계약으로만 협업한다. (EditDecisionList SUNSET D-66)"
 requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2,<3",
+    "PyJWT>=2,<3",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

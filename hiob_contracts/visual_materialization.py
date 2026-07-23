@@ -30,6 +30,16 @@ SEEDREAM_5_PRO_MODEL_ID = "seedream-5-pro"
 # are not the allowed committed-path transport after founder transport lock.
 SEEDREAM_V1_TRANSPORT = "piapi"
 ALLOWED_V1_TRANSPORTS = frozenset({SEEDREAM_V1_TRANSPORT})
+VISUAL_RENDER_MODES_V1 = frozenset({
+    "persona_talk",
+    "duet",
+    "hands_demo",
+    "product_solo",
+    "social_proof",
+    "scene_no_person",
+    "situation_pov",
+    "before_after",
+})
 
 
 @dataclass(frozen=True)
@@ -385,6 +395,6 @@ __all__ = [
     "CastRole", "CastRoleIntentV1", "MaterializationStatus", "PlannedReferenceV1",
     "ReferenceKind", "ReferenceOwner", "ReferenceSnapshotV1", "RoleRequirement",
     "SEEDREAM_5_PRO_MODEL_ID", "SEEDREAM_V1_MAX_REFS", "SEEDREAM_V1_TRANSPORT",
-    "VISUAL_CONTRACT_VERSION_V1",
+    "VISUAL_CONTRACT_VERSION_V1", "VISUAL_RENDER_MODES_V1",
     "VisualMaterializationRequestV1", "VisualMaterializationReceiptV1",
 ]

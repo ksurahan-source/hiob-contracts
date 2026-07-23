@@ -55,3 +55,6 @@ export * from './factory/index.js';
 
 // First-customer durable order / approval / paid effect / verified render v2.
 export * from './overnight-first-customer-v2.js';
+
+// Ares XL V1 split script/production-plan revision and approval seam.
+export * from './ares-script-revision-v1.js';
