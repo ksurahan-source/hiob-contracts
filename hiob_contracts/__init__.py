@@ -113,6 +113,14 @@ from .ares_script_revision_v1 import (
     canonical_contract_digest_v1,
     derive_ares_g1_subject_digest_v1,
 )
+from .strategy_approval_v2 import (
+    ParzifalIdentityBindingV1,
+    StrategyApprovalBundleV1,
+    StrategyApprovalReceiptV2,
+    derive_parzifal_identity_binding_id_v1,
+    validate_parzifal_identity_binding_v1,
+    validate_strategy_approval_evidence_v2,
+)
 from .overnight_first_customer_v2 import (
     FIRST_CUSTOMER_CONTRACT_VERSIONS_V2,
     CreativeOrderV2,
@@ -170,6 +178,11 @@ __all__ = [
     "BeatPlanV1", "ScriptPackageV1",
     "canonical_contract_json_v1", "canonical_contract_digest_v1",
     "derive_ares_g1_subject_digest_v1",
+    "ParzifalIdentityBindingV1",
+    "StrategyApprovalBundleV1", "StrategyApprovalReceiptV2",
+    "derive_parzifal_identity_binding_id_v1",
+    "validate_parzifal_identity_binding_v1",
+    "validate_strategy_approval_evidence_v2",
     "FIRST_CUSTOMER_CONTRACT_VERSIONS_V2",
     "CreativeOrderV2", "ScriptApprovalReceiptV2", "EditorApprovalReceiptV2",
     "PaidEffectIntentV2", "PaidEffectAttemptV2", "VerifiedRenderReceiptV2",
