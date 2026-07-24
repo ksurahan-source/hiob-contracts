@@ -10,8 +10,10 @@ target_input_digest. The digest byte-parity is maintained across Python↔TS.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field, fields
 from typing import Optional
+
+from .factory.digest import sha256_digest
 
 
 @dataclass(frozen=True)
@@ -115,3 +117,10 @@ class AresScriptInput:
             style=d.get("style"),
             reel_mode=d.get("reel_mode"),
         )
+
+
+def ares_script_input_schema_digest() -> str:
+    """Return the canonical digest for the exact v1 dataclass field structure."""
+
+    schema = {item.name: str(item.type) for item in fields(AresScriptInput)}
+    return sha256_digest(schema)

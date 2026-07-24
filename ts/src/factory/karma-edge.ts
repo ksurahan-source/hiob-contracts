@@ -109,6 +109,9 @@ export const KarmaEdgeReceiptSchema = z
     edge_id: z.string(),
     run_id: z.string(),
     factory_revision: z.number().int().nonnegative(),
+    // Historical v1 receipts did not carry workspace_id. Formal consumers
+    // enforce a non-blank exact scope after generic parsing.
+    workspace_id: z.string().default(''),
     source_output_digests: z.array(DigestSchema).min(1),
     target_contract: ContractRefSchema,
     decision: z.enum(['accepted', 'blocked', 'needs_human']),

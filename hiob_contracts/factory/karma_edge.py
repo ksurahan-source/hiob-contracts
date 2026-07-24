@@ -147,6 +147,9 @@ class KarmaEdgeReceipt(BaseModel):
     edge_id: str
     run_id: str
     factory_revision: int = Field(ge=0)
+    # Historical v1 receipts predate workspace binding. Keep generic parsing
+    # compatible; formal consumers reject ``""`` at their authority boundary.
+    workspace_id: str = ""
     source_output_digests: tuple[Digest, ...]
     target_contract: ContractRef
     decision: EdgeDecision

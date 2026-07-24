@@ -8,7 +8,7 @@ Claims (required):
 Optional:
   run_id, kid, node_id
 
-Lifetime: HIOB_SERVICE_JWT_SECRET or MODAL_DISPATCH_SECRET or HIOB_WORKER_DISPATCH_SECRET
+Signing key: dedicated HIOB_SERVICE_JWT_SECRET only.
 """
 from __future__ import annotations
 
@@ -26,13 +26,7 @@ class ServiceJwtError(ValueError):
 
 
 def signing_secret() -> str:
-    return (
-        os.environ.get("HIOB_SERVICE_JWT_SECRET")
-        or os.environ.get("HIOB_PLANET_NODE_SECRET")
-        or os.environ.get("MODAL_DISPATCH_SECRET")
-        or os.environ.get("HIOB_WORKER_DISPATCH_SECRET")
-        or ""
-    ).strip()
+    return (os.environ.get("HIOB_SERVICE_JWT_SECRET") or "").strip()
 
 
 @dataclass(frozen=True)
@@ -50,8 +44,6 @@ class ServiceClaims:
     kid: str = "hs256-v1"
 
     def has_scope(self, required: str) -> bool:
-        if "*" in self.scope or "node:*:execute" in self.scope:
-            return True
         return required in self.scope
 
 
@@ -97,6 +89,8 @@ def verify_service_token(
     expected_audience: str,
     required_scope: Optional[str] = None,
     workspace_id: Optional[str] = None,
+    expected_run_id: Optional[str] = None,
+    expected_node_id: Optional[str] = None,
     secret: Optional[str] = None,
     leeway_s: int = 30,
 ) -> ServiceClaims:
@@ -147,14 +141,30 @@ def verify_service_token(
         kid=str(data.get("kid") or "hs256-v1"),
     )
 
-    if required_scope and not claims.has_scope(required_scope):
-        raise ServiceJwtError(
-            f"missing scope {required_scope}",
-            code="PLANET_FORBIDDEN",
-        )
-    if workspace_id is not None and claims.workspace_id and claims.workspace_id != str(workspace_id):
+    if required_scope:
+        if {"*", "node:*:execute"}.intersection(claims.scope):
+            raise ServiceJwtError(
+                "wildcard node scope is forbidden",
+                code="PLANET_FORBIDDEN",
+            )
+        if not claims.has_scope(required_scope):
+            raise ServiceJwtError(
+                f"missing scope {required_scope}",
+                code="PLANET_FORBIDDEN",
+            )
+    if workspace_id is not None and claims.workspace_id != str(workspace_id):
         raise ServiceJwtError(
             "workspace_id claim mismatch",
+            code="PLANET_FORBIDDEN",
+        )
+    if expected_run_id is not None and claims.run_id != str(expected_run_id):
+        raise ServiceJwtError(
+            "run_id claim mismatch",
+            code="PLANET_FORBIDDEN",
+        )
+    if expected_node_id is not None and claims.node_id != str(expected_node_id):
+        raise ServiceJwtError(
+            "node_id claim mismatch",
             code="PLANET_FORBIDDEN",
         )
     return claims

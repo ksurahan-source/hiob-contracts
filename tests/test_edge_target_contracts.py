@@ -31,7 +31,10 @@ from hiob_contracts.factory import (
     sha256_digest,
 )
 from hiob_contracts.parzifal_target_input import ParzifalTargetInput
-from hiob_contracts.ares_script_input import AresScriptInput
+from hiob_contracts.ares_script_input import (
+    AresScriptInput,
+    ares_script_input_schema_digest,
+)
 from hiob_contracts.janus_brief import JanusBrief
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -132,6 +135,7 @@ def test_karma_j2p_receipt_with_parzifal_target_input():
         edge_id="j2p",
         run_id="run-1",
         factory_revision=0,
+        workspace_id="ws-1",
         source_output_digests=(sha256_digest({"brief": "data"}),),
         target_contract=_contract("ParzifalTargetInput"),
         decision="accepted",
@@ -234,8 +238,12 @@ def test_karma_p2a_receipt_with_ares_script_input():
         edge_id="p2a",
         run_id="run-1",
         factory_revision=0,
+        workspace_id="ws-1",
         source_output_digests=(sha256_digest({"target": "profile"}),),
-        target_contract=_contract("AresScriptInput"),
+        target_contract=_contract(
+            "AresScriptInput",
+            ares_script_input_schema_digest(),
+        ),
         decision="accepted",
         target_input=si_dict,
         target_input_digest=si_digest,

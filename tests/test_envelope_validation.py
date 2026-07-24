@@ -294,6 +294,7 @@ def _accepted_receipt(*, edge_id: str, target_input: dict, created_at: str) -> K
         edge_id=edge_id,
         run_id="run-1",
         factory_revision=0,
+        workspace_id="ws-1",
         source_output_digests=(_SRC,),
         target_contract=ContractRef(
             name=edge.target_contract, version="v1", schema_digest=_POLICY
@@ -349,6 +350,7 @@ def test_verify_karma_edge_receipt_bad_mapper_fail_loud():
         edge_id="a2orpheus",
         run_id="run-1",
         factory_revision=0,
+        workspace_id="ws-1",
         source_output_digests=(_SRC,),
         target_contract=ContractRef(
             name="OrpheusPlanInput", version="v1", schema_digest=_POLICY
