@@ -293,6 +293,7 @@ def _accepted_receipt(*, edge_id: str, target_input: dict, created_at: str) -> K
         receipt_id="rcpt-1",
         edge_id=edge_id,
         run_id="run-1",
+        workspace_id="ws-1",
         factory_revision=0,
         source_output_digests=(_SRC,),
         target_contract=ContractRef(
@@ -348,6 +349,7 @@ def test_verify_karma_edge_receipt_bad_mapper_fail_loud():
         receipt_id="rcpt-x",
         edge_id="a2orpheus",
         run_id="run-1",
+        workspace_id="ws-1",
         factory_revision=0,
         source_output_digests=(_SRC,),
         target_contract=ContractRef(

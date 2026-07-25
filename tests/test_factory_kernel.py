@@ -188,7 +188,8 @@ def _mapper() -> MapperRef:
 
 def _accepted_receipt(target_input: dict) -> KarmaEdgeReceipt:
     return KarmaEdgeReceipt(
-        receipt_id="rcpt-1", edge_id="j2p", run_id="r", factory_revision=0,
+        receipt_id="rcpt-1", edge_id="j2p", run_id="r",
+        workspace_id="ws-1", factory_revision=0,
         source_output_digests=(sha256_digest({"a": 1}),),
         target_contract=_contract("ParzifalTargetInput"),
         decision="accepted", target_input=target_input,
@@ -207,7 +208,8 @@ def test_accepted_receipt_authorizes_matching_digest():
 def test_accepted_without_target_input_rejected():
     with pytest.raises(ValidationError):
         KarmaEdgeReceipt(
-            receipt_id="r", edge_id="j2p", run_id="r", factory_revision=0,
+            receipt_id="r", edge_id="j2p", run_id="r",
+        workspace_id="ws-1", factory_revision=0,
             source_output_digests=(sha256_digest({"a": 1}),),
             target_contract=_contract(), decision="accepted",
             mapper=_mapper(), created_at="2026-07-14T00:00:00Z",
@@ -217,7 +219,8 @@ def test_accepted_without_target_input_rejected():
 def test_accepted_with_mismatched_target_digest_rejected():
     with pytest.raises(ValidationError):
         KarmaEdgeReceipt(
-            receipt_id="r", edge_id="j2p", run_id="r", factory_revision=0,
+            receipt_id="r", edge_id="j2p", run_id="r",
+        workspace_id="ws-1", factory_revision=0,
             source_output_digests=(sha256_digest({"a": 1}),),
             target_contract=_contract(), decision="accepted",
             target_input={"x": 1}, target_input_digest=sha256_digest({"x": 2}),
@@ -228,7 +231,8 @@ def test_accepted_with_mismatched_target_digest_rejected():
 def test_accepted_with_error_violation_rejected():
     with pytest.raises(ValidationError):
         KarmaEdgeReceipt(
-            receipt_id="r", edge_id="j2p", run_id="r", factory_revision=0,
+            receipt_id="r", edge_id="j2p", run_id="r",
+        workspace_id="ws-1", factory_revision=0,
             source_output_digests=(sha256_digest({"a": 1}),),
             target_contract=_contract(), decision="accepted",
             target_input={"x": 1}, target_input_digest=sha256_digest({"x": 1}),
@@ -241,7 +245,8 @@ def test_accepted_with_error_violation_rejected():
 def test_blocked_receipt_must_not_carry_target_input(decision):
     with pytest.raises(ValidationError):
         KarmaEdgeReceipt(
-            receipt_id="r", edge_id="j2p", run_id="r", factory_revision=0,
+            receipt_id="r", edge_id="j2p", run_id="r",
+        workspace_id="ws-1", factory_revision=0,
             source_output_digests=(sha256_digest({"a": 1}),),
             target_contract=_contract(), decision=decision,
             target_input={"x": 1}, target_input_digest=sha256_digest({"x": 1}),
@@ -252,7 +257,8 @@ def test_blocked_receipt_must_not_carry_target_input(decision):
 @pytest.mark.parametrize("decision", ["blocked", "needs_human"])
 def test_blocked_receipt_does_not_authorize(decision):
     r = KarmaEdgeReceipt(
-        receipt_id="r", edge_id="j2p", run_id="r", factory_revision=0,
+        receipt_id="r", edge_id="j2p", run_id="r",
+        workspace_id="ws-1", factory_revision=0,
         source_output_digests=(sha256_digest({"a": 1}),),
         target_contract=_contract(), decision=decision,
         mapper=_mapper(), created_at="2026-07-14T00:00:00Z",

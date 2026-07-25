@@ -81,7 +81,7 @@ from .parzifal_master_sheet import (
     CHARACTER_ANGLES, PRODUCT_ANGLES, EXPRESSIONS, SHEET_STATUSES,
 )
 from .parzifal_target_input import ParzifalTargetInput
-from .ares_script_input import AresScriptInput
+from .ares_script_input import AresScriptInput, ares_script_input_schema_digest
 from .visual_materialization import (
     ALLOWED_V1_TRANSPORTS,
     BeatCastIntentV1,
@@ -177,7 +177,7 @@ __all__ = [
     "DecisionContext", "DecisionCallable", "resolve_decision",
     "ParzifalMasterSheet", "CharacterMasterSheet", "ProductMasterSheet", "SheetPanel",
     "CHARACTER_ANGLES", "PRODUCT_ANGLES", "EXPRESSIONS", "SHEET_STATUSES",
-    "ParzifalTargetInput", "AresScriptInput",
+    "ParzifalTargetInput", "AresScriptInput", "ares_script_input_schema_digest",
     "ALLOWED_V1_TRANSPORTS", "BeatCastIntentV1", "BeatFramePlanV1", "CastRoleIntentV1",
     "PlannedReferenceV1", "ReferenceSnapshotV1", "SEEDREAM_5_PRO_MODEL_ID",
     "SEEDREAM_V1_MAX_REFS", "SEEDREAM_V1_TRANSPORT",

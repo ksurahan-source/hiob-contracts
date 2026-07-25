@@ -49,6 +49,7 @@ def _receipt(*, decision: str = "accepted", edge_id: str = "p2a") -> dict:
         "edge_id": edge_id,
         "run_id": "run-v2-1",
         "factory_revision": 1,
+        "workspace_id": "ws-v2-1",
         "source_output_digests": (IDENTITY_DIGEST,),
         "target_contract": {
             "name": "AresScriptInput",

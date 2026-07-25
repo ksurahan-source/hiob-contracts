@@ -31,6 +31,7 @@ function sampleRequest() {
         edge_id: 'p2a',
         run_id: 'run-v2-1',
         factory_revision: 1,
+        workspace_id: 'ws-v2-1',
         source_output_digests: [IDENTITY],
         target_contract: {
           name: 'AresScriptInput',
