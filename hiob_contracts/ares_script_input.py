@@ -10,8 +10,10 @@ target_input_digest. The digest byte-parity is maintained across Python↔TS.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field, fields
 from typing import Optional
+
+from .factory.digest import canonical_json, sha256_digest
 
 
 @dataclass(frozen=True)
@@ -115,3 +117,13 @@ class AresScriptInput:
             style=d.get("style"),
             reel_mode=d.get("reel_mode"),
         )
+
+
+def ares_script_input_schema_digest() -> str:
+    """Canonical v1 consumer-contract digest for the p2a edge.
+
+    Derived from field structure so Karma and Ares reject a receipt
+    produced for an older AresScriptInput shape.
+    """
+    schema = {item.name: str(item.type) for item in fields(AresScriptInput)}
+    return sha256_digest(canonical_json(schema))

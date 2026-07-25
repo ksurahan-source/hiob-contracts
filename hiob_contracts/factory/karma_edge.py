@@ -147,6 +147,9 @@ class KarmaEdgeReceipt(BaseModel):
     edge_id: str
     run_id: str
     factory_revision: int = Field(ge=0)
+    # Tenant scope travels with the authority artifact so consumers can reject
+    # cross-workspace replay without trusting caller context alone.
+    workspace_id: str = Field(min_length=1)
     source_output_digests: tuple[Digest, ...]
     target_contract: ContractRef
     decision: EdgeDecision
@@ -160,6 +163,8 @@ class KarmaEdgeReceipt(BaseModel):
 
     @model_validator(mode="after")
     def _check(self) -> "KarmaEdgeReceipt":
+        if not self.workspace_id.strip():
+            raise ValueError("receipt workspace_id must not be blank")
         if not self.source_output_digests:
             raise ValueError("receipt must reference at least one source output digest")
         for d in self.source_output_digests:

@@ -109,6 +109,7 @@ export const KarmaEdgeReceiptSchema = z
     edge_id: z.string(),
     run_id: z.string(),
     factory_revision: z.number().int().nonnegative(),
+    workspace_id: z.string().min(1),
     source_output_digests: z.array(DigestSchema).min(1),
     target_contract: ContractRefSchema,
     decision: z.enum(['accepted', 'blocked', 'needs_human']),

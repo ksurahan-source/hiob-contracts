@@ -102,7 +102,7 @@ test('PlanetOutput tampered payload rejected', () => {
 // ── KarmaEdgeReceipt invariants ─────────────────────────────────────────────
 function acceptedReceipt(targetInput: Record<string, unknown>) {
   return {
-    receipt_id: 'r', edge_id: 'j2p', run_id: 'r', factory_revision: 0,
+    receipt_id: 'r', edge_id: 'j2p', run_id: 'r', factory_revision: 0, workspace_id: 'ws-1',
     source_output_digests: [sha256Digest({ a: 1 })],
     target_contract: { name: 'ParzifalTargetInput', version: 'v1', schema_digest: SCHEMA },
     decision: 'accepted' as const, target_input: targetInput,
@@ -119,7 +119,7 @@ test('accepted receipt authorizes matching digest only', () => {
 });
 test('accepted receipt without target_input rejected', () => {
   const bad = KarmaEdgeReceiptSchema.safeParse({
-    receipt_id: 'r', edge_id: 'j2p', run_id: 'r', factory_revision: 0,
+    receipt_id: 'r', edge_id: 'j2p', run_id: 'r', factory_revision: 0, workspace_id: 'ws-1',
     source_output_digests: [sha256Digest({ a: 1 })],
     target_contract: { name: 'X', version: 'v1', schema_digest: SCHEMA }, decision: 'accepted',
     mapper: { node_id: 'k', revision: 'r', policy_digest: POLICY }, created_at: 't',
@@ -136,7 +136,7 @@ test('accepted receipt with error-violation rejected', () => {
 for (const decision of ['blocked', 'needs_human'] as const) {
   test(`${decision} receipt must not carry target_input`, () => {
     const bad = KarmaEdgeReceiptSchema.safeParse({
-      receipt_id: 'r', edge_id: 'j2p', run_id: 'r', factory_revision: 0,
+      receipt_id: 'r', edge_id: 'j2p', run_id: 'r', factory_revision: 0, workspace_id: 'ws-1',
       source_output_digests: [sha256Digest({ a: 1 })],
       target_contract: { name: 'X', version: 'v1', schema_digest: SCHEMA }, decision,
       target_input: { x: 1 }, target_input_digest: sha256Digest({ x: 1 }),

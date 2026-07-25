@@ -81,7 +81,7 @@ from .parzifal_master_sheet import (
     CHARACTER_ANGLES, PRODUCT_ANGLES, EXPRESSIONS, SHEET_STATUSES,
 )
 from .parzifal_target_input import ParzifalTargetInput
-from .ares_script_input import AresScriptInput
+from .ares_script_input import AresScriptInput, ares_script_input_schema_digest
 from .visual_materialization import (
     ALLOWED_V1_TRANSPORTS,
     BeatCastIntentV1,
@@ -96,6 +96,27 @@ from .visual_materialization import (
     VISUAL_RENDER_MODES_V1,
     VisualMaterializationRequestV1,
     VisualMaterializationReceiptV1,
+)
+from .ares_create_script_v2 import (
+    AresAuthorityV2,
+    AresSpeakerSlotV2,
+    AresIdentitySealedV2,
+    AresProductFactsSealedV2,
+    AresClaimRefV2,
+    AresEvidenceAndClaimsSealedV2,
+    AresHookDirectiveV2,
+    AresCreativeConstraintsV2,
+    AresCreateScriptRequestV2,
+    ScriptPackageV2,
+    AresBeatRoleIntentV2,
+    BeatPlanV2,
+    AresQualityFindingV2,
+    AresGenerateProvenanceV2,
+    AresGenerateUsageV2,
+    AresCreateScriptResultV2,
+    ares_create_script_request_schema_digest,
+    ares_create_script_result_schema_digest,
+    request_content_digest,
 )
 from .ares_script_revision_v1 import (
     AresApprovalBeginCommandV1,
@@ -156,7 +177,7 @@ __all__ = [
     "DecisionContext", "DecisionCallable", "resolve_decision",
     "ParzifalMasterSheet", "CharacterMasterSheet", "ProductMasterSheet", "SheetPanel",
     "CHARACTER_ANGLES", "PRODUCT_ANGLES", "EXPRESSIONS", "SHEET_STATUSES",
-    "ParzifalTargetInput", "AresScriptInput",
+    "ParzifalTargetInput", "AresScriptInput", "ares_script_input_schema_digest",
     "ALLOWED_V1_TRANSPORTS", "BeatCastIntentV1", "BeatFramePlanV1", "CastRoleIntentV1",
     "PlannedReferenceV1", "ReferenceSnapshotV1", "SEEDREAM_5_PRO_MODEL_ID",
     "SEEDREAM_V1_MAX_REFS", "SEEDREAM_V1_TRANSPORT",
@@ -168,6 +189,15 @@ __all__ = [
     "AresBeatPlanRevisionV1", "AresBeatV1", "AresSceneDirectionV1",
     "AresScriptRevisionV1", "AresScriptSegmentV1",
     "BeatPlanV1", "ScriptPackageV1",
+    "AresAuthorityV2", "AresSpeakerSlotV2", "AresIdentitySealedV2",
+    "AresProductFactsSealedV2", "AresClaimRefV2", "AresEvidenceAndClaimsSealedV2",
+    "AresHookDirectiveV2", "AresCreativeConstraintsV2",
+    "AresCreateScriptRequestV2", "ScriptPackageV2", "AresBeatRoleIntentV2",
+    "BeatPlanV2", "AresQualityFindingV2", "AresGenerateProvenanceV2",
+    "AresGenerateUsageV2", "AresCreateScriptResultV2",
+    "ares_create_script_request_schema_digest",
+    "ares_create_script_result_schema_digest", "request_content_digest",
+
     "canonical_contract_json_v1", "canonical_contract_digest_v1",
     "derive_ares_g1_subject_digest_v1",
     "FIRST_CUSTOMER_CONTRACT_VERSIONS_V2",

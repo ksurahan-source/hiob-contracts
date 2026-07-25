@@ -37,6 +37,23 @@ export type { ParzifalTargetInput } from './parzifal-target-input';
 export { AresScriptInputSchema, validateAresScriptInput } from './ares-script-input';
 export type { AresScriptInput } from './ares-script-input';
 
+// Ares pure generate V2
+export {
+  AresCreateScriptRequestV2Schema,
+  AresCreateScriptResultV2Schema,
+  ScriptPackageV2Schema,
+  BeatPlanV2Schema,
+  aresCreateScriptRequestSchemaDigest,
+  aresCreateScriptResultSchemaDigest,
+} from './ares-create-script-v2';
+export type {
+  AresCreateScriptRequestV2,
+  AresCreateScriptResultV2,
+  ScriptPackageV2,
+  BeatPlanV2,
+} from './ares-create-script-v2';
+
+
 // CompositionSnapshot
 export { CompositionSnapshotSchema, validateCompositionSnapshot } from './composition-snapshot';
 export type { CompositionSnapshot } from './composition-snapshot';
