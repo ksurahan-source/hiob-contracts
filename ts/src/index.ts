@@ -53,6 +53,41 @@ export type {
   BeatPlanV2,
 } from './ares-create-script-v2';
 
+// Ares pure generate V3 — explicit authority refs and semantic-only beat plan
+export {
+  AresRequestScopeV3Schema,
+  AresAuthorityArtifactRefV3Schema,
+  AresP2ATargetProjectionV3Schema,
+  AresAuthorityBundleV3Schema,
+  AresCreateScriptRequestV3Schema,
+  ScriptPackageV3Schema,
+  AresSemanticBeatV3Schema,
+  SemanticBeatPlanV3Schema,
+  AresQualityFindingV3Schema,
+  AresGenerateProvenanceV3Schema,
+  AresGenerateUsageV3Schema,
+  AresCreateScriptResultV3Schema,
+  aresCreateScriptRequestV3SchemaDigest,
+  aresCreateScriptResultV3SchemaDigest,
+  authorityRefReceiptDigestV3,
+  aresP2ATargetProjectionV3SchemaDescriptor,
+  aresP2ATargetProjectionV3SchemaDigest,
+} from './ares-create-script-v3';
+export type {
+  AresRequestScopeV3,
+  AresAuthorityArtifactRefV3,
+  AresP2ATargetProjectionV3,
+  AresAuthorityBundleV3,
+  AresCreateScriptRequestV3,
+  ScriptPackageV3,
+  AresSemanticBeatV3,
+  SemanticBeatPlanV3,
+  AresQualityFindingV3,
+  AresGenerateProvenanceV3,
+  AresGenerateUsageV3,
+  AresCreateScriptResultV3,
+} from './ares-create-script-v3';
+
 
 // CompositionSnapshot
 export { CompositionSnapshotSchema, validateCompositionSnapshot } from './composition-snapshot';
