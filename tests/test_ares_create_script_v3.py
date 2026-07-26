@@ -242,6 +242,39 @@ def request_data() -> dict:
     }
 
 
+@pytest.mark.parametrize(
+    ("ref_name", "field", "value"),
+    [
+        ("identity_ref", "workspace_id", "ws-other"),
+        ("product_ref", "run_id", "run-other"),
+        ("evidence_ref", "producer", "janus"),
+        ("hook_ref", "artifact_type", "product_truth"),
+    ],
+)
+def test_v3_projection_rejects_cross_scope_and_wrong_owner_refs(
+    ref_name: str,
+    field: str,
+    value: str,
+):
+    projection = deepcopy(
+        request_data()["authority"]["accepted_p2a_receipt"]["target_input"]
+    )
+    projection[ref_name][field] = value
+    ref = projection[ref_name]
+    ref["receipt_digest"] = authority_ref_receipt_digest_v3(
+        receipt_id=ref["receipt_id"],
+        producer=ref["producer"],
+        artifact_type=ref["artifact_type"],
+        artifact_digest=ref["artifact_digest"],
+        payload_digest=ref["payload_digest"],
+        workspace_id=ref["workspace_id"],
+        run_id=ref["run_id"],
+    )
+
+    with pytest.raises(ValidationError):
+        AresP2ATargetProjectionV3.model_validate(projection)
+
+
 def _with_digest(body: dict, field: str) -> dict:
     value = deepcopy(body)
     value[field] = sha256_digest(value)

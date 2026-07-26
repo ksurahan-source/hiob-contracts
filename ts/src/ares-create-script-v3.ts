@@ -394,6 +394,34 @@ export const AresP2ATargetProjectionV3Schema = z
     creative_constraints: AresCreativeConstraintsV3InputSchema,
   })
   .strict()
+  .superRefine((value, ctx) => {
+    const expected = {
+      identity_ref: ['parzifal', 'identity_lock'],
+      product_ref: ['janus', 'product_truth'],
+      evidence_ref: ['artemis', 'evidence_bundle'],
+      hook_ref: ['metis', 'hook_directive'],
+    } as const;
+    for (const [field, [producer, artifactType]] of Object.entries(expected)) {
+      const ref = value[field as keyof typeof expected];
+      if (ref.producer !== producer || ref.artifact_type !== artifactType) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${field} must be issued by ${producer} as ${artifactType}`,
+          path: [field],
+        });
+      }
+      if (
+        ref.workspace_id !== value.scope.workspace_id
+        || ref.run_id !== value.scope.run_id
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `${field} must match the projection scope`,
+          path: [field],
+        });
+      }
+    }
+  })
   .transform(deepFreeze);
 
 export function aresP2ATargetProjectionV3SchemaDescriptor(): Record<string, unknown> {

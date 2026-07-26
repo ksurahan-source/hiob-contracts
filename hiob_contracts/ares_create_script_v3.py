@@ -194,6 +194,11 @@ class AresP2ATargetProjectionV3(BaseModel):
                 raise ValueError(
                     f"{field} must be issued by {producer} as {artifact_type}"
                 )
+            if (
+                ref.workspace_id != self.scope.workspace_id
+                or ref.run_id != self.scope.run_id
+            ):
+                raise ValueError(f"{field} must match the projection scope")
         return self
 
 

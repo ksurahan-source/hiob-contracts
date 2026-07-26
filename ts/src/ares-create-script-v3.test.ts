@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   AresCreateScriptRequestV3Schema,
   AresCreateScriptResultV3Schema,
+  AresP2ATargetProjectionV3Schema,
   AresRequestScopeV3Schema,
   AresSemanticBeatV3Schema,
   ScriptPackageV3Schema,
@@ -197,6 +198,42 @@ function sampleRequest() {
     creative_constraints: creativeConstraints,
   };
 }
+
+test('projection schema rejects cross-scope and wrong-owner refs directly', () => {
+  const base = sampleRequest().authority.accepted_p2a_receipt.target_input;
+  const mutations: Array<[string, (value: any) => void]> = [
+    ['cross-workspace identity', value => {
+      value.identity_ref.workspace_id = 'ws-other';
+    }],
+    ['cross-run product', value => {
+      value.product_ref.run_id = 'run-other';
+    }],
+    ['wrong evidence producer', value => {
+      value.evidence_ref.producer = 'janus';
+    }],
+    ['wrong hook artifact type', value => {
+      value.hook_ref.artifact_type = 'product_truth';
+    }],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    const value = structuredClone(base);
+    mutate(value);
+    for (const field of [
+      'identity_ref',
+      'product_ref',
+      'evidence_ref',
+      'hook_ref',
+    ] as const) {
+      value[field].receipt_digest = authorityRefReceiptDigestV3(value[field]);
+    }
+    assert.equal(
+      AresP2ATargetProjectionV3Schema.safeParse(value).success,
+      false,
+      label,
+    );
+  }
+});
 
 function blockedResult() {
   const payload = {
