@@ -101,6 +101,7 @@ def authority_ref_receipt_digest_v3(
     producer: str,
     artifact_type: str,
     artifact_digest: str,
+    source_output_digest: str,
     payload_digest: str,
     workspace_id: str,
     run_id: str,
@@ -120,6 +121,7 @@ def authority_ref_receipt_digest_v3(
             "producer": producer,
             "artifact_type": artifact_type,
             "artifact_digest": artifact_digest,
+            "source_output_digest": source_output_digest,
             "payload_digest": payload_digest,
             "workspace_id": workspace_id,
             "run_id": run_id,
@@ -141,6 +143,7 @@ class AresAuthorityArtifactRefV3(BaseModel):
         "p2a_receipt",
     ]
     artifact_digest: DigestStr
+    source_output_digest: DigestStr
     payload_digest: DigestStr
     receipt_id: NonBlankStr
     receipt_digest: DigestStr
@@ -156,6 +159,7 @@ class AresAuthorityArtifactRefV3(BaseModel):
             producer=self.producer,
             artifact_type=self.artifact_type,
             artifact_digest=self.artifact_digest,
+            source_output_digest=self.source_output_digest,
             payload_digest=self.payload_digest,
             workspace_id=self.workspace_id,
             run_id=self.run_id,
@@ -174,6 +178,7 @@ class AresP2ATargetProjectionV3(BaseModel):
 
     contract_version: Literal["AresP2ATargetProjection.v3"]
     scope: AresRequestScopeV3
+    command_source_output_digest: DigestStr
     identity_ref: AresAuthorityArtifactRefV3
     product_ref: AresAuthorityArtifactRefV3
     evidence_ref: AresAuthorityArtifactRefV3
@@ -205,6 +210,7 @@ class AresP2ATargetProjectionV3(BaseModel):
 def ares_p2a_target_projection_v3(
     *,
     scope: AresRequestScopeV3,
+    command_source_output_digest: str,
     identity_ref: AresAuthorityArtifactRefV3,
     product_ref: AresAuthorityArtifactRefV3,
     evidence_ref: AresAuthorityArtifactRefV3,
@@ -216,6 +222,7 @@ def ares_p2a_target_projection_v3(
     return AresP2ATargetProjectionV3(
         contract_version="AresP2ATargetProjection.v3",
         scope=scope,
+        command_source_output_digest=command_source_output_digest,
         identity_ref=identity_ref,
         product_ref=product_ref,
         evidence_ref=evidence_ref,
@@ -239,6 +246,7 @@ def ares_p2a_target_projection_v3_schema_descriptor() -> dict[str, Any]:
             "producer",
             "artifact_type",
             "artifact_digest",
+            "source_output_digest",
             "payload_digest",
             "receipt_id",
             "receipt_digest",
@@ -257,6 +265,7 @@ def ares_p2a_target_projection_v3_schema_descriptor() -> dict[str, Any]:
                 ]
             },
             "artifact_digest": digest,
+            "source_output_digest": digest,
             "payload_digest": digest,
             "receipt_id": nonblank,
             "receipt_digest": digest,
@@ -265,6 +274,7 @@ def ares_p2a_target_projection_v3_schema_descriptor() -> dict[str, Any]:
         },
         "invariants": [
             "receipt_digest=canonical_ref_subject",
+            "source_output_digest=producer_planet_output.output_digest",
             "workspace_id/run_id=scope",
         ],
     }
@@ -304,6 +314,7 @@ def ares_p2a_target_projection_v3_schema_descriptor() -> dict[str, Any]:
         "required": [
             "contract_version",
             "scope",
+            "command_source_output_digest",
             "identity_ref",
             "product_ref",
             "evidence_ref",
@@ -328,6 +339,7 @@ def ares_p2a_target_projection_v3_schema_descriptor() -> dict[str, Any]:
                     "idempotency_key": nonblank,
                 },
             },
+            "command_source_output_digest": digest,
             "identity_ref": ref_shape,
             "product_ref": ref_shape,
             "evidence_ref": ref_shape,
@@ -340,7 +352,7 @@ def ares_p2a_target_projection_v3_schema_descriptor() -> dict[str, Any]:
             "evidence_ref=artemis/evidence_bundle",
             "hook_ref=metis/hook_directive",
             "target_input=canonical_projection",
-            "source_output_digests_cover_all_authority_artifacts",
+            "source_output_digests_cover_four_authority_outputs_and_command",
         ],
     }
 
@@ -477,8 +489,14 @@ class AresCreateScriptRequestV3(BaseModel):
         if receipt.run_id != self.scope.run_id:
             raise ValueError("Karma receipt run_id must match request scope")
 
+        receipt_projection = AresP2ATargetProjectionV3.model_validate(
+            _json_value(receipt.target_input)
+        )
         projection = ares_p2a_target_projection_v3(
             scope=self.scope,
+            command_source_output_digest=(
+                receipt_projection.command_source_output_digest
+            ),
             identity_ref=self.authority.identity_ref,
             product_ref=self.authority.product_ref,
             evidence_ref=self.authority.evidence_ref,
@@ -506,15 +524,16 @@ class AresCreateScriptRequestV3(BaseModel):
             )
         source_digests = set(receipt.source_output_digests)
         required_sources = {
-            self.authority.identity_ref.artifact_digest,
-            self.authority.product_ref.artifact_digest,
-            self.authority.evidence_ref.artifact_digest,
-            self.authority.hook_ref.artifact_digest,
+            self.authority.identity_ref.source_output_digest,
+            self.authority.product_ref.source_output_digest,
+            self.authority.evidence_ref.source_output_digest,
+            self.authority.hook_ref.source_output_digest,
+            projection.command_source_output_digest,
         }
         if not required_sources.issubset(source_digests):
             raise ValueError(
-                "Karma receipt source_output_digests must cover all four "
-                "upstream authority artifacts"
+                "Karma receipt source_output_digests must cover four authority "
+                "outputs and the Star command output"
             )
 
         bindings = (

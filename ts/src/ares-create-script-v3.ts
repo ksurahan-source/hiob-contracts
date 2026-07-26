@@ -327,6 +327,7 @@ export function authorityRefReceiptDigestV3(args: {
   producer: string;
   artifact_type: string;
   artifact_digest: string;
+  source_output_digest: string;
   payload_digest: string;
   workspace_id: string;
   run_id: string;
@@ -337,6 +338,7 @@ export function authorityRefReceiptDigestV3(args: {
     producer: args.producer,
     artifact_type: args.artifact_type,
     artifact_digest: args.artifact_digest,
+    source_output_digest: args.source_output_digest,
     payload_digest: args.payload_digest,
     workspace_id: args.workspace_id,
     run_id: args.run_id,
@@ -364,6 +366,7 @@ export const AresAuthorityArtifactRefV3Schema = z
       'p2a_receipt',
     ]),
     artifact_digest: DigestSchema,
+    source_output_digest: DigestSchema,
     payload_digest: DigestSchema,
     receipt_id: NonBlankString,
     receipt_digest: DigestSchema,
@@ -387,6 +390,7 @@ export const AresP2ATargetProjectionV3Schema = z
   .object({
     contract_version: z.literal('AresP2ATargetProjection.v3'),
     scope: AresRequestScopeV3Schema,
+    command_source_output_digest: DigestSchema,
     identity_ref: AresAuthorityArtifactRefV3Schema,
     product_ref: AresAuthorityArtifactRefV3Schema,
     evidence_ref: AresAuthorityArtifactRefV3Schema,
@@ -441,6 +445,7 @@ export function aresP2ATargetProjectionV3SchemaDescriptor(): Record<string, unkn
       'producer',
       'artifact_type',
       'artifact_digest',
+      'source_output_digest',
       'payload_digest',
       'receipt_id',
       'receipt_digest',
@@ -459,6 +464,7 @@ export function aresP2ATargetProjectionV3SchemaDescriptor(): Record<string, unkn
         ],
       },
       artifact_digest: digest,
+      source_output_digest: digest,
       payload_digest: digest,
       receipt_id: nonblank,
       receipt_digest: digest,
@@ -467,6 +473,7 @@ export function aresP2ATargetProjectionV3SchemaDescriptor(): Record<string, unkn
     },
     invariants: [
       'receipt_digest=canonical_ref_subject',
+      'source_output_digest=producer_planet_output.output_digest',
       'workspace_id/run_id=scope',
     ],
   };
@@ -506,6 +513,7 @@ export function aresP2ATargetProjectionV3SchemaDescriptor(): Record<string, unkn
     required: [
       'contract_version',
       'scope',
+      'command_source_output_digest',
       'identity_ref',
       'product_ref',
       'evidence_ref',
@@ -530,6 +538,7 @@ export function aresP2ATargetProjectionV3SchemaDescriptor(): Record<string, unkn
           idempotency_key: nonblank,
         },
       },
+      command_source_output_digest: digest,
       identity_ref: refShape,
       product_ref: refShape,
       evidence_ref: refShape,
@@ -542,7 +551,7 @@ export function aresP2ATargetProjectionV3SchemaDescriptor(): Record<string, unkn
       'evidence_ref=artemis/evidence_bundle',
       'hook_ref=metis/hook_directive',
       'target_input=canonical_projection',
-      'source_output_digests_cover_all_authority_artifacts',
+      'source_output_digests_cover_four_authority_outputs_and_command',
     ],
   };
 }
@@ -685,9 +694,22 @@ export const AresCreateScriptRequestV3Schema = z
       });
     }
 
+    const parsedReceiptProjection = AresP2ATargetProjectionV3Schema.safeParse(
+      receipt.target_input,
+    );
+    if (!parsedReceiptProjection.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Karma receipt target_input must be AresP2ATargetProjection.v3',
+        path: ['authority', 'accepted_p2a_receipt', 'target_input'],
+      });
+      return;
+    }
     const projection = {
       contract_version: 'AresP2ATargetProjection.v3' as const,
       scope: value.scope,
+      command_source_output_digest:
+        parsedReceiptProjection.data.command_source_output_digest,
       identity_ref: value.authority.identity_ref,
       product_ref: value.authority.product_ref,
       evidence_ref: value.authority.evidence_ref,
@@ -718,15 +740,16 @@ export const AresCreateScriptRequestV3Schema = z
     }
     const sourceDigests = new Set(receipt.source_output_digests);
     const requiredSources = [
-      value.authority.identity_ref.artifact_digest,
-      value.authority.product_ref.artifact_digest,
-      value.authority.evidence_ref.artifact_digest,
-      value.authority.hook_ref.artifact_digest,
+      value.authority.identity_ref.source_output_digest,
+      value.authority.product_ref.source_output_digest,
+      value.authority.evidence_ref.source_output_digest,
+      value.authority.hook_ref.source_output_digest,
+      projection.command_source_output_digest,
     ];
     if (requiredSources.some((digest) => !sourceDigests.has(digest))) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Karma receipt must cover all upstream authority artifacts',
+        message: 'Karma receipt must cover four authority outputs and the Star command output',
         path: ['authority', 'accepted_p2a_receipt', 'source_output_digests'],
       });
     }
@@ -1036,6 +1059,7 @@ export function aresCreateScriptRequestV3SchemaDigest(): string {
       'receipt_digest',
       'receipt_id',
       'run_id',
+      'source_output_digest',
       'workspace_id',
     ].sort(),
     identity_fields: [

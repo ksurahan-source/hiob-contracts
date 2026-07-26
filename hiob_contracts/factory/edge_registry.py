@@ -40,16 +40,20 @@ class SemanticEdge:
 
 # ── The factory edge graph (§5). Order follows the flow. ─────────────────────
 EDGES: tuple[SemanticEdge, ...] = (
-    # Planning slice (Phase 2): Janus → Parzifal → Ares.
+    # Planning slice (Phase 2): Janus → Parzifal, then authority fan-in → Ares.
     SemanticEdge(
         "j2p", "janus", "JanusBrief", "parzifal", "parzifal.target.consolidate",
         "ParzifalTargetInput", "policy.j2p", 30_000, "required",
         "Janus evidence brief refined for Parzifal target/identity derivation",
     ),
+    # HARD CUTOVER: runtime p2a validation is V3-only. Historical V2 receipts
+    # remain parseable as AresScriptInput but are not executable through p2a.
     SemanticEdge(
-        "p2a", "parzifal", "TargetProfile+IdentityLock+CastSheet", "ares", "ares.script.build",
-        "AresScriptInput", "policy.p2a", 30_000, "required",
-        "Parzifal identity/target refined for Ares; Ares cannot run without this receipt (FR-3)",
+        "p2a", "parzifal+janus+artemis+metis+star",
+        "IdentityLock+ProductTruth+EvidenceBundle+HookDirective+AresV3CommandScope",
+        "ares", "ares.scripts.generate", "AresP2ATargetProjection",
+        "policy.p2a", 30_000, "required",
+        "Four producer authority outputs plus Star command scope projected for Ares V3",
     ),
     # Media plan slice (Phase 3): Ares → {Athena, Orpheus, Apollo} plans.
     SemanticEdge(

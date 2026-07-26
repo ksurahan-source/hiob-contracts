@@ -3,7 +3,7 @@
  *
  * Mirror of tests/test_edge_target_contracts.py. Tests:
  * - j2p edge (JanusBrief → ParzifalTargetInput)
- * - p2a edge (Parzifal outputs → AresScriptInput)
+ * - p2a edge (five-source authority fan-in → AresP2ATargetProjection)
  * - Unknown edge rejection (negative test)
  * - Python↔TS digest parity
  */
@@ -84,15 +84,29 @@ test('ParzifalTargetInput validation requires target facts', () => {
   assert(errs.some((e) => e.includes('target fact')), 'requires target facts');
 });
 
-// ── p2a edge: Parzifal outputs → AresScriptInput ──────────────────────
+// ── p2a edge: producer authority fan-in → Ares V3 projection ─────────
 test('p2a edge registered', () => {
   const edge = getEdge('p2a');
   assert(edge !== undefined, 'p2a edge exists');
-  assert(edge!.source_planet === 'parzifal', 'source is parzifal');
+  assert(
+    edge!.source_planet === 'parzifal+janus+artemis+metis+star',
+    'source is five-source fan-in',
+  );
+  assert(
+    edge!.source_contract
+      === 'IdentityLock+ProductTruth+EvidenceBundle+HookDirective+AresV3CommandScope',
+    'source contract is the V3 authority fan-in',
+  );
   assert(edge!.target_planet === 'ares', 'target is ares');
-  assert(edge!.target_node_id === 'ares.script.build', 'node_id correct');
+  assert(edge!.target_node_id === 'ares.scripts.generate', 'node_id correct');
+  assert(
+    edge!.target_contract === 'AresP2ATargetProjection',
+    'target contract is Ares V3 projection',
+  );
   assert(edge!.criticality === 'required', 'p2a required');
-  assert(isRegisteredEdge('parzifal', 'ares'), 'is_registered_edge true');
+  for (const source of ['parzifal', 'janus', 'artemis', 'metis', 'star']) {
+    assert(isRegisteredEdge(source, 'ares'), `${source}→ares registered`);
+  }
 });
 
 test('AresScriptInput round-trip with digest stability', () => {
