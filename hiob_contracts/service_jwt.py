@@ -6,7 +6,8 @@ body parsing / handler execution (fail closed).
 Claims (required):
   iss, sub, aud, scope, workspace_id, exp, iat, jti
 Optional:
-  run_id, kid, node_id
+  run_id, kid, node_id, operation_id, idempotency_key, request_digest,
+  execution_digest
 
 Lifetime: HIOB_SERVICE_JWT_SECRET or MODAL_DISPATCH_SECRET or HIOB_WORKER_DISPATCH_SECRET
 """
@@ -47,6 +48,10 @@ class ServiceClaims:
     jti: str
     run_id: str = ""
     node_id: str = ""
+    operation_id: str = ""
+    idempotency_key: str = ""
+    request_digest: str = ""
+    execution_digest: str = ""
     kid: str = "hs256-v1"
 
     def has_scope(self, required: str) -> bool:
@@ -64,6 +69,10 @@ def mint_service_token(
     issuer: str = "hiob-control-plane",
     run_id: str = "",
     node_id: str = "",
+    operation_id: str = "",
+    idempotency_key: str = "",
+    request_digest: str = "",
+    execution_digest: str = "",
     ttl_s: int = 300,
     secret: Optional[str] = None,
 ) -> str:
@@ -83,6 +92,10 @@ def mint_service_token(
         "workspace_id": str(workspace_id or "default"),
         "run_id": str(run_id or ""),
         "node_id": str(node_id or ""),
+        "operation_id": str(operation_id or ""),
+        "idempotency_key": str(idempotency_key or ""),
+        "request_digest": str(request_digest or ""),
+        "execution_digest": str(execution_digest or ""),
         "jti": str(uuid.uuid4()),
         "iat": now,
         "exp": now + ttl,
@@ -144,6 +157,10 @@ def verify_service_token(
         jti=str(data.get("jti") or ""),
         run_id=str(data.get("run_id") or ""),
         node_id=str(data.get("node_id") or ""),
+        operation_id=str(data.get("operation_id") or ""),
+        idempotency_key=str(data.get("idempotency_key") or ""),
+        request_digest=str(data.get("request_digest") or ""),
+        execution_digest=str(data.get("execution_digest") or ""),
         kid=str(data.get("kid") or "hs256-v1"),
     )
 
@@ -172,5 +189,9 @@ def claims_to_dict(c: ServiceClaims) -> dict[str, Any]:
         "jti": c.jti,
         "run_id": c.run_id,
         "node_id": c.node_id,
+        "operation_id": c.operation_id,
+        "idempotency_key": c.idempotency_key,
+        "request_digest": c.request_digest,
+        "execution_digest": c.execution_digest,
         "kid": c.kid,
     }
