@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from hiob_contracts import (
+    AresAuthorityArtifactRefV3,
     AresCreateScriptRequestV3,
     AresCreateScriptResultV3,
     AresP2ATargetProjectionV3,
@@ -39,6 +40,8 @@ IDENTITY_DIGEST = sha256_digest({"identity": "lock-1"})
 PRODUCT_DIGEST = sha256_digest({"product": "truth-1"})
 EVIDENCE_DIGEST = sha256_digest({"evidence": "approved-1"})
 HOOK_DIGEST = sha256_digest({"hook": "metis-1"})
+STAR_COMMAND_OUTPUT_DIGEST = sha256_digest({"star": "ares-v3-command-1"})
+KARMA_OUTPUT_DIGEST = sha256_digest({"karma": "p2a-output-1"})
 
 
 def identity_payload() -> dict:
@@ -127,7 +130,7 @@ def accepted_p2a_receipt(
         "waiver_receipt_refs": [],
         "mapper": {
             "planet": "karma",
-            "node_id": "karma.p2a",
+            "node_id": "karma.edge.refine",
             "revision": "r3",
             "policy_digest": sha256_digest({"policy": "p2a-r3"}),
         },
@@ -145,6 +148,9 @@ def authority_ref(
         "producer": producer,
         "artifact_type": artifact_type,
         "artifact_digest": artifact_digest,
+        "source_output_digest": sha256_digest(
+            {"producer_output": f"{producer}-{artifact_type}-1"}
+        ),
         "payload_digest": sha256_digest(payload),
         "receipt_id": f"{producer}-{artifact_type}-receipt-1",
         "workspace_id": WORKSPACE_ID,
@@ -155,6 +161,7 @@ def authority_ref(
         producer=producer,
         artifact_type=artifact_type,
         artifact_digest=artifact_digest,
+        source_output_digest=body["source_output_digest"],
         payload_digest=body["payload_digest"],
         workspace_id=WORKSPACE_ID,
         run_id=RUN_ID,
@@ -183,6 +190,7 @@ def request_data() -> dict:
         {
             "contract_version": "AresP2ATargetProjection.v3",
             "scope": scope,
+            "command_source_output_digest": STAR_COMMAND_OUTPUT_DIGEST,
             "identity_ref": identity_ref,
             "product_ref": product_ref,
             "evidence_ref": evidence_ref,
@@ -205,13 +213,15 @@ def request_data() -> dict:
     receipt_body = accepted_p2a_receipt(
         target_input,
         [
-            IDENTITY_DIGEST,
-            PRODUCT_DIGEST,
-            EVIDENCE_DIGEST,
-            HOOK_DIGEST,
+            identity_ref["source_output_digest"],
+            product_ref["source_output_digest"],
+            evidence_ref["source_output_digest"],
+            hook_ref["source_output_digest"],
+            STAR_COMMAND_OUTPUT_DIGEST,
         ],
     )
     receipt = KarmaEdgeReceipt.model_validate(receipt_body)
+    receipt_digest = karma_receipt_digest_v3(receipt)
     p2a_payload_digest = receipt.target_input_digest
     assert p2a_payload_digest is not None
     return {
@@ -230,7 +240,8 @@ def request_data() -> dict:
                     receipt.target_input or {},
                 ),
                 "receipt_id": receipt.receipt_id,
-                "receipt_digest": karma_receipt_digest_v3(receipt),
+                "receipt_digest": receipt_digest,
+                "source_output_digest": KARMA_OUTPUT_DIGEST,
             },
             "accepted_p2a_receipt": receipt_body,
         },
@@ -266,6 +277,7 @@ def test_v3_projection_rejects_cross_scope_and_wrong_owner_refs(
         producer=ref["producer"],
         artifact_type=ref["artifact_type"],
         artifact_digest=ref["artifact_digest"],
+        source_output_digest=ref["source_output_digest"],
         payload_digest=ref["payload_digest"],
         workspace_id=ref["workspace_id"],
         run_id=ref["run_id"],
@@ -383,6 +395,15 @@ def test_v3_accepts_five_producer_issued_refs_and_full_scope():
     assert request.scope.operation_id == "op-script-v3-1"
     assert request.authority.identity_ref.producer == "parzifal"
     assert request.authority.p2a_ref.producer == "karma"
+    assert set(request.authority.accepted_p2a_receipt.source_output_digests) >= {
+        request.authority.identity_ref.source_output_digest,
+        request.authority.product_ref.source_output_digest,
+        request.authority.evidence_ref.source_output_digest,
+        request.authority.hook_ref.source_output_digest,
+        request.authority.accepted_p2a_receipt.target_input[
+            "command_source_output_digest"
+        ],
+    }
     assert request_content_digest_v3(request).startswith("sha256:")
 
 
@@ -448,6 +469,38 @@ def test_v3_rejects_native_artifact_digest_mismatch():
         AresCreateScriptRequestV3.model_validate(body)
 
 
+def test_v3_source_output_coverage_does_not_accept_artifact_digests():
+    body = request_data()
+    receipt_body = body["authority"]["accepted_p2a_receipt"]
+    receipt_body["source_output_digests"] = [
+        IDENTITY_DIGEST,
+        PRODUCT_DIGEST,
+        EVIDENCE_DIGEST,
+        HOOK_DIGEST,
+        STAR_COMMAND_OUTPUT_DIGEST,
+    ]
+    receipt = KarmaEdgeReceipt.model_validate(receipt_body)
+    receipt_digest = karma_receipt_digest_v3(receipt)
+    body["authority"]["p2a_ref"]["receipt_digest"] = receipt_digest
+    body["authority"]["p2a_ref"]["source_output_digest"] = receipt_digest
+
+    with pytest.raises(ValidationError, match="four authority outputs"):
+        AresCreateScriptRequestV3.model_validate(body)
+
+
+def test_v3_rejects_missing_star_command_source_output():
+    body = request_data()
+    receipt_body = body["authority"]["accepted_p2a_receipt"]
+    receipt_body["source_output_digests"].remove(STAR_COMMAND_OUTPUT_DIGEST)
+    receipt = KarmaEdgeReceipt.model_validate(receipt_body)
+    receipt_digest = karma_receipt_digest_v3(receipt)
+    body["authority"]["p2a_ref"]["receipt_digest"] = receipt_digest
+    body["authority"]["p2a_ref"]["source_output_digest"] = receipt_digest
+
+    with pytest.raises(ValidationError, match="Star command output"):
+        AresCreateScriptRequestV3.model_validate(body)
+
+
 def test_v3_rejects_p2a_receipt_digest_mismatch():
     body = request_data()
     body["authority"]["p2a_ref"]["receipt_digest"] = sha256_digest({"fake": True})
@@ -455,11 +508,32 @@ def test_v3_rejects_p2a_receipt_digest_mismatch():
         AresCreateScriptRequestV3.model_validate(body)
 
 
+def test_v3_keeps_karma_output_and_receipt_digests_distinct():
+    request = AresCreateScriptRequestV3.model_validate(request_data())
+
+    assert request.authority.p2a_ref.source_output_digest == KARMA_OUTPUT_DIGEST
+    assert (
+        request.authority.p2a_ref.source_output_digest
+        != request.authority.p2a_ref.receipt_digest
+    )
+
+
 def test_v3_rejects_generic_authority_receipt_digest_drift():
     body = request_data()
     body["authority"]["identity_ref"]["receipt_id"] = "different-receipt-id"
     with pytest.raises(ValidationError):
         AresCreateScriptRequestV3.model_validate(body)
+
+
+def test_v3_authority_receipt_subject_rejects_source_output_digest_drift():
+    ref = deepcopy(request_data()["authority"]["identity_ref"])
+    ref["source_output_digest"] = sha256_digest({"forged": "producer-output"})
+
+    with pytest.raises(
+        ValidationError,
+        match="canonical authority reference",
+    ):
+        AresAuthorityArtifactRefV3.model_validate(ref)
 
 
 def test_v3_freezes_embedded_karma_target_projection():
@@ -500,7 +574,9 @@ def test_v3_rejects_fully_rehashed_incomplete_p2a_projection():
     body["authority"]["p2a_ref"]["artifact_digest"] = target_digest
     body["authority"]["p2a_ref"]["payload_digest"] = target_digest
     receipt = KarmaEdgeReceipt.model_validate(receipt_body)
-    body["authority"]["p2a_ref"]["receipt_digest"] = karma_receipt_digest_v3(receipt)
+    receipt_digest = karma_receipt_digest_v3(receipt)
+    body["authority"]["p2a_ref"]["receipt_digest"] = receipt_digest
+    body["authority"]["p2a_ref"]["source_output_digest"] = receipt_digest
     with pytest.raises(ValidationError):
         AresCreateScriptRequestV3.model_validate(body)
 
@@ -708,13 +784,13 @@ def test_v3_schema_digests_are_stable_and_distinct():
     result_digest = ares_create_script_result_v3_schema_digest()
     # These are also asserted by the TypeScript mirror test.
     assert request_digest == (
-        "sha256:7a326278a6c6a8591ebd3811e8742cee0b3aef7af9c2829d264eb6adea8b8dcf"
+        "sha256:f70720ef05786605cd31a50cdd68201b81306b87fb95e200e2aa1b8dcca0cabc"
     )
     assert result_digest == (
         "sha256:72a50c6d3305b158441328e024d630a9cdd0fe3f974d76bce7ab80d9d52c8de0"
     )
     assert ares_p2a_target_projection_v3_schema_digest() == (
-        "sha256:12bad18c7e403cff022e6743e634db69c84ec94e45262ae1d2f3a2b6e2392c99"
+        "sha256:21eb7a2cc977d1aedd61885f90ddbd213809c65a061c04b6fb6793b27817d687"
     )
     assert request_digest != result_digest
 
@@ -728,5 +804,7 @@ def test_v3_projection_schema_digest_binds_nested_structure_and_invariants():
     ] = 65
     assert sha256_digest(drifted) != baseline
     drifted = deepcopy(descriptor)
-    drifted["invariants"].remove("source_output_digests_cover_all_authority_artifacts")
+    drifted["invariants"].remove(
+        "source_output_digests_cover_four_authority_outputs_and_command"
+    )
     assert sha256_digest(drifted) != baseline

@@ -1,38 +1,29 @@
-"""Phase 3 edge target contract tests — j2p and p2a with exact typed schemas.
+"""Phase 3 edge target contract tests — j2p and V3 p2a typed schemas.
 
 PRD_BIG_FOOTSTEP Phase 3: make the registered j2p (Janus→Parzifal) and p2a
 (Parzifal→Ares) target contract refs EXACT with typed target_input schemas
 the consumer Planet owns.
 
 - j2p: JanusBrief → ParzifalTargetInput (Parzifal consumes)
-- p2a: TargetProfile+IdentityLock+CastSheet → AresScriptInput (Ares consumes)
+- p2a: five-source authority fan-in → AresP2ATargetProjection (Ares consumes)
 
 All contracts round-trip to/from dict; digests are Python-canonical.
 Unknown edge IDs are rejected (negative test).
 """
 from __future__ import annotations
 
-import pytest
-from pydantic import ValidationError
-
 from hiob_contracts.factory import (
-    ArtifactRef,
     ContractRef,
     KarmaEdgeReceipt,
-    KarmaRefineRequest,
     MapperRef,
     PlanetOutput,
-    PolicyRef,
-    TargetRef,
     canonical_json,
-    derive_idempotency_key,
     get_edge,
     is_registered_edge,
     sha256_digest,
 )
 from hiob_contracts.parzifal_target_input import ParzifalTargetInput
 from hiob_contracts.ares_script_input import AresScriptInput
-from hiob_contracts.janus_brief import JanusBrief
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 SCHEMA_DIGEST = sha256_digest({"schema": "example.v1"})
@@ -149,16 +140,22 @@ def test_karma_j2p_receipt_with_parzifal_target_input():
     assert receipt.authorizes(ti_digest)
 
 
-# ── p2a edge: Parzifal outputs → AresScriptInput ──────────────────────────
+# ── p2a edge: producer authority fan-in → Ares V3 projection ─────────────
 def test_p2a_edge_registered():
     """p2a edge exists and is required."""
     edge = get_edge("p2a")
     assert edge is not None
-    assert edge.source_planet == "parzifal"
+    assert edge.source_planet == "parzifal+janus+artemis+metis+star"
+    assert (
+        edge.source_contract
+        == "IdentityLock+ProductTruth+EvidenceBundle+HookDirective+AresV3CommandScope"
+    )
     assert edge.target_planet == "ares"
-    assert edge.target_node_id == "ares.script.build"
+    assert edge.target_node_id == "ares.scripts.generate"
+    assert edge.target_contract == "AresP2ATargetProjection"
     assert edge.criticality == "required"
-    assert is_registered_edge("parzifal", "ares")
+    for source in ("parzifal", "janus", "artemis", "metis", "star"):
+        assert is_registered_edge(source, "ares")
 
 
 def test_ares_script_input_round_trip():
@@ -220,36 +217,18 @@ def test_ares_script_input_validation_missing_grounding():
     assert any("grounding fact" in e for e in errs)
 
 
-def test_karma_p2a_receipt_with_ares_script_input():
-    """Karma p2a receipt carries AresScriptInput as target_input."""
-    script_input = AresScriptInput(
-        brand_slug="viewok",
-        protagonist_name="정원이",
-        target_pain="수영 공포",
-    )
-    si_dict = script_input.to_dict()
-    si_digest = sha256_digest(si_dict)
+def test_karma_p2a_receipt_carries_ares_v3_projection():
+    """Karma p2a receipt carries the exact V3 target projection."""
+    from tests.test_ares_create_script_v3 import request_data
 
-    receipt = KarmaEdgeReceipt(
-        receipt_id="rcpt-p2a-1",
-        edge_id="p2a",
-        run_id="run-1",
-        workspace_id="ws-1",
-        factory_revision=0,
-        source_output_digests=(sha256_digest({"target": "profile"}),),
-        target_contract=_contract("AresScriptInput"),
-        decision="accepted",
-        target_input=si_dict,
-        target_input_digest=si_digest,
-        mapper=MapperRef(
-            node_id="karma.edge.refine", revision="r1", policy_digest=POLICY_DIGEST
-        ),
-        created_at="2026-07-14T00:00:00Z",
+    receipt = KarmaEdgeReceipt.model_validate(
+        request_data()["authority"]["accepted_p2a_receipt"]
     )
-
     assert receipt.decision == "accepted"
     assert receipt.target_input is not None
-    assert receipt.authorizes(si_digest)
+    assert receipt.target_contract.name == "AresP2ATargetProjection"
+    assert receipt.target_contract.version == "v3"
+    assert receipt.authorizes(receipt.target_input_digest)
 
 
 # ── NEGATIVE TESTS: unknown edge rejection ────────────────────────────────

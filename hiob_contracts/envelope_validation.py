@@ -18,6 +18,8 @@ from datetime import datetime, timezone
 from importlib import import_module
 from typing import Any
 
+from pydantic import BaseModel
+
 # 계약명 → (모듈, 클래스). 런타임 경계에서 검증할 핵심 계약(파싱·validate 보유).
 _REGISTRY: dict[str, tuple[str, str]] = {
     # Core planet contracts
@@ -39,6 +41,10 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     # Phase-3 edge targets (j2p / p2a)
     "ParzifalTargetInput": ("hiob_contracts.parzifal_target_input", "ParzifalTargetInput"),
     "AresScriptInput": ("hiob_contracts.ares_script_input", "AresScriptInput"),
+    "AresP2ATargetProjection": (
+        "hiob_contracts.ares_create_script_v3",
+        "AresP2ATargetProjectionV3",
+    ),
     # LP1-7 residual edge targets (a2* / media / editorial / render)
     "AthenaPlanInput": ("hiob_contracts.edge_target_inputs", "AthenaPlanInput"),
     "OrpheusPlanInput": ("hiob_contracts.edge_target_inputs", "OrpheusPlanInput"),
@@ -125,7 +131,7 @@ def validate_payload(contract: str, payload: Any) -> ValidationResult:
         return ValidationResult(False, contract, (f"parse error: {e}",))
     errs: list[str] = []
     v = getattr(obj, "validate", None)
-    if callable(v):
+    if callable(v) and not isinstance(obj, BaseModel):
         try:
             errs = list(v() or [])
         except Exception as e:  # noqa: BLE001
@@ -241,7 +247,8 @@ def verify_karma_edge_receipt(
     4. optional expected_edge_id match
     5. optional source_output_digests containment/equality
     6. optional staleness vs created_at (max_age_seconds; None disables)
-    7. accepted ⇒ target_input present (model also enforces digest match)
+    7. target contract metadata matches the registered edge
+    8. accepted ⇒ target_input present (model also enforces digest match)
     """
     from hiob_contracts.factory.edge_registry import get_edge
     from hiob_contracts.factory.karma_edge import KarmaEdgeReceipt
@@ -267,6 +274,32 @@ def verify_karma_edge_receipt(
     edge = get_edge(obj.edge_id)
     if edge is None:
         errs.append(f"unknown edge_id: {obj.edge_id}")
+    else:
+        target_contract = obj.target_contract
+        if target_contract.name != edge.target_contract:
+            errs.append(
+                "target_contract.name mismatch: "
+                f"expected {edge.target_contract!r}, got {target_contract.name!r}"
+            )
+        if obj.edge_id == "p2a":
+            from hiob_contracts.ares_create_script_v3 import (
+                ares_p2a_target_projection_v3_schema_digest,
+            )
+
+            if target_contract.version != "v3":
+                errs.append(
+                    "target_contract.version mismatch: "
+                    f"expected 'v3', got {target_contract.version!r}"
+                )
+            expected_schema_digest = (
+                ares_p2a_target_projection_v3_schema_digest()
+            )
+            if target_contract.schema_digest != expected_schema_digest:
+                errs.append(
+                    "target_contract.schema_digest mismatch: "
+                    f"expected {expected_schema_digest!r}, "
+                    f"got {target_contract.schema_digest!r}"
+                )
     if expected_edge_id is not None and obj.edge_id != expected_edge_id:
         errs.append(
             f"edge_id mismatch: expected {expected_edge_id!r}, got {obj.edge_id!r}"

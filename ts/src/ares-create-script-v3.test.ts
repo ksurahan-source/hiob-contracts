@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import {
+  AresAuthorityArtifactRefV3Schema,
   AresCreateScriptRequestV3Schema,
   AresCreateScriptResultV3Schema,
   AresP2ATargetProjectionV3Schema,
@@ -37,6 +38,8 @@ const identityDigest = digest({ identity: 'lock-1' });
 const productDigest = digest({ product: 'truth-1' });
 const evidenceDigest = digest({ evidence: 'approved-1' });
 const hookDigest = digest({ hook: 'metis-1' });
+const starCommandOutputDigest = digest({ star: 'ares-v3-command-1' });
+const karmaOutputDigest = digest({ karma: 'p2a-output-1' });
 
 function authorityRef(
   producer: string,
@@ -48,6 +51,9 @@ function authorityRef(
     producer,
     artifact_type: artifactType,
     artifact_digest: artifactDigest,
+    source_output_digest: digest({
+      producer_output: `${producer}-${artifactType}-1`,
+    }),
     payload_digest: digest(payload),
     receipt_id: `${producer}-${artifactType}-receipt-1`,
     workspace_id: workspaceId,
@@ -139,6 +145,7 @@ function sampleRequest() {
   const targetInput = {
     contract_version: 'AresP2ATargetProjection.v3' as const,
     scope,
+    command_source_output_digest: starCommandOutputDigest,
     identity_ref: identityRef,
     product_ref: productRef,
     evidence_ref: evidenceRef,
@@ -152,10 +159,11 @@ function sampleRequest() {
     factory_revision: 3,
     workspace_id: workspaceId,
     source_output_digests: [
-      identityDigest,
-      productDigest,
-      evidenceDigest,
-      hookDigest,
+      identityRef.source_output_digest,
+      productRef.source_output_digest,
+      evidenceRef.source_output_digest,
+      hookRef.source_output_digest,
+      starCommandOutputDigest,
     ],
     target_contract: {
       name: 'AresP2ATargetProjection',
@@ -170,7 +178,7 @@ function sampleRequest() {
     waiver_receipt_refs: [],
     mapper: {
       planet: 'karma' as const,
-      node_id: 'karma.p2a',
+      node_id: 'karma.edge.refine',
       revision: 'r3',
       policy_digest: digest({ policy: 'p2a-r3' }),
     },
@@ -188,6 +196,7 @@ function sampleRequest() {
         ...authorityRef('karma', 'p2a_receipt', receipt.target_input_digest, targetInput),
         receipt_id: receipt.receipt_id,
         receipt_digest: digest(receipt),
+        source_output_digest: karmaOutputDigest,
       },
       accepted_p2a_receipt: receipt,
     },
@@ -352,6 +361,49 @@ test('V3 rejects non-canonical Karma receipt digest', () => {
   assert.equal(AresCreateScriptRequestV3Schema.safeParse(body).success, false);
 });
 
+test('V3 keeps Karma output and receipt digests distinct', () => {
+  const body = AresCreateScriptRequestV3Schema.parse(sampleRequest());
+  assert.equal(body.authority.p2a_ref.source_output_digest, karmaOutputDigest);
+  assert.notEqual(
+    body.authority.p2a_ref.source_output_digest,
+    body.authority.p2a_ref.receipt_digest,
+  );
+});
+
+test('V3 authority receipt subject rejects source output digest drift', () => {
+  const ref = structuredClone(sampleRequest().authority.identity_ref);
+  ref.source_output_digest = digest({ forged: 'producer-output' });
+
+  assert.equal(AresAuthorityArtifactRefV3Schema.safeParse(ref).success, false);
+});
+
+test('V3 source coverage does not accept artifact digests', () => {
+  const body = sampleRequest();
+  body.authority.accepted_p2a_receipt.source_output_digests = [
+    identityDigest,
+    productDigest,
+    evidenceDigest,
+    hookDigest,
+    starCommandOutputDigest,
+  ];
+  const receiptDigest = digest(body.authority.accepted_p2a_receipt);
+  body.authority.p2a_ref.receipt_digest = receiptDigest;
+  body.authority.p2a_ref.source_output_digest = receiptDigest;
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(body).success, false);
+});
+
+test('V3 rejects missing Star command source output', () => {
+  const body = sampleRequest();
+  body.authority.accepted_p2a_receipt.source_output_digests =
+    body.authority.accepted_p2a_receipt.source_output_digests.filter(
+      item => item !== starCommandOutputDigest,
+    );
+  const receiptDigest = digest(body.authority.accepted_p2a_receipt);
+  body.authority.p2a_ref.receipt_digest = receiptDigest;
+  body.authority.p2a_ref.source_output_digest = receiptDigest;
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(body).success, false);
+});
+
 test('V3 rejects generic authority receipt subject drift', () => {
   const body = sampleRequest();
   body.authority.identity_ref.receipt_id = 'different-receipt-id';
@@ -390,7 +442,9 @@ test('V3 rejects a fully rehashed incomplete p2a projection', () => {
   receipt.target_input_digest = targetDigest;
   body.authority.p2a_ref.artifact_digest = targetDigest;
   body.authority.p2a_ref.payload_digest = targetDigest;
-  body.authority.p2a_ref.receipt_digest = digest(receipt);
+  const receiptDigest = digest(receipt);
+  body.authority.p2a_ref.receipt_digest = receiptDigest;
+  body.authority.p2a_ref.source_output_digest = receiptDigest;
   assert.equal(AresCreateScriptRequestV3Schema.safeParse(body).success, false);
 });
 
@@ -590,7 +644,7 @@ test('Python and TS schema shape digests are stable', () => {
   const resultDigest = aresCreateScriptResultV3SchemaDigest();
   assert.equal(
     requestDigest,
-    'sha256:7a326278a6c6a8591ebd3811e8742cee0b3aef7af9c2829d264eb6adea8b8dcf',
+    'sha256:f70720ef05786605cd31a50cdd68201b81306b87fb95e200e2aa1b8dcca0cabc',
   );
   assert.equal(
     resultDigest,
@@ -598,7 +652,7 @@ test('Python and TS schema shape digests are stable', () => {
   );
   assert.equal(
     aresP2ATargetProjectionV3SchemaDigest(),
-    'sha256:12bad18c7e403cff022e6743e634db69c84ec94e45262ae1d2f3a2b6e2392c99',
+    'sha256:21eb7a2cc977d1aedd61885f90ddbd213809c65a061c04b6fb6793b27817d687',
   );
   assert.notEqual(requestDigest, resultDigest);
 });
@@ -620,7 +674,8 @@ test('projection schema digest binds nested types and invariants', () => {
     invariants: string[];
   };
   driftedInvariant.invariants = driftedInvariant.invariants.filter(
-    (item) => item !== 'source_output_digests_cover_all_authority_artifacts',
+    (item) => item
+      !== 'source_output_digests_cover_four_authority_outputs_and_command',
   );
   assert.notEqual(digest(driftedInvariant), baseline);
 });

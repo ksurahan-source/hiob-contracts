@@ -4,6 +4,7 @@ import pytest
 from hiob_contracts import (
     ContractViolation,
     JanusBrief,
+    ares_p2a_target_projection_v3_schema_digest,
     ensure_valid,
     registered_contracts,
     validate_payload,
@@ -135,16 +136,17 @@ _SRC = sha256_digest({"src": "ares"})
 
 def _edge_payloads() -> dict[str, dict]:
     """Minimal valid target_input dicts for each of the 9 registry edges."""
+    from tests.test_ares_create_script_v3 import request_data
+
+    p2a_projection = request_data()["authority"]["accepted_p2a_receipt"][
+        "target_input"
+    ]
     return {
         "j2p": {
             "brand_slug": "viewok",
             "target_audience": "초등 부모",
         },
-        "p2a": {
-            "brand_slug": "viewok",
-            "protagonist_name": "정원이",
-            "target_pain": "수영 공포",
-        },
+        "p2a": p2a_projection,
         "a2athena": {
             "beat_plan": {"beats": [{"beat_index": 0, "text": "hook"}]},
             "context": {"brand_slug": "viewok"},
@@ -188,6 +190,7 @@ def test_all_nine_edges_have_registered_target_contracts():
     assert set(mapping) == {e.edge_id for e in EDGES}
     missing = unvalidated_edge_targets()
     assert missing == (), f"unvalidated edges: {missing}"
+    assert mapping["p2a"] == "AresP2ATargetProjection"
 
 
 def test_validate_edge_target_ok_for_all_nine():
@@ -324,6 +327,105 @@ def test_verify_karma_edge_receipt_origin_ok():
         now="2026-07-15T01:00:00+00:00",
     )
     assert r.ok, r.errors
+
+
+def test_verify_karma_p2a_v3_receipt_end_to_end():
+    from tests.test_ares_create_script_v3 import request_data
+
+    receipt_body = request_data()["authority"]["accepted_p2a_receipt"]
+    receipt = KarmaEdgeReceipt.model_validate(receipt_body)
+    r = verify_karma_edge_receipt(
+        receipt,
+        expected_edge_id="p2a",
+        expected_source_digests=tuple(receipt.source_output_digests),
+        max_age_seconds=86_400,
+        now="2026-07-26T01:00:00+00:00",
+    )
+    assert r.ok, r.errors
+
+
+@pytest.mark.parametrize(
+    ("name", "version", "schema_digest", "expected_error"),
+    [
+        (
+            "AresScriptInput",
+            "v3",
+            ares_p2a_target_projection_v3_schema_digest(),
+            "target_contract.name mismatch",
+        ),
+        (
+            "AresP2ATargetProjection",
+            "v999",
+            ares_p2a_target_projection_v3_schema_digest(),
+            "target_contract.version mismatch",
+        ),
+        (
+            "AresP2ATargetProjection",
+            "v3",
+            _POLICY,
+            "target_contract.schema_digest mismatch",
+        ),
+    ],
+)
+def test_verify_karma_p2a_rejects_target_contract_metadata_drift(
+    name: str,
+    version: str,
+    schema_digest: str,
+    expected_error: str,
+):
+    from tests.test_ares_create_script_v3 import request_data
+
+    receipt = KarmaEdgeReceipt.model_validate(
+        request_data()["authority"]["accepted_p2a_receipt"]
+    )
+    drifted = receipt.model_copy(
+        update={
+            "target_contract": ContractRef(
+                name=name,
+                version=version,
+                schema_digest=schema_digest,
+            )
+        }
+    )
+
+    result = verify_karma_edge_receipt(drifted, max_age_seconds=None)
+
+    assert not result.ok
+    assert any(expected_error in error for error in result.errors)
+
+
+def test_historical_v2_p2a_receipt_is_not_runtime_executable_after_cutover():
+    target_input = {
+        "brand_slug": "viewok",
+        "protagonist_name": "정원이",
+        "target_pain": "수영 공포",
+    }
+    receipt = KarmaEdgeReceipt(
+        receipt_id="rcpt-p2a-v2-historical",
+        edge_id="p2a",
+        run_id="run-1",
+        workspace_id="ws-1",
+        factory_revision=2,
+        source_output_digests=(_SRC,),
+        target_contract=ContractRef(
+            name="AresScriptInput",
+            version="v2",
+            schema_digest=_POLICY,
+        ),
+        decision="accepted",
+        target_input=target_input,
+        target_input_digest=sha256_digest(target_input),
+        mapper=MapperRef(
+            node_id="karma.edge.refine",
+            revision="r2",
+            policy_digest=_POLICY,
+        ),
+        created_at="2026-07-15T00:00:00+00:00",
+    )
+    r = verify_karma_edge_receipt(receipt, max_age_seconds=None)
+    assert not r.ok
+    assert any("target_contract.name mismatch" in error for error in r.errors)
+    assert any("target_contract.version mismatch" in error for error in r.errors)
 
 
 def test_verify_karma_edge_receipt_stale_fail_loud():
