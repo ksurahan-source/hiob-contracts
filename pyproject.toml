@@ -5,7 +5,7 @@ description = "HIOB 행성간 타입 계약 — JanusBrief→BeatPlan→{MediaAr
 requires-python = ">=3.10"
 dependencies = [
     "pydantic>=2,<3",
-    "PyJWT>=2,<3",
+    "PyJWT[crypto]>=2,<3",
 ]
 
 [build-system]

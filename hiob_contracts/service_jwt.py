@@ -1,7 +1,9 @@
 """Service JWT claims for planet node-mesh (PRD MESH-PERFECT Phase 0/PR1).
 
-Short-lived HS256 tokens issued by Star/control plane. Planets validate before
-body parsing / handler execution (fail closed).
+Short-lived HS256 or EdDSA tokens issued by Star/control plane. Planets validate
+before body parsing / handler execution (fail closed). HS256 remains available
+for compatibility; verifier-only services can receive only an Ed25519 public
+key and never need signing material.
 
 Claims (required):
   iss, sub, aud, scope, workspace_id, exp, iat, jti
@@ -11,6 +13,7 @@ Optional:
 
 Lifetime: HIOB_SERVICE_JWT_SECRET or MODAL_DISPATCH_SECRET or HIOB_WORKER_DISPATCH_SECRET
 """
+
 from __future__ import annotations
 
 import os
@@ -18,6 +21,12 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Optional, Sequence
+
+
+_HS256_ALGORITHM = "HS256"
+_HS256_KID = "hs256-v1"
+_EDDSA_ALGORITHM = "EdDSA"
+_EDDSA_KID = "eddsa-v1"
 
 
 class ServiceJwtError(ValueError):
@@ -78,13 +87,29 @@ def mint_service_token(
     jti: str = "",
     ttl_s: int = 300,
     secret: Optional[str] = None,
+    private_key: Optional[str] = None,
 ) -> str:
-    """Mint HS256 service JWT. ttl_s max 300 (5m) per PRD."""
+    """Mint a service JWT. ``private_key`` selects EdDSA; otherwise HS256."""
     import jwt  # PyJWT
 
-    sec = (secret if secret is not None else signing_secret()).strip()
-    if not sec:
-        raise ServiceJwtError("service JWT secret not configured", code="PLANET_UNAUTHORIZED")
+    if private_key is not None:
+        signing_key = private_key.strip()
+        algorithm = _EDDSA_ALGORITHM
+        kid = _EDDSA_KID
+        if not signing_key:
+            raise ServiceJwtError(
+                "service JWT private key not configured",
+                code="PLANET_UNAUTHORIZED",
+            )
+    else:
+        signing_key = (secret if secret is not None else signing_secret()).strip()
+        algorithm = _HS256_ALGORITHM
+        kid = _HS256_KID
+        if not signing_key:
+            raise ServiceJwtError(
+                "service JWT secret not configured",
+                code="PLANET_UNAUTHORIZED",
+            )
     ttl = max(30, min(int(ttl_s), 300))
     now = int(time.time())
     payload = {
@@ -103,9 +128,20 @@ def mint_service_token(
         "jti": str(jti or uuid.uuid4()),
         "iat": now,
         "exp": now + ttl,
-        "kid": "hs256-v1",
+        "kid": kid,
     }
-    return jwt.encode(payload, sec, algorithm="HS256")
+    try:
+        return jwt.encode(
+            payload,
+            signing_key,
+            algorithm=algorithm,
+            headers={"kid": kid, "typ": "JWT"},
+        )
+    except jwt.PyJWTError as exc:
+        raise ServiceJwtError(
+            f"invalid service JWT {algorithm} signing key",
+            code="PLANET_UNAUTHORIZED",
+        ) from exc
 
 
 def verify_service_token(
@@ -115,34 +151,99 @@ def verify_service_token(
     required_scope: Optional[str] = None,
     workspace_id: Optional[str] = None,
     secret: Optional[str] = None,
+    public_key: Optional[str] = None,
     leeway_s: int = 30,
 ) -> ServiceClaims:
-    """Verify JWT. Raises ServiceJwtError with PLANET_UNAUTHORIZED or PLANET_FORBIDDEN."""
+    """Verify JWT using EdDSA when ``public_key`` is supplied, else HS256."""
     import jwt  # PyJWT
 
-    sec = (secret if secret is not None else signing_secret()).strip()
-    if not sec:
-        raise ServiceJwtError("service JWT secret not configured", code="PLANET_UNAUTHORIZED")
     if not token or token.count(".") != 2:
-        raise ServiceJwtError("missing or malformed service JWT", code="PLANET_UNAUTHORIZED")
+        raise ServiceJwtError(
+            "missing or malformed service JWT", code="PLANET_UNAUTHORIZED"
+        )
+    if public_key is not None:
+        verification_key = public_key.strip()
+        algorithm = _EDDSA_ALGORITHM
+        expected_kid = _EDDSA_KID
+        if not verification_key:
+            raise ServiceJwtError(
+                "service JWT public key not configured",
+                code="PLANET_UNAUTHORIZED",
+            )
+    else:
+        verification_key = (secret if secret is not None else signing_secret()).strip()
+        algorithm = _HS256_ALGORITHM
+        expected_kid = _HS256_KID
+        if not verification_key:
+            raise ServiceJwtError(
+                "service JWT secret not configured",
+                code="PLANET_UNAUTHORIZED",
+            )
+
+    try:
+        header = jwt.get_unverified_header(token)
+    except jwt.PyJWTError as exc:
+        raise ServiceJwtError(
+            "invalid service JWT header",
+            code="PLANET_UNAUTHORIZED",
+        ) from exc
+    if header.get("alg") != algorithm:
+        raise ServiceJwtError(
+            "service JWT algorithm mismatch",
+            code="PLANET_UNAUTHORIZED",
+        )
+    header_kid = str(header.get("kid") or "")
+    if algorithm == _EDDSA_ALGORITHM:
+        if header_kid != expected_kid:
+            raise ServiceJwtError(
+                "service JWT key id mismatch",
+                code="PLANET_UNAUTHORIZED",
+            )
+    elif header_kid and header_kid != expected_kid:
+        raise ServiceJwtError(
+            "service JWT key id mismatch",
+            code="PLANET_UNAUTHORIZED",
+        )
+
     try:
         data = jwt.decode(
             token,
-            sec,
-            algorithms=["HS256"],
+            verification_key,
+            algorithms=[algorithm],
             audience=expected_audience,
             issuer="hiob-control-plane",
             leeway=leeway_s,
             options={"require": ["exp", "iat", "iss", "sub", "aud"]},
         )
     except jwt.ExpiredSignatureError as exc:
-        raise ServiceJwtError("service JWT expired", code="PLANET_UNAUTHORIZED") from exc
+        raise ServiceJwtError(
+            "service JWT expired", code="PLANET_UNAUTHORIZED"
+        ) from exc
     except jwt.InvalidAudienceError as exc:
-        raise ServiceJwtError("service JWT audience mismatch", code="PLANET_FORBIDDEN") from exc
+        raise ServiceJwtError(
+            "service JWT audience mismatch", code="PLANET_FORBIDDEN"
+        ) from exc
     except jwt.InvalidIssuerError as exc:
-        raise ServiceJwtError("service JWT issuer mismatch", code="PLANET_UNAUTHORIZED") from exc
+        raise ServiceJwtError(
+            "service JWT issuer mismatch", code="PLANET_UNAUTHORIZED"
+        ) from exc
     except jwt.PyJWTError as exc:
-        raise ServiceJwtError(f"invalid service JWT: {exc}", code="PLANET_UNAUTHORIZED") from exc
+        raise ServiceJwtError(
+            "invalid service JWT", code="PLANET_UNAUTHORIZED"
+        ) from exc
+
+    payload_kid = str(data.get("kid") or "")
+    if algorithm == _EDDSA_ALGORITHM:
+        if payload_kid != expected_kid:
+            raise ServiceJwtError(
+                "service JWT key id mismatch",
+                code="PLANET_UNAUTHORIZED",
+            )
+    elif payload_kid and payload_kid != expected_kid:
+        raise ServiceJwtError(
+            "service JWT key id mismatch",
+            code="PLANET_UNAUTHORIZED",
+        )
 
     scope_raw = data.get("scope") or []
     if isinstance(scope_raw, str):
@@ -166,7 +267,7 @@ def verify_service_token(
         request_digest=str(data.get("request_digest") or ""),
         execution_digest=str(data.get("execution_digest") or ""),
         dispatch_capability=str(data.get("dispatch_capability") or ""),
-        kid=str(data.get("kid") or "hs256-v1"),
+        kid=payload_kid or expected_kid,
     )
 
     if required_scope and not claims.has_scope(required_scope):
@@ -174,7 +275,11 @@ def verify_service_token(
             f"missing scope {required_scope}",
             code="PLANET_FORBIDDEN",
         )
-    if workspace_id is not None and claims.workspace_id and claims.workspace_id != str(workspace_id):
+    if (
+        workspace_id is not None
+        and claims.workspace_id
+        and claims.workspace_id != str(workspace_id)
+    ):
         raise ServiceJwtError(
             "workspace_id claim mismatch",
             code="PLANET_FORBIDDEN",
