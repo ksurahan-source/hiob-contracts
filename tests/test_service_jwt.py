@@ -46,6 +46,7 @@ def test_v3_request_binding_claims_roundtrip():
         idempotency_key="ares-v3:op-v3",
         request_digest="sha256:" + "1" * 64,
         execution_digest="sha256:" + "2" * 64,
+        jti="dispatch-once-v3",
         secret=SECRET,
     )
 
@@ -61,6 +62,7 @@ def test_v3_request_binding_claims_roundtrip():
     assert claims.idempotency_key == "ares-v3:op-v3"
     assert claims.request_digest == "sha256:" + "1" * 64
     assert claims.execution_digest == "sha256:" + "2" * 64
+    assert claims.jti == "dispatch-once-v3"
     assert claims_to_dict(claims) == {
         "iss": claims.iss,
         "sub": claims.sub,

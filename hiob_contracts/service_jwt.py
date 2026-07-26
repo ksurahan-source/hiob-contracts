@@ -73,6 +73,7 @@ def mint_service_token(
     idempotency_key: str = "",
     request_digest: str = "",
     execution_digest: str = "",
+    jti: str = "",
     ttl_s: int = 300,
     secret: Optional[str] = None,
 ) -> str:
@@ -96,7 +97,7 @@ def mint_service_token(
         "idempotency_key": str(idempotency_key or ""),
         "request_digest": str(request_digest or ""),
         "execution_digest": str(execution_digest or ""),
-        "jti": str(uuid.uuid4()),
+        "jti": str(jti or uuid.uuid4()),
         "iat": now,
         "exp": now + ttl,
         "kid": "hs256-v1",
