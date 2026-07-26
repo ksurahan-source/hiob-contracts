@@ -7,7 +7,7 @@ Claims (required):
   iss, sub, aud, scope, workspace_id, exp, iat, jti
 Optional:
   run_id, kid, node_id, operation_id, idempotency_key, request_digest,
-  execution_digest
+  execution_digest, dispatch_capability
 
 Lifetime: HIOB_SERVICE_JWT_SECRET or MODAL_DISPATCH_SECRET or HIOB_WORKER_DISPATCH_SECRET
 """
@@ -52,6 +52,7 @@ class ServiceClaims:
     idempotency_key: str = ""
     request_digest: str = ""
     execution_digest: str = ""
+    dispatch_capability: str = ""
     kid: str = "hs256-v1"
 
     def has_scope(self, required: str) -> bool:
@@ -73,6 +74,7 @@ def mint_service_token(
     idempotency_key: str = "",
     request_digest: str = "",
     execution_digest: str = "",
+    dispatch_capability: str = "",
     jti: str = "",
     ttl_s: int = 300,
     secret: Optional[str] = None,
@@ -97,6 +99,7 @@ def mint_service_token(
         "idempotency_key": str(idempotency_key or ""),
         "request_digest": str(request_digest or ""),
         "execution_digest": str(execution_digest or ""),
+        "dispatch_capability": str(dispatch_capability or ""),
         "jti": str(jti or uuid.uuid4()),
         "iat": now,
         "exp": now + ttl,
@@ -162,6 +165,7 @@ def verify_service_token(
         idempotency_key=str(data.get("idempotency_key") or ""),
         request_digest=str(data.get("request_digest") or ""),
         execution_digest=str(data.get("execution_digest") or ""),
+        dispatch_capability=str(data.get("dispatch_capability") or ""),
         kid=str(data.get("kid") or "hs256-v1"),
     )
 
@@ -194,5 +198,6 @@ def claims_to_dict(c: ServiceClaims) -> dict[str, Any]:
         "idempotency_key": c.idempotency_key,
         "request_digest": c.request_digest,
         "execution_digest": c.execution_digest,
+        "dispatch_capability": c.dispatch_capability,
         "kid": c.kid,
     }

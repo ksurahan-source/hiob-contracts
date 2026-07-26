@@ -46,6 +46,7 @@ def test_v3_request_binding_claims_roundtrip():
         idempotency_key="ares-v3:op-v3",
         request_digest="sha256:" + "1" * 64,
         execution_digest="sha256:" + "2" * 64,
+        dispatch_capability="one-time-capability",
         jti="dispatch-once-v3",
         secret=SECRET,
     )
@@ -63,6 +64,7 @@ def test_v3_request_binding_claims_roundtrip():
     assert claims.request_digest == "sha256:" + "1" * 64
     assert claims.execution_digest == "sha256:" + "2" * 64
     assert claims.jti == "dispatch-once-v3"
+    assert claims.dispatch_capability == "one-time-capability"
     assert claims_to_dict(claims) == {
         "iss": claims.iss,
         "sub": claims.sub,
@@ -78,6 +80,7 @@ def test_v3_request_binding_claims_roundtrip():
         "idempotency_key": "ares-v3:op-v3",
         "request_digest": "sha256:" + "1" * 64,
         "execution_digest": "sha256:" + "2" * 64,
+        "dispatch_capability": "one-time-capability",
         "kid": "hs256-v1",
     }
 
@@ -98,6 +101,7 @@ def test_legacy_token_without_v3_binding_claims_defaults_to_empty_strings():
         "idempotency_key",
         "request_digest",
         "execution_digest",
+        "dispatch_capability",
     ):
         payload.pop(field, None)
     legacy_token = jwt.encode(payload, SECRET, algorithm="HS256")
@@ -112,11 +116,13 @@ def test_legacy_token_without_v3_binding_claims_defaults_to_empty_strings():
     assert claims.idempotency_key == ""
     assert claims.request_digest == ""
     assert claims.execution_digest == ""
+    assert claims.dispatch_capability == ""
     serialized = claims_to_dict(claims)
     assert serialized["operation_id"] == ""
     assert serialized["idempotency_key"] == ""
     assert serialized["request_digest"] == ""
     assert serialized["execution_digest"] == ""
+    assert serialized["dispatch_capability"] == ""
 
 
 def test_wrong_audience_forbidden():
