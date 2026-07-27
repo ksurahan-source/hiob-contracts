@@ -83,6 +83,11 @@ export {
   deriveVoiceSpecDigestV1,
 } from './voice-spec-v1';
 export type { VoiceSpecV1 } from './voice-spec-v1';
+export {
+  ParzifalVoiceEnvelopeV1Schema,
+  deriveParzifalVoiceEnvelopeDigestV1,
+} from './parzifal-voice-envelope-v1';
+export type { ParzifalVoiceEnvelopeV1 } from './parzifal-voice-envelope-v1';
 export type {
   AresRequestScopeV3,
   AresAuthorityArtifactRefV3,

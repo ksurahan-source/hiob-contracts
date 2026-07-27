@@ -46,6 +46,10 @@ from .character_identity_v1 import (
     derive_character_identity_binding_digest_v1,
 )
 from .voice_spec_v1 import VoiceSpecV1, derive_voice_spec_digest_v1
+from .parzifal_voice_envelope_v1 import (
+    ParzifalVoiceEnvelopeV1,
+    derive_parzifal_voice_envelope_digest_v1,
+)
 from .planet_envelopes import VisualContext, VisualRequest, AudioRequest, SFXRequest, RenderJobRequest, RenderJobResponse, ProcessInsightsRequest
 from .planet_io import PlanetIO, PLANET_IO, Conformance, io_for, needs_new_contract, dsl_ready
 from .envelope_validation import (
@@ -292,6 +296,8 @@ __all__ = [
     "character_identity_binding_payload_v1",
     "derive_character_identity_binding_digest_v1",
     "VoiceSpecV1", "derive_voice_spec_digest_v1",
+    "ParzifalVoiceEnvelopeV1",
+    "derive_parzifal_voice_envelope_digest_v1",
     "LOCK_STATUSES", "ELEMENT_KINDS", "standing_lookup",
     "PlanetIO", "PLANET_IO", "Conformance", "io_for", "needs_new_contract", "dsl_ready",
     "Intake13Q", "JanusBrief",
