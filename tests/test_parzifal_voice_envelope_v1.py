@@ -42,6 +42,9 @@ def test_voice_envelope_is_frozen_and_digest_sealed() -> None:
     assert envelope.envelope_digest == derive_parzifal_voice_envelope_digest_v1(
         payload
     )
+    assert envelope.envelope_digest == (
+        "sha256:f5b3231832c1c93715e1786eb679158494a3ad242f7c2b72069150296c2e49f7"
+    )
     with pytest.raises(ValidationError):
         envelope.voice_id = "tc_other"
 
