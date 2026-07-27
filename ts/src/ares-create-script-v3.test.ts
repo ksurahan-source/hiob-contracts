@@ -9,6 +9,7 @@ import {
   AresP2ATargetProjectionV3Schema,
   AresRequestScopeV3Schema,
   AresSemanticBeatV3Schema,
+  AresSpeakerSlotV3InputSchema,
   ScriptPackageV3Schema,
   aresCreateScriptRequestV3SchemaDigest,
   aresCreateScriptResultV3SchemaDigest,
@@ -76,6 +77,7 @@ function sampleRequest() {
       display_name: '정원이',
       voice_id: null,
       face_id: null,
+      identity_binding_digest: null,
     }],
     locale: 'ko',
     audience_lock: null,
@@ -210,19 +212,26 @@ function sampleRequest() {
 }
 
 test('V3 speaker requires the atomic face and voice binding', () => {
-  const request = sampleRequest();
-  const speaker = request.identity.speakers[0] as Record<string, unknown>;
-  speaker.face_id = 'face-mom-1';
-  speaker.voice_id = 'voice-mom-1';
-  speaker.identity_binding_digest = deriveCharacterIdentityBindingDigestV1({
+  const speaker = {
+    role: 'lead',
     subject_id: 'mom',
+    display_name: '정원이',
     face_id: 'face-mom-1',
     voice_id: 'voice-mom-1',
-  });
-  assert.equal(AresCreateScriptRequestV3Schema.safeParse(request).success, true);
-
-  speaker.identity_binding_digest = digest({ wrong: true });
-  assert.equal(AresCreateScriptRequestV3Schema.safeParse(request).success, false);
+    identity_binding_digest: deriveCharacterIdentityBindingDigestV1({
+      subject_id: 'mom',
+      face_id: 'face-mom-1',
+      voice_id: 'voice-mom-1',
+    }),
+  };
+  assert.equal(AresSpeakerSlotV3InputSchema.safeParse(speaker).success, true);
+  assert.equal(
+    AresSpeakerSlotV3InputSchema.safeParse({
+      ...speaker,
+      identity_binding_digest: digest({ wrong: true }),
+    }).success,
+    false,
+  );
 });
 
 test('projection schema rejects cross-scope and wrong-owner refs directly', () => {

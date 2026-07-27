@@ -8,6 +8,7 @@
 import { z } from 'zod';
 
 import { sha256Digest } from './factory/digest.js';
+import { characterIdentityBindingErrorV1 } from './character-identity-v1.js';
 
 const NonEmptyString = z.string().trim().min(1);
 const DigestSchema = z
@@ -106,8 +107,19 @@ export const AresSpeakerSlotV2Schema = z
     display_name: NonEmptyString,
     voice_id: NonEmptyString.nullable().optional(),
     face_id: NonEmptyString.nullable().optional(),
+    identity_binding_digest: DigestSchema.nullable().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const error = characterIdentityBindingErrorV1(value);
+    if (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+        path: ['identity_binding_digest'],
+      });
+    }
+  });
 
 export const AresIdentitySealedV2Schema = z
   .object({

@@ -6,6 +6,7 @@
  * camera, and render fields are structurally absent and rejected.
  */
 import { z } from 'zod';
+import { characterIdentityBindingErrorV1 } from './character-identity-v1.js';
 
 import { sha256Digest } from './factory/digest.js';
 import { KarmaEdgeReceiptSchema } from './factory/karma-edge.js';
@@ -206,15 +207,26 @@ const ClaimProvenanceV3Schema = z
   })
   .strict();
 
-const AresSpeakerSlotV3InputSchema = z
+export const AresSpeakerSlotV3InputSchema = z
   .object({
     role: NonBlankString,
     subject_id: NonBlankString,
     display_name: NonBlankString,
     voice_id: NonBlankString.nullable().default(null),
     face_id: NonBlankString.nullable().default(null),
+    identity_binding_digest: DigestSchema.nullable().default(null),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const error = characterIdentityBindingErrorV1(value);
+    if (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+        path: ['identity_binding_digest'],
+      });
+    }
+  });
 
 const AresIdentitySealedV3InputSchema = z
   .object({
