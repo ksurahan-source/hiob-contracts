@@ -44,6 +44,7 @@ from .ares_script_revision_v1 import (
     canonical_contract_digest_v1,
 )
 from .factory import KarmaEdgeReceipt, sha256_digest
+from .character_identity_v1 import character_identity_binding_errors_v1
 from .provenance import ClaimProvenance
 
 
@@ -91,6 +92,19 @@ class AresSpeakerSlotV2(BaseModel):
     display_name: NonBlankStr
     voice_id: NonBlankStr | None = None
     face_id: NonBlankStr | None = None
+    identity_binding_digest: DigestStr | None = None
+
+    @model_validator(mode="after")
+    def _atomic_face_and_voice(self) -> "AresSpeakerSlotV2":
+        errors = character_identity_binding_errors_v1(
+            subject_id=self.subject_id,
+            face_id=self.face_id,
+            voice_id=self.voice_id,
+            identity_binding_digest=self.identity_binding_digest,
+        )
+        if errors:
+            raise ValueError(errors[0])
+        return self
 
 
 class AresIdentitySealedV2(BaseModel):

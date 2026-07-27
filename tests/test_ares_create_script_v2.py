@@ -15,6 +15,7 @@ from hiob_contracts import (
     ares_create_script_request_schema_digest,
     ares_create_script_result_schema_digest,
     canonical_contract_digest_v1,
+    derive_character_identity_binding_digest_v1,
     request_content_digest,
     sha256_digest,
 )
@@ -72,6 +73,8 @@ def _receipt(*, decision: str = "accepted", edge_id: str = "p2a") -> dict:
 
 
 def _identity() -> dict:
+    face_id = "face_mom_1"
+    voice_id = "tc_voice_1"
     return {
         "identity_lock_digest": IDENTITY_DIGEST,
         "cast_sheet_digest": sha256_digest({"cast": "sheet-1"}),
@@ -80,7 +83,13 @@ def _identity() -> dict:
                 "role": "lead",
                 "subject_id": "mom",
                 "display_name": "정원이",
-                "voice_id": "tc_voice_1",
+                "voice_id": voice_id,
+                "face_id": face_id,
+                "identity_binding_digest": derive_character_identity_binding_digest_v1(
+                    subject_id="mom",
+                    face_id=face_id,
+                    voice_id=voice_id,
+                ),
             }
         ],
         "locale": "ko",

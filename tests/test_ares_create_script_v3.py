@@ -55,6 +55,7 @@ def identity_payload() -> dict:
                 "display_name": "정원이",
                 "voice_id": None,
                 "face_id": None,
+                "identity_binding_digest": None,
             }
         ],
         "locale": "ko",
