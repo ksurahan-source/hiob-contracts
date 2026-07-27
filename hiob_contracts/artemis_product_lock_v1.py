@@ -346,6 +346,7 @@ class _ApprovalReceiptContent(_StrictModel):
     compile_request_digest: DigestStr
     draft_digest: DigestStr
     approver_account_id: OpaqueId
+    environment: OpaqueId
     decision: Literal["approved"] = "approved"
     state_revision: int = Field(ge=1, le=9_007_199_254_740_991)
 
@@ -367,6 +368,7 @@ class ArtemisApprovalReceiptV1(_ApprovalReceiptContent):
         receipt_id: str,
         draft: ProductElementLockDraftV1,
         approver_account_id: str,
+        environment: str,
         state_revision: int,
     ) -> "ArtemisApprovalReceiptV1":
         content = _ApprovalReceiptContent(
@@ -378,6 +380,7 @@ class ArtemisApprovalReceiptV1(_ApprovalReceiptContent):
             compile_request_digest=draft.compile_request_digest,
             draft_digest=draft.draft_digest,
             approver_account_id=approver_account_id,
+            environment=environment,
             state_revision=state_revision,
         )
         payload = content.model_dump(mode="json")

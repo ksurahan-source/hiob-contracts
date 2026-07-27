@@ -105,6 +105,7 @@ def _receipt(draft=None):
         receipt_id="receipt-1",
         draft=draft,
         approver_account_id="user-1",
+        environment="test",
         state_revision=1,
     )
 
@@ -295,6 +296,7 @@ def test_approval_receipt_requires_current_durable_authority() -> None:
             receipt_id="receipt-unsafe-int",
             draft=draft,
             approver_account_id="user-1",
+            environment="test",
             state_revision=9_007_199_254_740_992,
         )
 
