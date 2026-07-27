@@ -315,11 +315,13 @@ test('seal result has exact sealed or blocked JSON with no inactive null key', (
   const sealed = {
     contract_version: 'ArtemisSealResult.v1',
     status: 'sealed',
+    request_digest: sealRequest().request_digest,
     lock: lock(),
   };
   const blocked = {
     contract_version: 'ArtemisSealResult.v1',
     status: 'blocked',
+    request_digest: sealRequest().request_digest,
     error_code: 'APPROVAL_INVALID',
   };
   assert.equal(ArtemisSealResultV1Schema.safeParse(sealed).success, true);
