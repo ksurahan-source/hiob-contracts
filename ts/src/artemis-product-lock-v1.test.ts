@@ -215,6 +215,17 @@ test('all technical IDs use one URL-free allow-listed opaque grammar', () => {
   const receipt = approvalReceipt();
   receipt.approver_account_id = 'https://host/account';
   assert.equal(ArtemisApprovalReceiptV1Schema.safeParse(receipt).success, false);
+
+  const unsafeRevision = approvalReceipt();
+  unsafeRevision.state_revision = Number.MAX_SAFE_INTEGER + 1;
+  unsafeRevision.receipt_digest = sha256Digest({
+    ...unsafeRevision,
+    receipt_digest: undefined,
+  });
+  assert.equal(
+    ArtemisApprovalReceiptV1Schema.safeParse(unsafeRevision).success,
+    false,
+  );
 });
 
 test('observations match the Python golden digest and reject content drift', () => {
