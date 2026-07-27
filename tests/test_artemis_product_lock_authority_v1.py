@@ -85,9 +85,16 @@ def _draft(**overrides):
 class _Resolver:
     def __init__(self, current: bool) -> None:
         self.current = current
+        self.calls = 0
 
     def is_current_approval(self, **_values) -> bool:
+        self.calls += 1
         return self.current
+
+
+class _TruthyFalseResolver:
+    def is_current_approval(self, **_values):
+        return "false"
 
 
 def _receipt(draft=None):
@@ -191,6 +198,7 @@ def test_approval_receipt_requires_current_durable_authority() -> None:
     assert receipt.structurally_binds(draft)
     assert receipt.authorizes(draft, resolver=_Resolver(True))
     assert not receipt.authorizes(draft, resolver=_Resolver(False))
+    assert not receipt.authorizes(draft, resolver=_TruthyFalseResolver())
 
     forged = receipt.model_copy(update={"approver_account_id": "forged-user"})
     assert not forged.authorizes(draft, resolver=_Resolver(True))
@@ -246,20 +254,23 @@ def test_sealed_result_requires_authority_and_exact_request() -> None:
     )
 
     with pytest.raises(TypeError):
-        ArtemisSealResultV1.sealed(request_a, lock_a)
+        ArtemisSealResultV1.sealed(request_a)
 
-    with pytest.raises(ValueError, match="request"):
-        ArtemisSealResultV1.sealed(
-            request_b,
-            lock_a,
-            resolver=_Resolver(True),
+    with pytest.raises(ValidationError, match="request"):
+        ArtemisSealResultV1(
+            contract_version="ArtemisSealResult.v1",
+            status="sealed",
+            request_digest=request_b.request_digest,
+            lock=lock_a,
+            error_code=None,
         )
 
+    resolver = _Resolver(True)
     sealed = ArtemisSealResultV1.sealed(
         request_a,
-        lock_a,
-        resolver=_Resolver(True),
+        resolver=resolver,
     )
+    assert resolver.calls == 1
     assert sealed.authorizes(request_a, resolver=_Resolver(True))
     assert not sealed.authorizes(request_a, resolver=_Resolver(False))
 
