@@ -24,14 +24,14 @@ def _observations() -> JanusProductObservationsV1:
         product_id="product-1",
         product_name="Nano Mask",
         product_image_artifact_id="asset-product-1",
-        product_image_sha256=sha256_digest(b"product-image"),
+        product_image_sha256=sha256_digest("product-image"),
         observations=[
             {
                 "observation_id": "obs-1",
                 "kind": "product_fact",
                 "text": "한 장씩 개별 포장",
                 "evidence_artifact_id": "asset-detail-1",
-                "evidence_sha256": sha256_digest(b"detail-crop"),
+                "evidence_sha256": sha256_digest("detail-crop"),
                 "provenance": {
                     "source_record_id": "detail-page-1",
                     "quote": "한 장씩 개별 포장",
@@ -59,7 +59,7 @@ def _draft() -> ProductElementLockDraftV1:
                 "kind": "product_fact",
                 "source_observation_ids": ["obs-1"],
                 "evidence_artifact_id": "asset-detail-1",
-                "evidence_sha256": sha256_digest(b"detail-crop"),
+                "evidence_sha256": sha256_digest("detail-crop"),
                 "provenance": {
                     "source_record_id": "detail-page-1",
                     "quote": "한 장씩 개별 포장",
