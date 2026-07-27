@@ -269,6 +269,14 @@ def test_approval_receipt_requires_current_durable_authority() -> None:
     forged = receipt.model_copy(update={"approver_account_id": "forged-user"})
     assert not forged.authorizes(draft, resolver=_Resolver(True))
 
+    with pytest.raises(ValidationError, match="state_revision"):
+        ArtemisApprovalReceiptV1.build(
+            receipt_id="receipt-unsafe-int",
+            draft=draft,
+            approver_account_id="user-1",
+            state_revision=9_007_199_254_740_992,
+        )
+
 
 def test_seal_request_carries_receipt_not_self_attested_approver() -> None:
     draft = _draft()
