@@ -174,6 +174,25 @@ def test_compile_result_binds_request_and_draft() -> None:
         ArtemisCompileResultV1.compiled(wrong_request, draft)
 
 
+def test_compile_result_rejects_product_image_storage_key_drift() -> None:
+    request = _compile_request()
+    draft = _draft()
+    drifted = ProductElementLockDraftV1.build(
+        **{
+            **draft.model_dump(
+                mode="python",
+                exclude={"contract_version", "draft_digest"},
+            ),
+            "product_image_storage_key": (
+                "sealed/viewok/nano-mask/hero-v2.png"
+            ),
+        }
+    )
+
+    with pytest.raises(ValueError, match="grounded"):
+        ArtemisCompileResultV1.compiled(request, drifted)
+
+
 def test_compile_result_cross_checks_actual_observation_atoms() -> None:
     request = _compile_request()
     draft = _draft()

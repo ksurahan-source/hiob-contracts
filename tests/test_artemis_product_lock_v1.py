@@ -141,6 +141,22 @@ def test_observations_are_url_free_frozen_and_digest_bound() -> None:
             }
         )
 
+    normalized = JanusProductObservationsV1.build(
+        **{
+            **_observations().model_dump(
+                mode="python",
+                exclude={"contract_version", "observations_digest"},
+            ),
+            "product_image_storage_key": (
+                " sealed/viewok/nano-mask/hero-v1.png "
+            ),
+        }
+    )
+    assert (
+        normalized.product_image_storage_key
+        == "sealed/viewok/nano-mask/hero-v1.png"
+    )
+
     with pytest.raises(ValidationError):
         observations.product_name = "mutated"  # type: ignore[misc]
 

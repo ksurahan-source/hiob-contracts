@@ -250,6 +250,16 @@ test('observations match the Python golden digest and reject content drift', () 
     observations().product_image_storage_key,
     'sealed/viewok/nano-mask/hero-v1.png',
   );
+  const normalizedPayload = observationsPayload();
+  const normalized = JanusProductObservationsV1Schema.parse({
+    ...normalizedPayload,
+    product_image_storage_key: ' sealed/viewok/nano-mask/hero-v1.png ',
+    observations_digest: sha256Digest(normalizedPayload),
+  });
+  assert.equal(
+    normalized.product_image_storage_key,
+    'sealed/viewok/nano-mask/hero-v1.png',
+  );
 
   const drifted = structuredClone(observations());
   drifted.product_name = 'drifted';

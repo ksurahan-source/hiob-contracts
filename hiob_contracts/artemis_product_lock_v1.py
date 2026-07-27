@@ -101,6 +101,7 @@ class _ProductScope(_StrictModel):
     product_id: OpaqueId
     product_name: Text
     product_image_artifact_id: OpaqueId
+    product_image_storage_key: OpaqueId
     product_image_sha256: DigestStr
 
 
@@ -620,6 +621,7 @@ def _draft_is_grounded_in(
             draft.product_id,
             draft.product_name,
             draft.product_image_artifact_id,
+            draft.product_image_storage_key,
             draft.product_image_sha256,
         )
         != (
@@ -630,6 +632,7 @@ def _draft_is_grounded_in(
             source.product_id,
             source.product_name,
             source.product_image_artifact_id,
+            source.product_image_storage_key,
             source.product_image_sha256,
         )
     ):

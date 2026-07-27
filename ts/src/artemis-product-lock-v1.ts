@@ -54,6 +54,7 @@ const ProductScopeShape = {
   product_id: OpaqueIdSchema,
   product_name: TextSchema,
   product_image_artifact_id: OpaqueIdSchema,
+  product_image_storage_key: OpaqueIdSchema,
   product_image_sha256: DigestSchema,
 };
 
@@ -383,6 +384,7 @@ function reconstructedDraftFromLock(
     product_id: value.product_id,
     product_name: value.product_name,
     product_image_artifact_id: value.product_image_artifact_id,
+    product_image_storage_key: value.product_image_storage_key,
     product_image_sha256: value.product_image_sha256,
     claims: value.claims,
     forbidden_claims: value.forbidden_claims,
@@ -481,6 +483,7 @@ export function buildArtemisCompiledResultV1(
     && draft.product_id === source.product_id
     && draft.product_name === source.product_name
     && draft.product_image_artifact_id === source.product_image_artifact_id
+    && draft.product_image_storage_key === source.product_image_storage_key
     && draft.product_image_sha256 === source.product_image_sha256;
   const observations = new Map(
     source.observations.map(observation => [
