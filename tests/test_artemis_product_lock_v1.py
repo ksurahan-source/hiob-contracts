@@ -4,6 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from hiob_contracts.artemis_product_lock_v1 import (
+    ArtemisApprovalReceiptV1,
     ArtemisCompileRequestV1,
     ArtemisCompileResultV1,
     ArtemisSealRequestV1,
@@ -42,7 +43,8 @@ def _observations() -> JanusProductObservationsV1:
 
 
 def _draft() -> ProductElementLockDraftV1:
-    observations = _observations()
+    compile_request = ArtemisCompileRequestV1.build(observations=_observations())
+    observations = compile_request.observations
     return ProductElementLockDraftV1.build(
         workspace_id=observations.workspace_id,
         run_id=observations.run_id,
@@ -68,17 +70,26 @@ def _draft() -> ProductElementLockDraftV1:
         ],
         forbidden_claims=["의학적 치료 효과"],
         source_observations_digest=observations.observations_digest,
+        compile_request_digest=compile_request.request_digest,
     )
 
 
 def _seal_request() -> ArtemisSealRequestV1:
+    draft = _draft()
     return ArtemisSealRequestV1.build(
-        workspace_id="ws-1",
-        run_id="run-1",
-        listing_slug="nano-mask",
-        draft=_draft(),
-        approved_by="user-1",
+        draft=draft,
+        approval_receipt=ArtemisApprovalReceiptV1.build(
+            receipt_id="receipt-1",
+            draft=draft,
+            approver_account_id="user-1",
+            state_revision=1,
+        ),
     )
+
+
+class _Resolver:
+    def is_current_approval(self, **_values) -> bool:
+        return True
 
 
 def test_janus_owns_observations_not_product_claims() -> None:
@@ -106,7 +117,7 @@ def test_observations_are_url_free_frozen_and_digest_bound() -> None:
     with pytest.raises(ValidationError, match="observations_digest"):
         JanusProductObservationsV1.model_validate(payload)
 
-    with pytest.raises(ValidationError, match="URL"):
+    with pytest.raises(ValidationError, match="opaque"):
         JanusProductObservationsV1.build(
             **{
                 **_observations().model_dump(mode="python"),
@@ -155,8 +166,12 @@ def test_draft_requires_grounded_artemis_claim() -> None:
 
 
 def test_compile_result_has_exactly_one_terminal_shape() -> None:
-    compiled = ArtemisCompileResultV1.compiled(_draft())
-    blocked = ArtemisCompileResultV1.blocked("PRODUCT_LOCK_INCOMPLETE")
+    request = ArtemisCompileRequestV1.build(observations=_observations())
+    compiled = ArtemisCompileResultV1.compiled(request, _draft())
+    blocked = ArtemisCompileResultV1.blocked(
+        request.request_digest,
+        "PRODUCT_LOCK_INCOMPLETE",
+    )
 
     assert compiled.status == "compiled"
     assert compiled.draft is not None
@@ -169,6 +184,7 @@ def test_compile_result_has_exactly_one_terminal_shape() -> None:
         ArtemisCompileResultV1(
             contract_version="ArtemisCompileResult.v1",
             status="blocked",
+            request_digest=request.request_digest,
             draft=_draft(),
             error_code="PRODUCT_LOCK_INCOMPLETE",
         )
@@ -178,43 +194,66 @@ def test_seal_request_binds_scope_draft_and_approver() -> None:
     request = _seal_request()
     payload = request.model_dump(mode="json")
 
-    assert request.approval_digest.startswith("sha256:")
+    assert request.approval_receipt.receipt_digest.startswith("sha256:")
     assert ArtemisSealRequestV1.model_validate(payload) == request
+    assert request.authorizes(resolver=_Resolver())
 
-    payload["approved_by"] = "other-user"
-    with pytest.raises(ValidationError, match="approval_digest"):
+    payload["approval_receipt"]["approver_account_id"] = "other-user"
+    with pytest.raises(ValidationError, match="receipt_digest"):
         ArtemisSealRequestV1.model_validate(payload)
 
-    with pytest.raises(ValidationError, match="scope"):
-        ArtemisSealRequestV1.build(
-            workspace_id="other-workspace",
-            run_id="run-1",
-            listing_slug="nano-mask",
-            draft=_draft(),
-            approved_by="user-1",
+    draft = _draft()
+    other_draft = ProductElementLockDraftV1.build(
+        **{
+            **draft.model_dump(
+                mode="python",
+                exclude={"contract_version", "draft_digest"},
+            ),
+            "workspace_id": "other-workspace",
+        }
+    )
+    with pytest.raises(ValidationError, match="does not bind draft"):
+        ArtemisSealRequestV1(
+            contract_version="ArtemisSealRequest.v1",
+            draft=other_draft,
+            approval_receipt=request.approval_receipt,
+            request_digest=request.request_digest,
         )
 
 
 def test_sealed_lock_is_exact_approved_draft() -> None:
     request = _seal_request()
-    lock = ProductElementLockV1.from_approved(request)
+    lock = ProductElementLockV1.from_verified(
+        request,
+        resolver=_Resolver(),
+    )
     payload = lock.model_dump(mode="json")
 
     assert lock.contract_version == "ProductElementLock.v1"
     assert lock.draft_digest == request.draft.draft_digest
-    assert lock.approval_digest == request.approval_digest
+    assert (
+        lock.approval_receipt.receipt_digest
+        == request.approval_receipt.receipt_digest
+    )
     assert "url" not in str(payload).lower()
     assert ProductElementLockV1.model_validate(payload) == lock
 
     payload["product_name"] = "drifted"
-    with pytest.raises(ValidationError, match="lock_digest"):
+    with pytest.raises(ValidationError, match="draft_digest|lock_digest"):
         ProductElementLockV1.model_validate(payload)
 
 
 def test_seal_result_has_exactly_one_terminal_shape() -> None:
-    lock = ProductElementLockV1.from_approved(_seal_request())
-    sealed = ArtemisSealResultV1.sealed(lock)
-    blocked = ArtemisSealResultV1.blocked("APPROVAL_INVALID")
+    request = _seal_request()
+    lock = ProductElementLockV1.from_verified(
+        request,
+        resolver=_Resolver(),
+    )
+    sealed = ArtemisSealResultV1.sealed(request, lock)
+    blocked = ArtemisSealResultV1.blocked(
+        request.request_digest,
+        "APPROVAL_INVALID",
+    )
 
     assert sealed.status == "sealed"
     assert sealed.lock is not None
@@ -227,6 +266,7 @@ def test_seal_result_has_exactly_one_terminal_shape() -> None:
         ArtemisSealResultV1(
             contract_version="ArtemisSealResult.v1",
             status="sealed",
+            request_digest=request.request_digest,
             lock=None,
             error_code=None,
         )

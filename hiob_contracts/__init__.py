@@ -184,6 +184,8 @@ from .overnight_first_customer_v2 import (
     validate_verified_render_receipt_v2,
 )
 from .artemis_product_lock_v1 import (
+    ArtemisApprovalReceiptV1,
+    ArtemisApprovalResolverV1,
     ArtemisClaimV1,
     ArtemisCompileRequestV1,
     ArtemisCompileResultV1,
@@ -213,6 +215,7 @@ __all__ = [
     "ExecutionContractError", "ProviderError", "IdempotencyError",
     "DeadlineExceededError", "UnknownOperationError",
     "OperationStatusType",
+    "ArtemisApprovalReceiptV1", "ArtemisApprovalResolverV1",
     "ArtemisClaimV1", "ArtemisCompileRequestV1", "ArtemisCompileResultV1",
     "ArtemisSealRequestV1", "ArtemisSealResultV1",
     "JanusProductObservationV1", "JanusProductObservationsV1",
