@@ -68,7 +68,7 @@ def _draft() -> ProductElementLockDraftV1:
                 },
             }
         ],
-        forbidden_claims=["의학적 치료 효과"],
+        forbidden_claims=[],
         source_observations_digest=observations.observations_digest,
         compile_request_digest=compile_request.request_digest,
     )
@@ -245,13 +245,8 @@ def test_sealed_lock_is_exact_approved_draft() -> None:
 
 def test_seal_result_has_exactly_one_terminal_shape() -> None:
     request = _seal_request()
-    lock = ProductElementLockV1.from_verified(
-        request,
-        resolver=_Resolver(),
-    )
     sealed = ArtemisSealResultV1.sealed(
         request,
-        lock,
         resolver=_Resolver(),
     )
     blocked = ArtemisSealResultV1.blocked(

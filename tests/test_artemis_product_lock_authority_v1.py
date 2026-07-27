@@ -74,7 +74,7 @@ def _draft(**overrides):
                 "provenance": source.provenance.model_dump(mode="json"),
             }
         ],
-        "forbidden_claims": ["의학적 치료 효과"],
+        "forbidden_claims": [],
         "source_observations_digest": request.observations.observations_digest,
         "compile_request_digest": request.request_digest,
     }

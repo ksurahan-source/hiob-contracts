@@ -183,7 +183,10 @@ class ArtemisClaimV1(_EvidenceItem):
     claim_id: OpaqueId
     text: Text
     kind: ClaimKind
-    source_observation_ids: tuple[OpaqueId, ...] = Field(min_length=1)
+    source_observation_ids: tuple[OpaqueId, ...] = Field(
+        min_length=1,
+        max_length=1,
+    )
 
     @field_validator("source_observation_ids", mode="before")
     @classmethod
@@ -412,7 +415,7 @@ class ArtemisApprovalReceiptV1(_ApprovalReceiptContent):
             draft_digest=self.draft_digest,
             approver_account_id=self.approver_account_id,
             state_revision=self.state_revision,
-        )
+        ) is True
 
 
 class _SealRequestContent(_StrictModel):
@@ -532,18 +535,13 @@ class ArtemisSealResultV1(_StrictModel):
     def sealed(
         cls,
         request: ArtemisSealRequestV1,
-        lock: ProductElementLockV1,
         *,
         resolver: ArtemisApprovalResolverV1,
     ) -> "ArtemisSealResultV1":
-        reconstructed = ArtemisSealRequestV1.build(
-            draft=lock._reconstructed_draft(),
-            approval_receipt=lock.approval_receipt,
+        lock = ProductElementLockV1.from_verified(
+            request,
+            resolver=resolver,
         )
-        if reconstructed != request:
-            raise ValueError("lock does not belong to seal request")
-        if not request.authorizes(resolver=resolver):
-            raise ValueError("seal request approval is not current")
         return cls(
             status="sealed",
             request_digest=request.request_digest,
@@ -568,13 +566,17 @@ class ArtemisSealResultV1(_StrictModel):
         *,
         resolver: ArtemisApprovalResolverV1,
     ) -> bool:
-        return (
-            self.status == "sealed"
-            and self.lock is not None
-            and self.request_digest == request.request_digest
-            and self.lock.authorizes(resolver=resolver)
-            and request.authorizes(resolver=resolver)
+        if (
+            self.status != "sealed"
+            or self.lock is None
+            or self.request_digest != request.request_digest
+        ):
+            return False
+        reconstructed = ArtemisSealRequestV1.build(
+            draft=self.lock._reconstructed_draft(),
+            approval_receipt=self.lock.approval_receipt,
         )
+        return reconstructed == request and request.authorizes(resolver=resolver)
 
 
 def _without(values: dict[str, Any], *keys: str) -> dict[str, Any]:
@@ -635,23 +637,33 @@ def _draft_is_grounded_in(
     observations = {
         item.observation_id: item for item in source.observations
     }
+    used_observation_ids: set[str] = set()
     for claim in draft.claims:
-        items = [
-            observations.get(observation_id)
-            for observation_id in claim.source_observation_ids
-        ]
-        if any(item is None for item in items):
+        observation_id = claim.source_observation_ids[0]
+        item = observations.get(observation_id)
+        if item is None or observation_id in used_observation_ids:
             return False
-        if not any(
-            item is not None
-            and item.kind == claim.kind
+        used_observation_ids.add(observation_id)
+        if not (
+            item.kind == claim.kind
+            and item.text == claim.text
             and item.evidence_artifact_id == claim.evidence_artifact_id
             and item.evidence_sha256 == claim.evidence_sha256
             and item.provenance == claim.provenance
-            for item in items
         ):
             return False
-    return True
+    required_claim_ids = {
+        item.observation_id
+        for item in source.observations
+        if item.kind in {"product_fact", "social_proof"}
+    }
+    if used_observation_ids != required_claim_ids:
+        return False
+    expected_forbidden: list[str] = []
+    for item in source.observations:
+        if item.kind == "forbidden_claim" and item.text not in expected_forbidden:
+            expected_forbidden.append(item.text)
+    return draft.forbidden_claims == tuple(expected_forbidden)
 
 
 __all__ = [
