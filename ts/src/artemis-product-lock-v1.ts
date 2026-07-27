@@ -296,6 +296,7 @@ const ApprovalReceiptContentShape = {
   compile_request_digest: DigestSchema,
   draft_digest: DigestSchema,
   approver_account_id: OpaqueIdSchema,
+  environment: OpaqueIdSchema,
   decision: z.literal('approved'),
   state_revision: z.number().int().safe().min(1),
 };

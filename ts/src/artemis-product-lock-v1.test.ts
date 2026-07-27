@@ -122,6 +122,7 @@ function approvalReceipt(approvedDraft = draft()) {
     compile_request_digest: approvedDraft.compile_request_digest,
     draft_digest: approvedDraft.draft_digest,
     approver_account_id: 'account-1',
+    environment: 'test',
     decision: 'approved' as const,
     state_revision: 7,
   };

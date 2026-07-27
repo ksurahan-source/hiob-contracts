@@ -84,6 +84,7 @@ def _seal_request() -> ArtemisSealRequestV1:
             receipt_id="receipt-1",
             draft=draft,
             approver_account_id="user-1",
+            environment="test",
             state_revision=1,
         ),
     )
