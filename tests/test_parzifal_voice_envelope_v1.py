@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from hiob_contracts import (
     ParzifalVoiceEnvelopeV1,
+    derive_character_identity_binding_digest_v1,
     derive_parzifal_voice_envelope_digest_v1,
     sha256_digest,
 )
@@ -16,8 +17,15 @@ def _payload() -> dict:
         "workspace_id": "ws-1",
         "run_id": "run-1",
         "subject_id": "mom",
+        "face_id": "face-mom-1",
         "voice_id": "tc_voice_mom_1",
-        "identity_binding_digest": sha256_digest({"identity": "mom"}),
+        "identity_binding_digest": (
+            derive_character_identity_binding_digest_v1(
+                subject_id="mom",
+                face_id="face-mom-1",
+                voice_id="tc_voice_mom_1",
+            )
+        ),
         "voice_spec_digest": sha256_digest({"voice_spec": "mom"}),
     }
 
@@ -75,4 +83,19 @@ def test_voice_envelope_rejects_tampering_under_old_digest() -> None:
     with pytest.raises(ValidationError, match="envelope_digest"):
         ParzifalVoiceEnvelopeV1.model_validate(
             {**payload, "envelope_digest": digest}
+        )
+
+
+def test_voice_envelope_rejects_voice_rebound_under_new_envelope_digest() -> None:
+    payload = _payload()
+    payload["voice_id"] = "tc_changed"
+
+    with pytest.raises(ValidationError, match="identity_binding_digest"):
+        ParzifalVoiceEnvelopeV1.model_validate(
+            {
+                **payload,
+                "envelope_digest": derive_parzifal_voice_envelope_digest_v1(
+                    payload
+                ),
+            }
         )

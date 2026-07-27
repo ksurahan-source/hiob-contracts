@@ -6,6 +6,7 @@ import {
   ParzifalVoiceEnvelopeV1Schema,
   deriveParzifalVoiceEnvelopeDigestV1,
 } from './parzifal-voice-envelope-v1.js';
+import { deriveCharacterIdentityBindingDigestV1 } from './character-identity-v1.js';
 
 function payload() {
   return {
@@ -13,8 +14,13 @@ function payload() {
     workspace_id: 'ws-1',
     run_id: 'run-1',
     subject_id: 'mom',
+    face_id: 'face-mom-1',
     voice_id: 'tc_voice_mom_1',
-    identity_binding_digest: sha256Digest({ identity: 'mom' }),
+    identity_binding_digest: deriveCharacterIdentityBindingDigestV1({
+      subject_id: 'mom',
+      face_id: 'face-mom-1',
+      voice_id: 'tc_voice_mom_1',
+    }),
     voice_spec_digest: sha256Digest({ voice_spec: 'mom' }),
   };
 }
@@ -35,6 +41,10 @@ test('ParzifalVoiceEnvelopeV1 matches the Python digest contract', () => {
     ParzifalVoiceEnvelopeV1Schema.safeParse({
       ...envelope,
       voice_id: 'tc_changed',
+      envelope_digest: deriveParzifalVoiceEnvelopeDigestV1({
+        ...envelope,
+        voice_id: 'tc_changed',
+      }),
     }).success,
     false,
   );
