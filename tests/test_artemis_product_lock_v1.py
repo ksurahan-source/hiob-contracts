@@ -249,7 +249,11 @@ def test_seal_result_has_exactly_one_terminal_shape() -> None:
         request,
         resolver=_Resolver(),
     )
-    sealed = ArtemisSealResultV1.sealed(request, lock)
+    sealed = ArtemisSealResultV1.sealed(
+        request,
+        lock,
+        resolver=_Resolver(),
+    )
     blocked = ArtemisSealResultV1.blocked(
         request.request_digest,
         "APPROVAL_INVALID",

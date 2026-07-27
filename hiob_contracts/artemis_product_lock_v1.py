@@ -33,7 +33,11 @@ def _non_blank(value: str) -> str:
 
 
 def _opaque(value: str) -> str:
-    if not _OPAQUE_ID.fullmatch(value):
+    segments = value.split("/")
+    if (
+        not _OPAQUE_ID.fullmatch(value)
+        or any(segment in {"", ".", ".."} for segment in segments)
+    ):
         raise ValueError("technical id must use the opaque id grammar")
     return value
 
@@ -83,7 +87,6 @@ class JanusProductObservationV1(_EvidenceItem):
         return (
             self.kind,
             self.text,
-            self.evidence_artifact_id,
             self.evidence_sha256,
             self.provenance.source_record_id,
             self.provenance.quote,
@@ -197,8 +200,7 @@ class ArtemisClaimV1(_EvidenceItem):
         return (
             self.text,
             self.kind,
-            self.source_observation_ids,
-            self.evidence_artifact_id,
+            tuple(sorted(self.source_observation_ids)),
             self.evidence_sha256,
             self.provenance.source_record_id,
             self.provenance.quote,
@@ -517,6 +519,13 @@ class ArtemisSealResultV1(_StrictModel):
     @model_validator(mode="after")
     def _one_shape(self) -> "ArtemisSealResultV1":
         _require_result_shape(self.status, self.lock, self.error_code, "sealed")
+        if self.lock is not None:
+            reconstructed = ArtemisSealRequestV1.build(
+                draft=self.lock._reconstructed_draft(),
+                approval_receipt=self.lock.approval_receipt,
+            )
+            if reconstructed.request_digest != self.request_digest:
+                raise ValueError("sealed result does not bind seal request")
         return self
 
     @classmethod
@@ -524,7 +533,17 @@ class ArtemisSealResultV1(_StrictModel):
         cls,
         request: ArtemisSealRequestV1,
         lock: ProductElementLockV1,
+        *,
+        resolver: ArtemisApprovalResolverV1,
     ) -> "ArtemisSealResultV1":
+        reconstructed = ArtemisSealRequestV1.build(
+            draft=lock._reconstructed_draft(),
+            approval_receipt=lock.approval_receipt,
+        )
+        if reconstructed != request:
+            raise ValueError("lock does not belong to seal request")
+        if not request.authorizes(resolver=resolver):
+            raise ValueError("seal request approval is not current")
         return cls(
             status="sealed",
             request_digest=request.request_digest,
@@ -541,6 +560,20 @@ class ArtemisSealResultV1(_StrictModel):
             status="blocked",
             request_digest=request_digest,
             error_code=error_code,
+        )
+
+    def authorizes(
+        self,
+        request: ArtemisSealRequestV1,
+        *,
+        resolver: ArtemisApprovalResolverV1,
+    ) -> bool:
+        return (
+            self.status == "sealed"
+            and self.lock is not None
+            and self.request_digest == request.request_digest
+            and self.lock.authorizes(resolver=resolver)
+            and request.authorizes(resolver=resolver)
         )
 
 
