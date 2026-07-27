@@ -191,6 +191,72 @@ def test_compile_result_cross_checks_actual_observation_atoms() -> None:
         ArtemisCompileResultV1.compiled(request, forged)
 
 
+def test_compile_result_rejects_rewritten_or_dropped_observations() -> None:
+    request = _compile_request()
+    draft = _draft()
+    rewritten_claim = draft.claims[0].model_dump(mode="json")
+    rewritten_claim["text"] = "unrelated medical cure"
+    rewritten = ProductElementLockDraftV1.build(
+        **{
+            **draft.model_dump(
+                mode="python",
+                exclude={"contract_version", "draft_digest", "claims"},
+            ),
+            "claims": [rewritten_claim],
+        }
+    )
+    with pytest.raises(ValueError, match="grounded"):
+        ArtemisCompileResultV1.compiled(request, rewritten)
+
+    source = request.observations
+    with_forbidden = JanusProductObservationsV1.build(
+        **{
+            **source.model_dump(
+                mode="python",
+                exclude={"contract_version", "observations_digest", "observations"},
+            ),
+            "observations": [
+                *source.observations,
+                {
+                    "observation_id": "obs-forbidden-1",
+                    "kind": "forbidden_claim",
+                    "text": "의학적 치료 효과",
+                    "evidence_artifact_id": "asset/detail-2",
+                    "evidence_sha256": sha256_digest("detail-crop-2"),
+                    "provenance": {
+                        "source_record_id": "record/detail-2",
+                        "quote": "치료 효과를 보장하지 않습니다",
+                    },
+                },
+            ],
+        }
+    )
+    forbidden_request = ArtemisCompileRequestV1.build(
+        observations=with_forbidden
+    )
+    dropped_forbidden = ProductElementLockDraftV1.build(
+        **{
+            **draft.model_dump(
+                mode="python",
+                exclude={
+                    "contract_version",
+                    "draft_digest",
+                    "source_observations_digest",
+                    "compile_request_digest",
+                },
+            ),
+            "source_observations_digest": with_forbidden.observations_digest,
+            "compile_request_digest": forbidden_request.request_digest,
+            "forbidden_claims": [],
+        }
+    )
+    with pytest.raises(ValueError, match="grounded"):
+        ArtemisCompileResultV1.compiled(
+            forbidden_request,
+            dropped_forbidden,
+        )
+
+
 def test_approval_receipt_requires_current_durable_authority() -> None:
     draft = _draft()
     receipt = _receipt(draft)
@@ -278,12 +344,10 @@ def test_sealed_result_requires_authority_and_exact_request() -> None:
 def test_semantic_duplicate_claims_and_forbidden_claims_are_rejected() -> None:
     draft = _draft()
     first_claim = draft.claims[0].model_dump(mode="json")
-    first_claim["source_observation_ids"] = ["obs-1", "obs-2"]
     alias = deepcopy(first_claim)
     alias.update(
         claim_id="claim-2",
         evidence_artifact_id="asset/detail-alias",
-        source_observation_ids=["obs-2", "obs-1"],
     )
 
     with pytest.raises(ValidationError, match="duplicate claim content"):
