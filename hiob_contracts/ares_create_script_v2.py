@@ -496,9 +496,30 @@ class AresCreateScriptResultV2(BaseModel):
         return self
 
 
-def ares_create_script_request_schema_digest() -> str:
-    """Stable schema digest for request envelope field shape."""
-    schema = {
+def ares_identity_schema_descriptor_v2() -> dict[str, Any]:
+    return {
+        "speaker_fields": sorted(AresSpeakerSlotV2.model_fields),
+        "voice_spec_fields": sorted(VoiceSpecV1.model_fields),
+        "speaker_invariants": [
+            "face_id_and_voice_id_sealed_together",
+            "identity_binding_digest_matches_subject_face_voice",
+        ],
+        "identity_invariants": [
+            "speaker_face_voice_atomic_binding",
+            "speaker_roles_unique",
+            "voice_spec_requires_exactly_one_speaker",
+            "voice_spec_subject_matches_speaker",
+        ],
+        "voice_spec_invariants": [
+            "approved_examples_3_to_5",
+            "voice_spec_digest_matches_content",
+        ],
+    }
+
+
+def ares_create_script_request_schema_descriptor_v2() -> dict[str, Any]:
+    """Canonical request shape and cross-field invariants."""
+    return {
         "contract_version": "AresCreateScriptRequest.v2",
         "fields": sorted(AresCreateScriptRequestV2.model_fields.keys()),
         "authority_fields": sorted(AresAuthorityV2.model_fields.keys()),
@@ -507,8 +528,13 @@ def ares_create_script_request_schema_digest() -> str:
         "evidence_fields": sorted(AresEvidenceAndClaimsSealedV2.model_fields.keys()),
         "hook_fields": sorted(AresHookDirectiveV2.model_fields.keys()),
         "constraints_fields": sorted(AresCreativeConstraintsV2.model_fields.keys()),
+        **ares_identity_schema_descriptor_v2(),
     }
-    return sha256_digest(schema)
+
+
+def ares_create_script_request_schema_digest() -> str:
+    """Stable schema digest for request envelope field shape."""
+    return sha256_digest(ares_create_script_request_schema_descriptor_v2())
 
 
 def ares_create_script_result_schema_digest() -> str:
@@ -545,6 +571,8 @@ __all__ = [
     "AresGenerateUsageV2",
     "AresCreateScriptResultV2",
     "ares_create_script_request_schema_digest",
+    "ares_create_script_request_schema_descriptor_v2",
+    "ares_identity_schema_descriptor_v2",
     "ares_create_script_result_schema_digest",
     "request_content_digest",
 ]

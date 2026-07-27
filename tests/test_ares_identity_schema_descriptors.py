@@ -37,11 +37,14 @@ def test_v2_descriptor_binds_speaker_voice_spec_and_identity_invariants() -> Non
         "forbidden_phrases",
         "rhythm",
         "subject_id",
-        "voice_spec_digest",
         "vocabulary",
+        "voice_spec_digest",
     ]
     assert descriptor["identity_invariants"] == EXPECTED_IDENTITY_INVARIANTS
     assert ares_create_script_request_schema_digest() == sha256_digest(descriptor)
+    assert ares_create_script_request_schema_digest() == (
+        "sha256:85c65dc8b323daecbd5abc8e982fec7460c574abc7f3267e4f0bfafbc4c36a6d"
+    )
 
 
 def test_v3_descriptor_binds_the_same_identity_boundary() -> None:
@@ -50,3 +53,6 @@ def test_v3_descriptor_binds_the_same_identity_boundary() -> None:
     assert descriptor["speaker_fields"] == EXPECTED_SPEAKER_FIELDS
     assert descriptor["identity_invariants"] == EXPECTED_IDENTITY_INVARIANTS
     assert ares_create_script_request_v3_schema_digest() == sha256_digest(descriptor)
+    assert ares_create_script_request_v3_schema_digest() == (
+        "sha256:e3043b68c15ecdc9c560912067c8b7c6b7f25cdce3bce6dfb0facf20204be8b6"
+    )

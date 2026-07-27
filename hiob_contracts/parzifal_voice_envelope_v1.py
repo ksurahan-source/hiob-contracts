@@ -12,12 +12,14 @@ from .ares_script_revision_v1 import (
     _FROZEN_STRICT,
     canonical_contract_digest_v1,
 )
+from .character_identity_v1 import character_identity_binding_errors_v1
 
 _DIGEST_FIELDS = (
     "contract_version",
     "workspace_id",
     "run_id",
     "subject_id",
+    "face_id",
     "voice_id",
     "identity_binding_digest",
     "voice_spec_digest",
@@ -46,6 +48,7 @@ class ParzifalVoiceEnvelopeV1(BaseModel):
     workspace_id: NonBlankStr
     run_id: NonBlankStr
     subject_id: NonBlankStr
+    face_id: NonBlankStr
     voice_id: NonBlankStr
     identity_binding_digest: DigestStr
     voice_spec_digest: DigestStr
@@ -53,6 +56,14 @@ class ParzifalVoiceEnvelopeV1(BaseModel):
 
     @model_validator(mode="after")
     def _digest_matches_content(self) -> "ParzifalVoiceEnvelopeV1":
+        binding_errors = character_identity_binding_errors_v1(
+            subject_id=self.subject_id,
+            face_id=self.face_id,
+            voice_id=self.voice_id,
+            identity_binding_digest=self.identity_binding_digest,
+        )
+        if binding_errors:
+            raise ValueError(binding_errors[0])
         expected = derive_parzifal_voice_envelope_digest_v1(self)
         if self.envelope_digest != expected:
             raise ValueError(

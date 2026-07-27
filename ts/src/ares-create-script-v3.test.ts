@@ -671,7 +671,7 @@ test('Python and TS schema shape digests are stable', () => {
   const resultDigest = aresCreateScriptResultV3SchemaDigest();
   assert.equal(
     requestDigest,
-    'sha256:00d6a703cbfb2f35af353462c7f2eae363412b65353ad86586db54cd37331f38',
+    'sha256:e3043b68c15ecdc9c560912067c8b7c6b7f25cdce3bce6dfb0facf20204be8b6',
   );
   assert.equal(
     resultDigest,

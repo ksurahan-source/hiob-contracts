@@ -30,6 +30,7 @@ from .ares_create_script_v2 import (
     AresHookDirectiveV2,
     AresIdentitySealedV2,
     AresProductFactsSealedV2,
+    ares_identity_schema_descriptor_v2,
 )
 from .ares_script_revision_v1 import (
     AresScriptSegmentV1,
@@ -794,8 +795,8 @@ class AresCreateScriptResultV3(BaseModel):
         return self
 
 
-def ares_create_script_request_v3_schema_digest() -> str:
-    schema = {
+def ares_create_script_request_v3_schema_descriptor() -> dict[str, Any]:
+    return {
         "contract_version": "AresCreateScriptRequest.v3",
         "fields": sorted(AresCreateScriptRequestV3.model_fields),
         "scope_fields": sorted(AresRequestScopeV3.model_fields),
@@ -806,8 +807,12 @@ def ares_create_script_request_v3_schema_digest() -> str:
         "evidence_fields": sorted(AresEvidenceAndClaimsSealedV2.model_fields),
         "hook_fields": sorted(AresHookDirectiveV2.model_fields),
         "constraints_fields": sorted(AresCreativeConstraintsV2.model_fields),
+        **ares_identity_schema_descriptor_v2(),
     }
-    return sha256_digest(schema)
+
+
+def ares_create_script_request_v3_schema_digest() -> str:
+    return sha256_digest(ares_create_script_request_v3_schema_descriptor())
 
 
 def ares_create_script_result_v3_schema_digest() -> str:
@@ -844,6 +849,7 @@ __all__ = [
     "AresGenerateUsageV3",
     "AresCreateScriptResultV3",
     "ares_create_script_request_v3_schema_digest",
+    "ares_create_script_request_v3_schema_descriptor",
     "ares_create_script_result_v3_schema_digest",
     "request_content_digest_v3",
 ]

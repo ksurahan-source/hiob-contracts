@@ -6,6 +6,7 @@
  * camera, and render fields are structurally absent and rejected.
  */
 import { z } from 'zod';
+import { aresIdentitySchemaDescriptorV2 } from './ares-create-script-v2.js';
 import { characterIdentityBindingErrorV1 } from './character-identity-v1.js';
 import { VoiceSpecV1Schema } from './voice-spec-v1.js';
 
@@ -1053,8 +1054,8 @@ export const AresCreateScriptResultV3Schema = z
   })
   .transform(deepFreeze);
 
-export function aresCreateScriptRequestV3SchemaDigest(): string {
-  return sha256Digest({
+export function aresCreateScriptRequestV3SchemaDescriptor() {
+  return {
     contract_version: 'AresCreateScriptRequest.v3',
     fields: [
       'authority',
@@ -1138,7 +1139,12 @@ export function aresCreateScriptRequestV3SchemaDigest(): string {
       'style_mode',
       'vertical_mode',
     ].sort(),
-  });
+    ...aresIdentitySchemaDescriptorV2(),
+  };
+}
+
+export function aresCreateScriptRequestV3SchemaDigest(): string {
+  return sha256Digest(aresCreateScriptRequestV3SchemaDescriptor());
 }
 
 export function aresCreateScriptResultV3SchemaDigest(): string {

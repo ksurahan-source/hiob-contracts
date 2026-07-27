@@ -1,8 +1,12 @@
 import { z } from 'zod';
 
+import { characterIdentityBindingErrorV1 } from './character-identity-v1.js';
 import { sha256Digest } from './factory/digest.js';
 
-const NonBlankString = z.string().trim().min(1);
+const NonBlankString = z.string().refine(
+  (value) => value.trim().length > 0,
+  'string must not be blank',
+);
 const DigestSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, 'digest must be sha256:<64 lowercase hex>');
@@ -12,6 +16,7 @@ export type ParzifalVoiceEnvelopeDigestInputV1 = {
   workspace_id: string;
   run_id: string;
   subject_id: string;
+  face_id: string;
   voice_id: string;
   identity_binding_digest: string;
   voice_spec_digest: string;
@@ -27,6 +32,7 @@ export function deriveParzifalVoiceEnvelopeDigestV1(
     'workspace_id',
     'run_id',
     'subject_id',
+    'face_id',
     'voice_id',
     'identity_binding_digest',
     'voice_spec_digest',
@@ -42,6 +48,7 @@ export const ParzifalVoiceEnvelopeV1Schema = z
     workspace_id: NonBlankString,
     run_id: NonBlankString,
     subject_id: NonBlankString,
+    face_id: NonBlankString,
     voice_id: NonBlankString,
     identity_binding_digest: DigestSchema,
     voice_spec_digest: DigestSchema,
@@ -49,6 +56,14 @@ export const ParzifalVoiceEnvelopeV1Schema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    const bindingError = characterIdentityBindingErrorV1(value);
+    if (bindingError) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: bindingError,
+        path: ['identity_binding_digest'],
+      });
+    }
     if (value.envelope_digest !== deriveParzifalVoiceEnvelopeDigestV1(value)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

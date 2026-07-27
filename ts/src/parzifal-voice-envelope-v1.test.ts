@@ -34,7 +34,7 @@ test('ParzifalVoiceEnvelopeV1 matches the Python digest contract', () => {
 
   assert.equal(
     envelope.envelope_digest,
-    'sha256:085bbcf4fe05c51250ae09b5641aaeb8bf7fec49d4774cb840a3058e88a3a7d5',
+    'sha256:f5b3231832c1c93715e1786eb679158494a3ad242f7c2b72069150296c2e49f7',
   );
   assert.equal(ParzifalVoiceEnvelopeV1Schema.safeParse(envelope).success, true);
   assert.equal(

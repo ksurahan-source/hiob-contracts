@@ -43,6 +43,7 @@ export {
   AresCreateScriptResultV2Schema,
   ScriptPackageV2Schema,
   BeatPlanV2Schema,
+  aresCreateScriptRequestSchemaDescriptorV2,
   aresCreateScriptRequestSchemaDigest,
   aresCreateScriptResultSchemaDigest,
 } from './ares-create-script-v2';
@@ -67,6 +68,7 @@ export {
   AresGenerateProvenanceV3Schema,
   AresGenerateUsageV3Schema,
   AresCreateScriptResultV3Schema,
+  aresCreateScriptRequestV3SchemaDescriptor,
   aresCreateScriptRequestV3SchemaDigest,
   aresCreateScriptResultV3SchemaDigest,
   authorityRefReceiptDigestV3,

@@ -2,7 +2,10 @@ import { z } from 'zod';
 
 import { sha256Digest } from './factory/digest.js';
 
-const NonBlankString = z.string().trim().min(1);
+const NonBlankString = z.string().refine(
+  (value) => value.trim().length > 0,
+  'string must not be blank',
+);
 const DigestSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, 'digest must be sha256:<64 lowercase hex>');

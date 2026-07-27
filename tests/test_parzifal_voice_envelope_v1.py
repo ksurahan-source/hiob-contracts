@@ -78,7 +78,7 @@ def test_voice_envelope_rejects_blank_ids_and_invalid_digests(
 def test_voice_envelope_rejects_tampering_under_old_digest() -> None:
     payload = _payload()
     digest = derive_parzifal_voice_envelope_digest_v1(payload)
-    payload["voice_id"] = "tc_changed"
+    payload["workspace_id"] = "ws-changed"
 
     with pytest.raises(ValidationError, match="envelope_digest"):
         ParzifalVoiceEnvelopeV1.model_validate(

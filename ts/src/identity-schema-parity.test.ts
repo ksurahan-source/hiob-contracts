@@ -46,6 +46,14 @@ test('V2 and V3 descriptors bind speaker fields and identity invariants', () => 
   assert.deepEqual(v3.identity_invariants, identityInvariants);
   assert.equal(aresCreateScriptRequestSchemaDigest(), sha256Digest(v2));
   assert.equal(aresCreateScriptRequestV3SchemaDigest(), sha256Digest(v3));
+  assert.equal(
+    aresCreateScriptRequestSchemaDigest(),
+    'sha256:85c65dc8b323daecbd5abc8e982fec7460c574abc7f3267e4f0bfafbc4c36a6d',
+  );
+  assert.equal(
+    aresCreateScriptRequestV3SchemaDigest(),
+    'sha256:e3043b68c15ecdc9c560912067c8b7c6b7f25cdce3bce6dfb0facf20204be8b6',
+  );
 });
 
 test('V2 rejects duplicate roles without requiring a VoiceSpec', () => {
