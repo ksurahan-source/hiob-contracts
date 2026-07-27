@@ -183,6 +183,18 @@ from .overnight_first_customer_v2 import (
     validate_paid_effect_attempt_v2,
     validate_verified_render_receipt_v2,
 )
+from .artemis_product_lock_v1 import (
+    ArtemisClaimV1,
+    ArtemisCompileRequestV1,
+    ArtemisCompileResultV1,
+    ArtemisSealRequestV1,
+    ArtemisSealResultV1,
+    JanusProductObservationV1,
+    JanusProductObservationsV1,
+    ObservationProvenanceV1,
+    ProductElementLockDraftV1,
+    ProductElementLockV1,
+)
 from .factory import (
     Digest, DigestError, canonical_json, sha256_digest, is_digest, assert_digest,
     PlanetOutput, ArtifactRef, ContractRef,
@@ -201,6 +213,11 @@ __all__ = [
     "ExecutionContractError", "ProviderError", "IdempotencyError",
     "DeadlineExceededError", "UnknownOperationError",
     "OperationStatusType",
+    "ArtemisClaimV1", "ArtemisCompileRequestV1", "ArtemisCompileResultV1",
+    "ArtemisSealRequestV1", "ArtemisSealResultV1",
+    "JanusProductObservationV1", "JanusProductObservationsV1",
+    "ObservationProvenanceV1", "ProductElementLockDraftV1",
+    "ProductElementLockV1",
     "ContractViolation", "ValidationResult", "validate_payload", "ensure_valid", "registered_contracts",
     "validate_edge_target", "ensure_edge_target", "edge_target_contracts", "unvalidated_edge_targets",
     "verify_karma_edge_receipt", "ensure_karma_edge_receipt",

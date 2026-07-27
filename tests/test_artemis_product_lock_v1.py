@@ -127,7 +127,10 @@ def test_compile_request_binds_exact_observations() -> None:
     assert ArtemisCompileRequestV1.model_validate(payload) == request
 
     payload["observations"]["product_name"] = "drifted"
-    with pytest.raises(ValidationError, match="request_digest"):
+    with pytest.raises(
+        ValidationError,
+        match="observations_digest|request_digest",
+    ):
         ArtemisCompileRequestV1.model_validate(payload)
 
 
