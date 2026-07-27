@@ -7,7 +7,6 @@ from pydantic import ValidationError
 
 from hiob_contracts.artemis_product_lock_v1 import (
     ArtemisApprovalReceiptV1,
-    ArtemisClaimV1,
     ArtemisCompileRequestV1,
     ArtemisCompileResultV1,
     ArtemisSealRequestV1,
@@ -156,6 +155,25 @@ def test_compile_result_binds_request_and_draft() -> None:
     )
     with pytest.raises(ValidationError, match="compile_request_digest"):
         ArtemisCompileResultV1.compiled(wrong_request, draft)
+
+
+def test_compile_result_cross_checks_actual_observation_atoms() -> None:
+    request = _compile_request()
+    draft = _draft()
+    claim = draft.claims[0].model_dump(mode="json")
+    claim["source_observation_ids"] = ["never-observed"]
+    forged = ProductElementLockDraftV1.build(
+        **{
+            **draft.model_dump(
+                mode="python",
+                exclude={"contract_version", "draft_digest", "claims"},
+            ),
+            "claims": [claim],
+        }
+    )
+
+    with pytest.raises(ValidationError, match="grounded"):
+        ArtemisCompileResultV1.compiled(request, forged)
 
 
 def test_approval_receipt_requires_current_durable_authority() -> None:
