@@ -91,7 +91,7 @@ function draft() {
         quote: '한 장씩 개별 포장',
       },
     }],
-    forbidden_claims: ['의학적 치료 효과'],
+    forbidden_claims: [] as string[],
     source_observations_digest: source.observations_digest,
     compile_request_digest: request.request_digest,
   };
@@ -271,13 +271,20 @@ test('a draft requires an Artemis claim grounded in at least one source observat
 test('semantic claim aliases canonicalize source order and ignore artifact aliases', () => {
   const value = draft();
   const first = value.claims[0];
-  first.source_observation_ids = ['obs-1', 'obs-2'];
   value.claims.push({
     ...structuredClone(first),
     claim_id: 'claim-2',
     evidence_artifact_id: 'asset-detail-alias',
-    source_observation_ids: ['obs-2', 'obs-1'],
   });
+  assert.equal(
+    ProductElementLockDraftV1Schema.safeParse(rehashDraft(value)).success,
+    false,
+  );
+});
+
+test('each Artemis claim projects exactly one source observation', () => {
+  const value = draft();
+  value.claims[0].source_observation_ids = ['obs-1', 'obs-2'];
   assert.equal(
     ProductElementLockDraftV1Schema.safeParse(rehashDraft(value)).success,
     false,
@@ -366,6 +373,95 @@ test('compiled-result helper grounds scope and every claim in actual request ato
   }
 });
 
+test('compiled-result helper preserves exact claim text and forbidden projection', () => {
+  const request = compileRequest();
+  const rewritten = structuredClone(draft());
+  rewritten.claims[0].text = 'unrelated medical cure';
+  assert.throws(
+    () => buildArtemisCompiledResultV1(request, rehashDraft(rewritten)),
+    /grounded/,
+  );
+
+  const sourcePayload = observationsPayload();
+  sourcePayload.observations.push({
+    observation_id: 'obs-forbidden-1',
+    kind: 'forbidden_claim',
+    text: '의학적 치료 효과',
+    evidence_artifact_id: 'asset-detail-2',
+    evidence_sha256: sha256Digest('detail-crop-2'),
+    provenance: {
+      source_record_id: 'detail-page-2',
+      quote: '치료 효과를 보장하지 않습니다',
+    },
+  });
+  const source = {
+    ...sourcePayload,
+    observations_digest: sha256Digest(sourcePayload),
+  };
+  const requestPayload = {
+    contract_version: 'ArtemisCompileRequest.v1' as const,
+    observations: source,
+  };
+  const forbiddenRequest = {
+    ...requestPayload,
+    request_digest: sha256Digest(requestPayload),
+  };
+  const projected = structuredClone(draft());
+  projected.source_observations_digest = source.observations_digest;
+  projected.compile_request_digest = forbiddenRequest.request_digest;
+
+  assert.throws(
+    () => buildArtemisCompiledResultV1(
+      forbiddenRequest,
+      rehashDraft(projected),
+    ),
+    /grounded/,
+  );
+
+  projected.forbidden_claims = ['의학적 치료 효과'];
+  assert.equal(
+    buildArtemisCompiledResultV1(
+      forbiddenRequest,
+      rehashDraft(projected),
+    ).status,
+    'compiled',
+  );
+});
+
+test('compiled-result helper rejects dropped required product observations', () => {
+  const sourcePayload = observationsPayload();
+  sourcePayload.observations.push({
+    observation_id: 'obs-2',
+    kind: 'social_proof',
+    text: '재구매했어요',
+    evidence_artifact_id: 'asset-review-2',
+    evidence_sha256: sha256Digest('review-2'),
+    provenance: {
+      source_record_id: 'review-record-2',
+      quote: '재구매했어요',
+    },
+  });
+  const source = {
+    ...sourcePayload,
+    observations_digest: sha256Digest(sourcePayload),
+  };
+  const requestPayload = {
+    contract_version: 'ArtemisCompileRequest.v1' as const,
+    observations: source,
+  };
+  const request = {
+    ...requestPayload,
+    request_digest: sha256Digest(requestPayload),
+  };
+  const dropped = structuredClone(draft());
+  dropped.source_observations_digest = source.observations_digest;
+  dropped.compile_request_digest = request.request_digest;
+  assert.throws(
+    () => buildArtemisCompiledResultV1(request, rehashDraft(dropped)),
+    /grounded/,
+  );
+});
+
 test('seal request contains only the draft, durable approval receipt, and digest', () => {
   assert.equal(ArtemisApprovalReceiptV1Schema.safeParse(approvalReceipt()).success, true);
   assert.equal(ArtemisSealRequestV1Schema.safeParse(sealRequest()).success, true);
@@ -433,27 +529,31 @@ test('seal result has exact sealed or blocked JSON with no inactive null key', (
 test('sealed-result helper requires current authority and exact request-lock binding', () => {
   const requestA = sealRequest();
   const lockA = lock();
-  const currentResolver = { isCurrentApproval: () => true };
+  const currentResolver = {
+    calls: 0,
+    isCurrentApproval() {
+      this.calls += 1;
+      return true;
+    },
+  };
   const staleResolver = { isCurrentApproval: () => false };
 
   assert.throws(
-    () => buildArtemisSealedResultV1(requestA, lockA, staleResolver),
+    () => buildArtemisSealedResultV1(requestA, staleResolver),
     /current/,
   );
-
-  const otherDraft = structuredClone(draft());
-  otherDraft.product_name = 'Other Product';
-  const requestB = sealRequest(rehashDraft(otherDraft));
   assert.throws(
-    () => buildArtemisSealedResultV1(requestB, lockA, currentResolver),
-    /request/,
+    () => buildArtemisSealedResultV1(requestA, {
+      isCurrentApproval: () => 'false' as unknown as boolean,
+    }),
+    /current/,
   );
 
   const sealed = buildArtemisSealedResultV1(
     requestA,
-    lockA,
     currentResolver,
   );
+  assert.equal(currentResolver.calls, 1);
   assert.deepEqual(sealed, {
     contract_version: 'ArtemisSealResult.v1',
     status: 'sealed',
