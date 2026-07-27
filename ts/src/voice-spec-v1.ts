@@ -2,10 +2,14 @@ import { z } from 'zod';
 
 import { sha256Digest } from './factory/digest.js';
 
-const NonBlankString = z.string().refine(
-  (value) => value.trim().length > 0,
-  'string must not be blank',
-);
+const boundedNonBlankString = (maxLength: number) =>
+  z
+    .string()
+    .max(maxLength)
+    .refine(
+      (value) => value.trim().length > 0,
+      'string must not be blank',
+    );
 const DigestSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, 'digest must be sha256:<64 lowercase hex>');
@@ -38,11 +42,11 @@ export function deriveVoiceSpecDigestV1(value: VoiceSpecDigestInputV1 | Record<s
 export const VoiceSpecV1Schema = z
   .object({
     contract_version: z.literal('VoiceSpec.v1').default('VoiceSpec.v1'),
-    subject_id: NonBlankString,
-    rhythm: NonBlankString,
-    vocabulary: z.array(NonBlankString).max(12),
-    forbidden_phrases: z.array(NonBlankString).max(12),
-    approved_examples: z.array(NonBlankString).min(3).max(5),
+    subject_id: boundedNonBlankString(128),
+    rhythm: boundedNonBlankString(300),
+    vocabulary: z.array(boundedNonBlankString(80)).max(12),
+    forbidden_phrases: z.array(boundedNonBlankString(120)).max(12),
+    approved_examples: z.array(boundedNonBlankString(500)).min(3).max(5),
     voice_spec_digest: DigestSchema,
   })
   .strict()

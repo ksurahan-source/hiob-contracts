@@ -63,3 +63,16 @@ def test_voice_spec_rejects_changed_content_under_old_digest() -> None:
 
     with pytest.raises(ValidationError, match="voice_spec_digest"):
         VoiceSpecV1.model_validate({**payload, "voice_spec_digest": digest})
+
+
+def test_voice_spec_rejects_unbounded_example_text() -> None:
+    payload = _payload()
+    payload["approved_examples"][0] = "가" * 501
+
+    with pytest.raises(ValidationError):
+        VoiceSpecV1.model_validate(
+            {
+                **payload,
+                "voice_spec_digest": derive_voice_spec_digest_v1(payload),
+            }
+        )

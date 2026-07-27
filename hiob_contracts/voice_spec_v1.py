@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Mapping
+from typing import Annotated, Any, Literal, Mapping
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -44,11 +44,17 @@ class VoiceSpecV1(BaseModel):
     model_config = _FROZEN_STRICT
 
     contract_version: Literal["VoiceSpec.v1"] = "VoiceSpec.v1"
-    subject_id: NonBlankStr
-    rhythm: NonBlankStr
-    vocabulary: tuple[NonBlankStr, ...] = Field(max_length=12)
-    forbidden_phrases: tuple[NonBlankStr, ...] = Field(max_length=12)
-    approved_examples: tuple[NonBlankStr, ...] = Field(min_length=3, max_length=5)
+    subject_id: Annotated[NonBlankStr, Field(max_length=128)]
+    rhythm: Annotated[NonBlankStr, Field(max_length=300)]
+    vocabulary: tuple[
+        Annotated[NonBlankStr, Field(max_length=80)], ...
+    ] = Field(max_length=12)
+    forbidden_phrases: tuple[
+        Annotated[NonBlankStr, Field(max_length=120)], ...
+    ] = Field(max_length=12)
+    approved_examples: tuple[
+        Annotated[NonBlankStr, Field(max_length=500)], ...
+    ] = Field(min_length=3, max_length=5)
     voice_spec_digest: DigestStr
 
     @field_validator(

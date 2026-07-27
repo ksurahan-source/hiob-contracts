@@ -29,4 +29,15 @@ test('VoiceSpecV1 is bounded and digest sealed', () => {
       .success,
     false,
   );
+  assert.equal(
+    VoiceSpecV1Schema.safeParse({
+      ...sealed,
+      approved_examples: ['가'.repeat(501), '둘째 문장입니다', '셋째 문장입니다'],
+      voice_spec_digest: deriveVoiceSpecDigestV1({
+        ...payload,
+        approved_examples: ['가'.repeat(501), '둘째 문장입니다', '셋째 문장입니다'],
+      }),
+    }).success,
+    false,
+  );
 });
