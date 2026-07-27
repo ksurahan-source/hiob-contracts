@@ -81,6 +81,11 @@ from .parzifal_master_sheet import (
     CHARACTER_ANGLES, PRODUCT_ANGLES, EXPRESSIONS, SHEET_STATUSES,
 )
 from .parzifal_target_input import ParzifalTargetInput
+from .element_lock_v3 import (
+    CreateElementLockRequestV1,
+    ElementArtifactRefV1,
+    ElementLockPackageV1,
+)
 from .ares_script_input import AresScriptInput, ares_script_input_schema_digest
 from .visual_materialization import (
     ALLOWED_V1_TRANSPORTS,
@@ -204,6 +209,7 @@ __all__ = [
     "ParzifalMasterSheet", "CharacterMasterSheet", "ProductMasterSheet", "SheetPanel",
     "CHARACTER_ANGLES", "PRODUCT_ANGLES", "EXPRESSIONS", "SHEET_STATUSES",
     "ParzifalTargetInput", "AresScriptInput", "ares_script_input_schema_digest",
+    "CreateElementLockRequestV1", "ElementArtifactRefV1", "ElementLockPackageV1",
     "ALLOWED_V1_TRANSPORTS", "BeatCastIntentV1", "BeatFramePlanV1", "BeatFramePlanV2",
     "CastRoleIntentV1",
     "PlannedReferenceV1", "ReferenceSnapshotV1", "SEEDREAM_5_PRO_MODEL_ID",
