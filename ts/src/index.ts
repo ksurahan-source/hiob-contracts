@@ -110,3 +110,6 @@ export * from './overnight-first-customer-v2.js';
 
 // Ares XL V1 split script/production-plan revision and approval seam.
 export * from './ares-script-revision-v1.js';
+
+// Artemis product understanding: Janus observations -> grounded draft -> lock.
+export * from './artemis-product-lock-v1.js';
