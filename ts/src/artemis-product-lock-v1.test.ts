@@ -10,6 +10,7 @@ import {
   JanusProductObservationsV1Schema,
   ProductElementLockDraftV1Schema,
   ProductElementLockV1Schema,
+  buildArtemisCompiledResultV1,
 } from './artemis-product-lock-v1.js';
 import { sha256Digest } from './factory/digest.js';
 
@@ -93,6 +94,14 @@ function draft() {
     source_observations_digest: source.observations_digest,
     compile_request_digest: request.request_digest,
   };
+  return {
+    ...payload,
+    draft_digest: sha256Digest(payload),
+  };
+}
+
+function rehashDraft(value: ReturnType<typeof draft>) {
+  const { draft_digest: _oldDigest, ...payload } = value;
   return {
     ...payload,
     draft_digest: sha256Digest(payload),
@@ -271,6 +280,55 @@ test('compile result binds the request and has exact compiled or blocked JSON', 
     }).success,
     false,
   );
+});
+
+test('compiled-result helper grounds scope and every claim in actual request atoms', () => {
+  const request = compileRequest();
+  const groundedDraft = draft();
+  assert.deepEqual(
+    buildArtemisCompiledResultV1(request, groundedDraft),
+    {
+      contract_version: 'ArtemisCompileResult.v1',
+      status: 'compiled',
+      request_digest: request.request_digest,
+      draft: groundedDraft,
+    },
+  );
+
+  const mutations: Array<[string, (value: ReturnType<typeof draft>) => void]> = [
+    ['scope', value => { value.product_name = 'Other Product'; }],
+    ['source digest', value => {
+      value.source_observations_digest = sha256Digest('other observations');
+    }],
+    ['compile request', value => {
+      value.compile_request_digest = sha256Digest('other compile request');
+    }],
+    ['observation id', value => {
+      value.claims[0].source_observation_ids = ['never-observed'];
+    }],
+    ['evidence artifact', value => {
+      value.claims[0].evidence_artifact_id = 'asset-detail-other';
+    }],
+    ['evidence digest', value => {
+      value.claims[0].evidence_sha256 = sha256Digest('other evidence');
+    }],
+    ['provenance record', value => {
+      value.claims[0].provenance.source_record_id = 'detail-page-other';
+    }],
+    ['provenance quote', value => {
+      value.claims[0].provenance.quote = '다른 인용';
+    }],
+  ];
+
+  for (const [label, mutate] of mutations) {
+    const forged = structuredClone(groundedDraft);
+    mutate(forged);
+    assert.throws(
+      () => buildArtemisCompiledResultV1(request, rehashDraft(forged)),
+      /grounded/,
+      label,
+    );
+  }
 });
 
 test('seal request contains only the draft, durable approval receipt, and digest', () => {
