@@ -346,7 +346,7 @@ class _ApprovalReceiptContent(_StrictModel):
     draft_digest: DigestStr
     approver_account_id: OpaqueId
     decision: Literal["approved"] = "approved"
-    state_revision: int = Field(ge=1)
+    state_revision: int = Field(ge=1, le=9_007_199_254_740_991)
 
 
 class ArtemisApprovalReceiptV1(_ApprovalReceiptContent):
