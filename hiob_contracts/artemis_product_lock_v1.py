@@ -288,6 +288,8 @@ class ArtemisCompileResultV1(_StrictModel):
         request: ArtemisCompileRequestV1,
         draft: ProductElementLockDraftV1,
     ) -> "ArtemisCompileResultV1":
+        if not _draft_is_grounded_in(request, draft):
+            raise ValueError("draft claims are not grounded in compile request")
         return cls(
             status="compiled",
             request_digest=request.request_digest,
@@ -565,6 +567,58 @@ def _require_result_shape(
         raise ValueError(f"{success} result requires only its value")
     if status == "blocked" and (value is not None or error_code is None):
         raise ValueError("blocked result requires only error_code")
+
+
+def _draft_is_grounded_in(
+    request: ArtemisCompileRequestV1,
+    draft: ProductElementLockDraftV1,
+) -> bool:
+    source = request.observations
+    if (
+        draft.compile_request_digest != request.request_digest
+        or draft.source_observations_digest != source.observations_digest
+        or (
+            draft.workspace_id,
+            draft.run_id,
+            draft.brand_slug,
+            draft.listing_slug,
+            draft.product_id,
+            draft.product_name,
+            draft.product_image_artifact_id,
+            draft.product_image_sha256,
+        )
+        != (
+            source.workspace_id,
+            source.run_id,
+            source.brand_slug,
+            source.listing_slug,
+            source.product_id,
+            source.product_name,
+            source.product_image_artifact_id,
+            source.product_image_sha256,
+        )
+    ):
+        return False
+    observations = {
+        item.observation_id: item for item in source.observations
+    }
+    for claim in draft.claims:
+        items = [
+            observations.get(observation_id)
+            for observation_id in claim.source_observation_ids
+        ]
+        if any(item is None for item in items):
+            return False
+        if not any(
+            item is not None
+            and item.kind == claim.kind
+            and item.evidence_artifact_id == claim.evidence_artifact_id
+            and item.evidence_sha256 == claim.evidence_sha256
+            and item.provenance == claim.provenance
+            for item in items
+        ):
+            return False
+    return True
 
 
 __all__ = [

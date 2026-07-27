@@ -153,7 +153,7 @@ def test_compile_result_binds_request_and_draft() -> None:
     wrong_request = ArtemisCompileRequestV1.build(
         observations=_observations(run_id="run-2")
     )
-    with pytest.raises(ValidationError, match="compile_request_digest"):
+    with pytest.raises(ValueError, match="grounded|compile_request_digest"):
         ArtemisCompileResultV1.compiled(wrong_request, draft)
 
 
@@ -172,7 +172,7 @@ def test_compile_result_cross_checks_actual_observation_atoms() -> None:
         }
     )
 
-    with pytest.raises(ValidationError, match="grounded"):
+    with pytest.raises(ValueError, match="grounded"):
         ArtemisCompileResultV1.compiled(request, forged)
 
 
