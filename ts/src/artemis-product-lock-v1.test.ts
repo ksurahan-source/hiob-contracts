@@ -11,6 +11,7 @@ import {
   ProductElementLockDraftV1Schema,
   ProductElementLockV1Schema,
   buildArtemisCompiledResultV1,
+  buildArtemisSealedResultV1,
 } from './artemis-product-lock-v1.js';
 import { sha256Digest } from './factory/digest.js';
 
@@ -108,8 +109,7 @@ function rehashDraft(value: ReturnType<typeof draft>) {
   };
 }
 
-function approvalReceipt() {
-  const approvedDraft = draft();
+function approvalReceipt(approvedDraft = draft()) {
   const payload = {
     contract_version: 'ArtemisApprovalReceipt.v1' as const,
     receipt_id: 'approval-receipt-1',
@@ -129,11 +129,11 @@ function approvalReceipt() {
   };
 }
 
-function sealRequest() {
+function sealRequest(sealedDraft = draft()) {
   const payload = {
     contract_version: 'ArtemisSealRequest.v1' as const,
-    draft: draft(),
-    approval_receipt: approvalReceipt(),
+    draft: sealedDraft,
+    approval_receipt: approvalReceipt(sealedDraft),
   };
   return {
     ...payload,
@@ -141,8 +141,7 @@ function sealRequest() {
   };
 }
 
-function lock() {
-  const approvedDraft = draft();
+function lock(approvedDraft = draft()) {
   const {
     contract_version: _draftVersion,
     draft_digest,
@@ -152,7 +151,7 @@ function lock() {
     ...content,
     contract_version: 'ProductElementLock.v1' as const,
     draft_digest,
-    approval_receipt: approvalReceipt(),
+    approval_receipt: approvalReceipt(approvedDraft),
   };
   return {
     ...payload,
@@ -180,6 +179,9 @@ test('all technical IDs use one URL-free allow-listed opaque grammar', () => {
     'ftp://host/file',
     '//host/path',
     'javascript:alert(1)',
+    'asset/../../secret',
+    'asset/./secret',
+    'asset//secret',
   ];
   for (const unsafeId of unsafeIds) {
     const value = structuredClone(observations());
@@ -230,6 +232,23 @@ test('observations match the Python golden digest and reject content drift', () 
   assert.equal(ArtemisCompileRequestV1Schema.safeParse(request).success, false);
 });
 
+test('semantic observation aliases cannot bypass deduplication', () => {
+  const payload = observationsPayload();
+  const first = payload.observations[0];
+  payload.observations.push({
+    ...structuredClone(first),
+    observation_id: 'obs-2',
+    evidence_artifact_id: 'asset-detail-alias',
+  });
+  assert.equal(
+    JanusProductObservationsV1Schema.safeParse({
+      ...payload,
+      observations_digest: sha256Digest(payload),
+    }).success,
+    false,
+  );
+});
+
 test('a draft requires an Artemis claim grounded in at least one source observation', () => {
   assert.equal(ProductElementLockDraftV1Schema.safeParse(draft()).success, true);
 
@@ -245,6 +264,22 @@ test('a draft requires an Artemis claim grounded in at least one source observat
   driftedRequestBinding.compile_request_digest = sha256Digest('other request');
   assert.equal(
     ProductElementLockDraftV1Schema.safeParse(driftedRequestBinding).success,
+    false,
+  );
+});
+
+test('semantic claim aliases canonicalize source order and ignore artifact aliases', () => {
+  const value = draft();
+  const first = value.claims[0];
+  first.source_observation_ids = ['obs-1', 'obs-2'];
+  value.claims.push({
+    ...structuredClone(first),
+    claim_id: 'claim-2',
+    evidence_artifact_id: 'asset-detail-alias',
+    source_observation_ids: ['obs-2', 'obs-1'],
+  });
+  assert.equal(
+    ProductElementLockDraftV1Schema.safeParse(rehashDraft(value)).success,
     false,
   );
 });
@@ -391,6 +426,46 @@ test('seal result has exact sealed or blocked JSON with no inactive null key', (
   );
   assert.equal(
     ArtemisSealResultV1Schema.safeParse({ ...blocked, lock: null }).success,
+    false,
+  );
+});
+
+test('sealed-result helper requires current authority and exact request-lock binding', () => {
+  const requestA = sealRequest();
+  const lockA = lock();
+  const currentResolver = { isCurrentApproval: () => true };
+  const staleResolver = { isCurrentApproval: () => false };
+
+  assert.throws(
+    () => buildArtemisSealedResultV1(requestA, lockA, staleResolver),
+    /current/,
+  );
+
+  const otherDraft = structuredClone(draft());
+  otherDraft.product_name = 'Other Product';
+  const requestB = sealRequest(rehashDraft(otherDraft));
+  assert.throws(
+    () => buildArtemisSealedResultV1(requestB, lockA, currentResolver),
+    /request/,
+  );
+
+  const sealed = buildArtemisSealedResultV1(
+    requestA,
+    lockA,
+    currentResolver,
+  );
+  assert.deepEqual(sealed, {
+    contract_version: 'ArtemisSealResult.v1',
+    status: 'sealed',
+    request_digest: requestA.request_digest,
+    lock: lockA,
+  });
+
+  assert.equal(
+    ArtemisSealResultV1Schema.safeParse({
+      ...sealed,
+      request_digest: sha256Digest('other request'),
+    }).success,
     false,
   );
 });
