@@ -16,6 +16,7 @@ import {
   aresP2ATargetProjectionV3SchemaDigest,
   authorityRefReceiptDigestV3,
 } from './ares-create-script-v3.js';
+import { deriveCharacterIdentityBindingDigestV1 } from './character-identity-v1.js';
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -207,6 +208,22 @@ function sampleRequest() {
     creative_constraints: creativeConstraints,
   };
 }
+
+test('V3 speaker requires the atomic face and voice binding', () => {
+  const request = sampleRequest();
+  const speaker = request.identity.speakers[0] as Record<string, unknown>;
+  speaker.face_id = 'face-mom-1';
+  speaker.voice_id = 'voice-mom-1';
+  speaker.identity_binding_digest = deriveCharacterIdentityBindingDigestV1({
+    subject_id: 'mom',
+    face_id: 'face-mom-1',
+    voice_id: 'voice-mom-1',
+  });
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(request).success, true);
+
+  speaker.identity_binding_digest = digest({ wrong: true });
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(request).success, false);
+});
 
 test('projection schema rejects cross-scope and wrong-owner refs directly', () => {
   const base = sampleRequest().authority.accepted_p2a_receipt.target_input;

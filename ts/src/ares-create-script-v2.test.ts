@@ -8,6 +8,7 @@ import {
   aresCreateScriptRequestSchemaDigest,
   aresCreateScriptResultSchemaDigest,
 } from './ares-create-script-v2.js';
+import { deriveCharacterIdentityBindingDigestV1 } from './character-identity-v1.js';
 
 function digest(value: unknown): string {
   const encoded = JSON.stringify(value);
@@ -88,6 +89,31 @@ test('request schema accepts sealed authority bundle', () => {
   const parsed = AresCreateScriptRequestV2Schema.parse(sampleRequest());
   assert.equal(parsed.contract_version, 'AresCreateScriptRequest.v2');
   assert.equal(parsed.authority.identity_lock_digest, IDENTITY);
+});
+
+test('speaker atomically binds face and voice', () => {
+  const request = sampleRequest();
+  const speaker = request.identity.speakers[0] as Record<string, unknown>;
+  speaker.face_id = 'face-mom-1';
+  speaker.voice_id = 'voice-mom-1';
+  speaker.identity_binding_digest = deriveCharacterIdentityBindingDigestV1({
+    subject_id: 'mom',
+    face_id: 'face-mom-1',
+    voice_id: 'voice-mom-1',
+  });
+  assert.equal(AresCreateScriptRequestV2Schema.safeParse(request).success, true);
+
+  delete speaker.identity_binding_digest;
+  assert.equal(AresCreateScriptRequestV2Schema.safeParse(request).success, false);
+});
+
+test('speaker rejects a mismatched face and voice binding', () => {
+  const request = sampleRequest();
+  const speaker = request.identity.speakers[0] as Record<string, unknown>;
+  speaker.face_id = 'face-mom-1';
+  speaker.voice_id = 'voice-mom-1';
+  speaker.identity_binding_digest = digest({ wrong: true });
+  assert.equal(AresCreateScriptRequestV2Schema.safeParse(request).success, false);
 });
 
 test('request schema rejects job_status extra field', () => {
