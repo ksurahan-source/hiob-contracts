@@ -10,6 +10,7 @@ from hiob_contracts.artemis_product_lock_v1 import (
     ArtemisCompileRequestV1,
     ArtemisCompileResultV1,
     ArtemisSealRequestV1,
+    ArtemisSealResultV1,
     JanusProductObservationV1,
     JanusProductObservationsV1,
     ProductElementLockDraftV1,
@@ -107,6 +108,9 @@ def _receipt(draft=None):
         "ftp://host/path",
         "//host/path",
         "javascript:alert(1)",
+        "asset/../../secret",
+        "asset/./secret",
+        "asset//secret",
     ],
 )
 def test_all_technical_ids_use_one_opaque_allowlist(bad_id: str) -> None:
@@ -135,7 +139,11 @@ def test_builders_hash_normalized_content() -> None:
 
 def test_semantic_duplicate_observations_are_rejected() -> None:
     first = _observations().observations[0].model_dump(mode="json")
-    duplicate = {**first, "observation_id": "obs-2"}
+    duplicate = {
+        **first,
+        "observation_id": "obs-2",
+        "evidence_artifact_id": "asset/detail-alias",
+    }
 
     with pytest.raises(ValidationError, match="duplicate observation content"):
         _observations(observations=[first, duplicate])
@@ -222,9 +230,50 @@ def test_lock_reconstructs_the_exact_approved_draft() -> None:
         ProductElementLockV1.model_validate(payload)
 
 
+def test_sealed_result_requires_authority_and_exact_request() -> None:
+    request_a = ArtemisSealRequestV1.build(
+        draft=_draft(),
+        approval_receipt=_receipt(),
+    )
+    lock_a = ProductElementLockV1.from_verified(
+        request_a,
+        resolver=_Resolver(True),
+    )
+    draft_b = _draft(product_name="Other Product")
+    request_b = ArtemisSealRequestV1.build(
+        draft=draft_b,
+        approval_receipt=_receipt(draft_b),
+    )
+
+    with pytest.raises(TypeError):
+        ArtemisSealResultV1.sealed(request_a, lock_a)
+
+    with pytest.raises(ValueError, match="request"):
+        ArtemisSealResultV1.sealed(
+            request_b,
+            lock_a,
+            resolver=_Resolver(True),
+        )
+
+    sealed = ArtemisSealResultV1.sealed(
+        request_a,
+        lock_a,
+        resolver=_Resolver(True),
+    )
+    assert sealed.authorizes(request_a, resolver=_Resolver(True))
+    assert not sealed.authorizes(request_a, resolver=_Resolver(False))
+
+
 def test_semantic_duplicate_claims_and_forbidden_claims_are_rejected() -> None:
     draft = _draft()
     first_claim = draft.claims[0].model_dump(mode="json")
+    first_claim["source_observation_ids"] = ["obs-1", "obs-2"]
+    alias = deepcopy(first_claim)
+    alias.update(
+        claim_id="claim-2",
+        evidence_artifact_id="asset/detail-alias",
+        source_observation_ids=["obs-2", "obs-1"],
+    )
 
     with pytest.raises(ValidationError, match="duplicate claim content"):
         ProductElementLockDraftV1.build(
@@ -235,7 +284,7 @@ def test_semantic_duplicate_claims_and_forbidden_claims_are_rejected() -> None:
                 ),
                 "claims": [
                     first_claim,
-                    {**deepcopy(first_claim), "claim_id": "claim-2"},
+                    alias,
                 ],
             }
         )
