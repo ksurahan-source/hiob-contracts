@@ -79,6 +79,7 @@ function sampleRequest() {
       face_id: null,
       identity_binding_digest: null,
     }],
+    voice_spec: null,
     locale: 'ko',
     audience_lock: null,
   };
@@ -670,7 +671,7 @@ test('Python and TS schema shape digests are stable', () => {
   const resultDigest = aresCreateScriptResultV3SchemaDigest();
   assert.equal(
     requestDigest,
-    'sha256:f70720ef05786605cd31a50cdd68201b81306b87fb95e200e2aa1b8dcca0cabc',
+    'sha256:00d6a703cbfb2f35af353462c7f2eae363412b65353ad86586db54cd37331f38',
   );
   assert.equal(
     resultDigest,

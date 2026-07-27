@@ -119,6 +119,7 @@ test('speaker rejects a mismatched face and voice binding', () => {
 
 test('identity accepts one matching VoiceSpec and rejects subject drift', () => {
   const request = sampleRequest();
+  const identity = request.identity as Record<string, any>;
   const voiceSpec = {
     contract_version: 'VoiceSpec.v1' as const,
     subject_id: 'mom',
@@ -127,14 +128,14 @@ test('identity accepts one matching VoiceSpec and rejects subject drift', () => 
     forbidden_phrases: ['혁신적인'],
     approved_examples: ['첫 문장', '둘째 문장', '셋째 문장'],
   };
-  request.identity.voice_spec = {
+  identity.voice_spec = {
     ...voiceSpec,
     voice_spec_digest: deriveVoiceSpecDigestV1(voiceSpec),
   };
   assert.equal(AresCreateScriptRequestV2Schema.safeParse(request).success, true);
-  request.identity.voice_spec.subject_id = 'other';
-  request.identity.voice_spec.voice_spec_digest = deriveVoiceSpecDigestV1(
-    request.identity.voice_spec,
+  identity.voice_spec.subject_id = 'other';
+  identity.voice_spec.voice_spec_digest = deriveVoiceSpecDigestV1(
+    identity.voice_spec,
   );
   assert.equal(AresCreateScriptRequestV2Schema.safeParse(request).success, false);
 });

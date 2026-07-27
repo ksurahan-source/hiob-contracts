@@ -7,6 +7,7 @@
  */
 import { z } from 'zod';
 import { characterIdentityBindingErrorV1 } from './character-identity-v1.js';
+import { VoiceSpecV1Schema } from './voice-spec-v1.js';
 
 import { sha256Digest } from './factory/digest.js';
 import { KarmaEdgeReceiptSchema } from './factory/karma-edge.js';
@@ -233,6 +234,7 @@ const AresIdentitySealedV3InputSchema = z
     identity_lock_digest: DigestSchema,
     cast_sheet_digest: DigestSchema,
     speakers: z.array(AresSpeakerSlotV3InputSchema).min(1),
+    voice_spec: VoiceSpecV1Schema.nullable().default(null),
     locale: NonBlankString.default('ko'),
     audience_lock: NonBlankString.nullable().default(null),
   })
@@ -245,6 +247,21 @@ const AresIdentitySealedV3InputSchema = z
         message: 'speakers roles must be unique',
         path: ['speakers'],
       });
+    }
+    if (value.voice_spec) {
+      if (value.speakers.length !== 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'voice_spec requires exactly one sealed speaker',
+          path: ['voice_spec'],
+        });
+      } else if (value.voice_spec.subject_id !== value.speakers[0].subject_id) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'voice_spec.subject_id must match the sealed speaker',
+          path: ['voice_spec', 'subject_id'],
+        });
+      }
     }
   });
 
@@ -1080,6 +1097,7 @@ export function aresCreateScriptRequestV3SchemaDigest(): string {
       'identity_lock_digest',
       'locale',
       'speakers',
+      'voice_spec',
     ].sort(),
     product_fields: [
       'brand_display_name',

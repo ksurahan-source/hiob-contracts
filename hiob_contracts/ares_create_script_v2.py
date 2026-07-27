@@ -45,6 +45,7 @@ from .ares_script_revision_v1 import (
 )
 from .factory import KarmaEdgeReceipt, sha256_digest
 from .character_identity_v1 import character_identity_binding_errors_v1
+from .voice_spec_v1 import VoiceSpecV1
 from .provenance import ClaimProvenance
 
 
@@ -115,6 +116,7 @@ class AresIdentitySealedV2(BaseModel):
     identity_lock_digest: DigestStr
     cast_sheet_digest: DigestStr
     speakers: tuple[AresSpeakerSlotV2, ...] = Field(min_length=1)
+    voice_spec: VoiceSpecV1 | None = None
     locale: NonBlankStr = "ko"
     audience_lock: NonBlankStr | None = None
 
@@ -128,6 +130,11 @@ class AresIdentitySealedV2(BaseModel):
         roles = [slot.role for slot in self.speakers]
         if len(roles) != len(set(roles)):
             raise ValueError("speakers roles must be unique")
+        if self.voice_spec is not None:
+            if len(self.speakers) != 1:
+                raise ValueError("voice_spec requires exactly one sealed speaker")
+            if self.voice_spec.subject_id != self.speakers[0].subject_id:
+                raise ValueError("voice_spec.subject_id must match the sealed speaker")
         return self
 
 

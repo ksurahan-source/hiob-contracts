@@ -9,6 +9,7 @@ import { z } from 'zod';
 
 import { sha256Digest } from './factory/digest.js';
 import { characterIdentityBindingErrorV1 } from './character-identity-v1.js';
+import { VoiceSpecV1Schema } from './voice-spec-v1.js';
 
 const NonEmptyString = z.string().trim().min(1);
 const DigestSchema = z
@@ -126,10 +127,27 @@ export const AresIdentitySealedV2Schema = z
     identity_lock_digest: DigestSchema,
     cast_sheet_digest: DigestSchema,
     speakers: z.array(AresSpeakerSlotV2Schema).min(1),
+    voice_spec: VoiceSpecV1Schema.nullable().optional(),
     locale: NonEmptyString.default('ko'),
     audience_lock: NonEmptyString.nullable().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (!value.voice_spec) return;
+    if (value.speakers.length !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'voice_spec requires exactly one sealed speaker',
+        path: ['voice_spec'],
+      });
+    } else if (value.voice_spec.subject_id !== value.speakers[0].subject_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'voice_spec.subject_id must match the sealed speaker',
+        path: ['voice_spec', 'subject_id'],
+      });
+    }
+  });
 
 export const AresProductFactsSealedV2Schema = z
   .object({
