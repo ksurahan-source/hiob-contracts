@@ -9,6 +9,7 @@ import {
   aresCreateScriptResultSchemaDigest,
 } from './ares-create-script-v2.js';
 import { deriveCharacterIdentityBindingDigestV1 } from './character-identity-v1.js';
+import { deriveVoiceSpecDigestV1 } from './voice-spec-v1.js';
 
 function digest(value: unknown): string {
   const encoded = JSON.stringify(value);
@@ -113,6 +114,28 @@ test('speaker rejects a mismatched face and voice binding', () => {
   speaker.face_id = 'face-mom-1';
   speaker.voice_id = 'voice-mom-1';
   speaker.identity_binding_digest = digest({ wrong: true });
+  assert.equal(AresCreateScriptRequestV2Schema.safeParse(request).success, false);
+});
+
+test('identity accepts one matching VoiceSpec and rejects subject drift', () => {
+  const request = sampleRequest();
+  const voiceSpec = {
+    contract_version: 'VoiceSpec.v1' as const,
+    subject_id: 'mom',
+    rhythm: 'short and quick',
+    vocabulary: ['근데'],
+    forbidden_phrases: ['혁신적인'],
+    approved_examples: ['첫 문장', '둘째 문장', '셋째 문장'],
+  };
+  request.identity.voice_spec = {
+    ...voiceSpec,
+    voice_spec_digest: deriveVoiceSpecDigestV1(voiceSpec),
+  };
+  assert.equal(AresCreateScriptRequestV2Schema.safeParse(request).success, true);
+  request.identity.voice_spec.subject_id = 'other';
+  request.identity.voice_spec.voice_spec_digest = deriveVoiceSpecDigestV1(
+    request.identity.voice_spec,
+  );
   assert.equal(AresCreateScriptRequestV2Schema.safeParse(request).success, false);
 });
 

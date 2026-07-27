@@ -16,6 +16,7 @@ from hiob_contracts import (
     ares_create_script_result_schema_digest,
     canonical_contract_digest_v1,
     derive_character_identity_binding_digest_v1,
+    derive_voice_spec_digest_v1,
     request_content_digest,
     sha256_digest,
 )
@@ -95,6 +96,33 @@ def _identity() -> dict:
         "locale": "ko",
         "audience_lock": "30대 엄마",
     }
+
+
+def _voice_spec(*, subject_id: str = "mom") -> dict:
+    payload = {
+        "contract_version": "VoiceSpec.v1",
+        "subject_id": subject_id,
+        "rhythm": "short, quick, context-aware",
+        "vocabulary": ["근데", "솔직히"],
+        "forbidden_phrases": ["혁신적인"],
+        "approved_examples": ["첫 문장", "둘째 문장", "셋째 문장"],
+    }
+    return {**payload, "voice_spec_digest": derive_voice_spec_digest_v1(payload)}
+
+
+def test_identity_accepts_one_matching_voice_spec() -> None:
+    identity = _identity()
+    identity["voice_spec"] = _voice_spec()
+    parsed = AresIdentitySealedV2.model_validate(identity)
+    assert parsed.voice_spec is not None
+    assert parsed.voice_spec.subject_id == "mom"
+
+
+def test_identity_rejects_voice_spec_for_another_subject() -> None:
+    identity = _identity()
+    identity["voice_spec"] = _voice_spec(subject_id="other")
+    with pytest.raises(ValueError, match="voice_spec.subject_id"):
+        AresIdentitySealedV2.model_validate(identity)
 
 
 def _product() -> dict:
