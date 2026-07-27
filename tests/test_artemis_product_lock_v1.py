@@ -25,6 +25,7 @@ def _observations() -> JanusProductObservationsV1:
         product_id="product-1",
         product_name="Nano Mask",
         product_image_artifact_id="asset-product-1",
+        product_image_storage_key="sealed/viewok/nano-mask/hero-v1.png",
         product_image_sha256=sha256_digest("product-image"),
         observations=[
             {
@@ -53,6 +54,7 @@ def _draft() -> ProductElementLockDraftV1:
         product_id=observations.product_id,
         product_name=observations.product_name,
         product_image_artifact_id=observations.product_image_artifact_id,
+        product_image_storage_key=observations.product_image_storage_key,
         product_image_sha256=observations.product_image_sha256,
         claims=[
             {
@@ -97,6 +99,10 @@ def test_janus_owns_observations_not_product_claims() -> None:
 
     assert observations.contract_version == "JanusProductObservations.v1"
     assert observations.observations[0].observation_id == "obs-1"
+    assert (
+        observations.product_image_storage_key
+        == "sealed/viewok/nano-mask/hero-v1.png"
+    )
     assert "claims" not in observations.model_dump(mode="json")
 
     with pytest.raises(ValidationError, match="claims"):
@@ -126,6 +132,15 @@ def test_observations_are_url_free_frozen_and_digest_bound() -> None:
             }
         )
 
+    with pytest.raises(ValidationError, match="opaque"):
+        JanusProductObservationsV1.build(
+            **{
+                **_observations().model_dump(mode="python"),
+                "product_image_storage_key": "https://signed.example/product.png",
+                "observations_digest": None,
+            }
+        )
+
     with pytest.raises(ValidationError):
         observations.product_name = "mutated"  # type: ignore[misc]
 
@@ -149,6 +164,10 @@ def test_draft_requires_grounded_artemis_claim() -> None:
     draft = _draft()
 
     assert draft.contract_version == "ProductElementLockDraft.v1"
+    assert (
+        draft.product_image_storage_key
+        == "sealed/viewok/nano-mask/hero-v1.png"
+    )
     assert draft.claims[0].source_observation_ids == ("obs-1",)
     assert draft.claims[0].evidence_artifact_id == "asset-detail-1"
 
@@ -230,6 +249,10 @@ def test_sealed_lock_is_exact_approved_draft() -> None:
     payload = lock.model_dump(mode="json")
 
     assert lock.contract_version == "ProductElementLock.v1"
+    assert (
+        lock.product_image_storage_key
+        == "sealed/viewok/nano-mask/hero-v1.png"
+    )
     assert lock.draft_digest == request.draft.draft_digest
     assert (
         lock.approval_receipt.receipt_digest

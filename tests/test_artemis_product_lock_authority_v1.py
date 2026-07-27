@@ -28,6 +28,7 @@ def _observations(**overrides):
         "product_id": "product-1",
         "product_name": "Nano Mask",
         "product_image_artifact_id": "asset/product-1",
+        "product_image_storage_key": "sealed/viewok/nano-mask/hero-v1.png",
         "product_image_sha256": sha256_digest("product-image"),
         "observations": [
             {
@@ -62,6 +63,7 @@ def _draft(**overrides):
         "product_id": "product-1",
         "product_name": "Nano Mask",
         "product_image_artifact_id": "asset/product-1",
+        "product_image_storage_key": "sealed/viewok/nano-mask/hero-v1.png",
         "product_image_sha256": sha256_digest("product-image"),
         "claims": [
             {

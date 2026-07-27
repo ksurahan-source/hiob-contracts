@@ -20,7 +20,7 @@ const PRODUCT_IMAGE_DIGEST =
 const EVIDENCE_DIGEST =
   'sha256:74a599b03a2b298085f1cb43063e6440ab53e43c069d9abf7d8db92f5f4e2c4c';
 const PYTHON_OBSERVATIONS_DIGEST =
-  'sha256:c6c0e6143f4407045055cea286f5cabe906a417cb1d5f7d2e8ada8724f776754';
+  'sha256:d6a2a6ef29019fb172d146c299af8fbaa4a72cdc1c8a844cc926b23cbba2c6c2';
 
 function observationsPayload() {
   return {
@@ -32,6 +32,7 @@ function observationsPayload() {
     product_id: 'product-1',
     product_name: 'Nano Mask',
     product_image_artifact_id: 'asset-product-1',
+    product_image_storage_key: 'sealed/viewok/nano-mask/hero-v1.png',
     product_image_sha256: PRODUCT_IMAGE_DIGEST,
     observations: [{
       observation_id: 'obs-1',
@@ -78,6 +79,7 @@ function draft() {
     product_id: source.product_id,
     product_name: source.product_name,
     product_image_artifact_id: source.product_image_artifact_id,
+    product_image_storage_key: source.product_image_storage_key,
     product_image_sha256: source.product_image_sha256,
     claims: [{
       claim_id: 'claim-1',
@@ -195,6 +197,18 @@ test('all technical IDs use one URL-free allow-listed opaque grammar', () => {
       false,
       unsafeId,
     );
+
+    const storageValue = structuredClone(observations());
+    storageValue.product_image_storage_key = unsafeId;
+    storageValue.observations_digest = sha256Digest({
+      ...storageValue,
+      observations_digest: undefined,
+    });
+    assert.equal(
+      JanusProductObservationsV1Schema.safeParse(storageValue).success,
+      false,
+      `storage key: ${unsafeId}`,
+    );
   }
 
   const technicalIdMutations: Array<(value: ReturnType<typeof observations>) => void> = [
@@ -232,6 +246,10 @@ test('observations match the Python golden digest and reject content drift', () 
   assert.equal(sha256Digest(observationsPayload()), PYTHON_OBSERVATIONS_DIGEST);
   assert.equal(observations().observations_digest, PYTHON_OBSERVATIONS_DIGEST);
   assert.equal(JanusProductObservationsV1Schema.safeParse(observations()).success, true);
+  assert.equal(
+    observations().product_image_storage_key,
+    'sealed/viewok/nano-mask/hero-v1.png',
+  );
 
   const drifted = structuredClone(observations());
   drifted.product_name = 'drifted';
@@ -350,6 +368,9 @@ test('compiled-result helper grounds scope and every claim in actual request ato
 
   const mutations: Array<[string, (value: ReturnType<typeof draft>) => void]> = [
     ['scope', value => { value.product_name = 'Other Product'; }],
+    ['storage key', value => {
+      value.product_image_storage_key = 'sealed/viewok/nano-mask/hero-v2.png';
+    }],
     ['source digest', value => {
       value.source_observations_digest = sha256Digest('other observations');
     }],
@@ -501,6 +522,10 @@ test('seal request contains only the draft, durable approval receipt, and digest
 
 test('sealed lock reconstructs and verifies the exact approved draft content', () => {
   assert.equal(ProductElementLockV1Schema.safeParse(lock()).success, true);
+  assert.equal(
+    lock().product_image_storage_key,
+    'sealed/viewok/nano-mask/hero-v1.png',
+  );
 
   const drifted = structuredClone(lock());
   drifted.product_name = 'drifted after approval';
