@@ -220,6 +220,19 @@ const AresSpeakerSlotV3InputSchema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (
+      !value.face_id
+      && !value.voice_id
+      && !value.identity_binding_digest
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'Ares speaker requires sealed face_id + voice_id + identity_binding_digest',
+        path: ['identity_binding_digest'],
+      });
+      return;
+    }
     const bindingError = characterIdentityBindingErrorV1(value);
     if (bindingError) {
       ctx.addIssue({

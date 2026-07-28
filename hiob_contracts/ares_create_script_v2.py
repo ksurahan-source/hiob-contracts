@@ -98,6 +98,15 @@ class AresSpeakerSlotV2(BaseModel):
 
     @model_validator(mode="after")
     def _atomic_face_and_voice(self) -> "AresSpeakerSlotV2":
+        if (
+            self.face_id is None
+            and self.voice_id is None
+            and self.identity_binding_digest is None
+        ):
+            raise ValueError(
+                "Ares speaker requires sealed face_id + voice_id + "
+                "identity_binding_digest"
+            )
         errors = character_identity_binding_errors_v1(
             subject_id=self.subject_id,
             face_id=self.face_id,

@@ -160,6 +160,9 @@ def test_ares_speaker_rejects_voice_spec_for_another_subject() -> None:
                 "role": "lead",
                 "subject_id": SUBJECT_ID,
                 "display_name": "수영하는 엄마",
+                "face_id": FACE_ID,
+                "voice_id": VOICE_ID,
+                "identity_binding_digest": _binding_digest(),
                 "voice_spec": _voice_spec("someone-else"),
             }
         )
