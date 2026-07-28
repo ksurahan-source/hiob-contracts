@@ -73,6 +73,15 @@ export {
   aresP2ATargetProjectionV3SchemaDescriptor,
   aresP2ATargetProjectionV3SchemaDigest,
 } from './ares-create-script-v3';
+export {
+  characterIdentityBindingPayloadV1,
+  deriveCharacterIdentityBindingDigestV1,
+} from './character-identity-v1';
+export {
+  VoiceSpecV1Schema,
+  deriveVoiceSpecDigestV1,
+} from './voice-spec-v1';
+export type {VoiceSpecV1} from './voice-spec-v1';
 export type {
   AresRequestScopeV3,
   AresAuthorityArtifactRefV3,
