@@ -41,6 +41,15 @@ def test_voice_spec_has_one_parity_digest_and_is_immutable() -> None:
     ]
     with pytest.raises(ValidationError):
         spec.subject_id = "other"
+    with pytest.raises(TypeError):
+        spec.approved_examples[0] = "mutated"
+
+
+def test_voice_spec_digest_defaults_contract_version_in_helper() -> None:
+    payload = _payload()
+    payload.pop("contract_version")
+
+    assert derive_voice_spec_digest_v1(payload) == EXPECTED_DIGEST
 
 
 @pytest.mark.parametrize("example_count", [2, 6])

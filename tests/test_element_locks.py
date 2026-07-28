@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from hiob_contracts import (
     ElementLocks, ElementRef, CharacterLock, ProductLock, BackgroundLock,
-    ensure_valid, validate_payload, registered_contracts, standing_lookup,
+    derive_character_identity_binding_digest_v1, ensure_valid,
+    validate_payload, registered_contracts, standing_lookup,
 )
 
 APPROVED = {
@@ -138,6 +139,32 @@ def test_standing_lookup_exact_scope_hit():
         "heroine", workspace_id="ws-viewok", brand_slug="viewok",
     )
     assert [r.kind for r in refs] == ["character", "product", "background"]
+
+
+def test_standing_lookup_rejects_approved_invalid_character_binding():
+    invalid = {
+        **APPROVED,
+        "characters": {
+            "heroine": {
+                **APPROVED["characters"]["heroine"],
+                "face_id": "face-1",
+                "voice_id": "voice-1",
+                "identity_binding_digest": (
+                    derive_character_identity_binding_digest_v1(
+                        subject_id="heroine",
+                        face_id="face-1",
+                        voice_id="other-voice",
+                    )
+                ),
+            }
+        },
+    }
+
+    assert standing_lookup(
+        [invalid],
+        workspace_id="ws-viewok",
+        brand_slug="viewok",
+    ) is None
 
 
 def test_validate_approved_requires_a_hero_cut():

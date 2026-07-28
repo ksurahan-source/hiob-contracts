@@ -16,6 +16,7 @@ from hiob_contracts import (
     ares_create_script_result_schema_digest,
     canonical_contract_digest_v1,
     derive_character_identity_binding_digest_v1,
+    derive_voice_spec_digest_v1,
     request_content_digest,
     sha256_digest,
 )
@@ -75,6 +76,18 @@ def _receipt(*, decision: str = "accepted", edge_id: str = "p2a") -> dict:
 def _identity() -> dict:
     face_id = "face_mom_1"
     voice_id = "tc_voice_1"
+    voice_spec_body = {
+        "contract_version": "VoiceSpec.v1",
+        "subject_id": "mom",
+        "rhythm": "짧고 솔직하게",
+        "vocabulary": ["솔직히", "딱"],
+        "forbidden_phrases": ["혁신적인"],
+        "approved_examples": [
+            "솔직히 이건 좀 놀랐어.",
+            "딱 한 번이면 감이 와.",
+            "은근 이런 데서 차이가 나.",
+        ],
+    }
     return {
         "identity_lock_digest": IDENTITY_DIGEST,
         "cast_sheet_digest": sha256_digest({"cast": "sheet-1"}),
@@ -92,6 +105,12 @@ def _identity() -> dict:
                         voice_id=voice_id,
                     )
                 ),
+                "voice_spec": {
+                    **voice_spec_body,
+                    "voice_spec_digest": derive_voice_spec_digest_v1(
+                        voice_spec_body
+                    ),
+                },
             }
         ],
         "locale": "ko",

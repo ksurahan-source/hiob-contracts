@@ -16,6 +16,7 @@ import {
   aresP2ATargetProjectionV3SchemaDigest,
   authorityRefReceiptDigestV3,
 } from './ares-create-script-v3.js';
+import {deriveVoiceSpecDigestV1} from './voice-spec-v1.js';
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -66,6 +67,18 @@ function authorityRef(
 }
 
 function sampleRequest() {
+  const voiceSpecBody = {
+    contract_version: 'VoiceSpec.v1' as const,
+    subject_id: 'mom',
+    rhythm: '짧고 솔직하게',
+    vocabulary: ['솔직히', '딱'],
+    forbidden_phrases: ['혁신적인'],
+    approved_examples: [
+      '솔직히 이건 좀 놀랐어.',
+      '딱 한 번이면 감이 와.',
+      '은근 이런 데서 차이가 나.',
+    ],
+  };
   const identity = {
     identity_lock_digest: identityDigest,
     cast_sheet_digest: digest({ cast: 'sheet-1' }),
@@ -75,6 +88,11 @@ function sampleRequest() {
       display_name: '정원이',
       voice_id: null,
       face_id: null,
+      identity_binding_digest: null,
+      voice_spec: {
+        ...voiceSpecBody,
+        voice_spec_digest: deriveVoiceSpecDigestV1(voiceSpecBody),
+      },
     }],
     locale: 'ko',
     audience_lock: null,

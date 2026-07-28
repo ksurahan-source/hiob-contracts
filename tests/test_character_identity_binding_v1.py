@@ -8,6 +8,7 @@ from hiob_contracts import (
     CharacterLock,
     ElementLocks,
     derive_character_identity_binding_digest_v1,
+    derive_voice_spec_digest_v1,
 )
 
 
@@ -25,6 +26,25 @@ def _binding_digest() -> str:
         face_id=FACE_ID,
         voice_id=VOICE_ID,
     )
+
+
+def _voice_spec(subject_id: str = SUBJECT_ID) -> dict:
+    body = {
+        "contract_version": "VoiceSpec.v1",
+        "subject_id": subject_id,
+        "rhythm": "짧게 끊고 마지막에 한 박자 쉰다",
+        "vocabulary": ["솔직히", "딱", "은근"],
+        "forbidden_phrases": ["혁신적인", "여러분 안녕하세요"],
+        "approved_examples": [
+            "솔직히 이건 좀 놀랐어.",
+            "딱 한 번만 해보면 감이 와.",
+            "은근 이런 데서 차이가 나더라.",
+        ],
+    }
+    return {
+        **body,
+        "voice_spec_digest": derive_voice_spec_digest_v1(body),
+    }
 
 
 def test_character_identity_digest_has_cross_language_vector() -> None:
@@ -97,6 +117,7 @@ def test_ares_speaker_consumes_the_same_atomic_binding() -> None:
             "face_id": FACE_ID,
             "voice_id": VOICE_ID,
             "identity_binding_digest": _binding_digest(),
+            "voice_spec": _voice_spec(),
         }
     )
 
@@ -125,6 +146,19 @@ def test_ares_speaker_fails_closed_on_partial_or_changed_binding(
                 "role": "lead",
                 "subject_id": SUBJECT_ID,
                 "display_name": "수영하는 엄마",
+                "voice_spec": _voice_spec(),
                 **updates,
+            }
+        )
+
+
+def test_ares_speaker_rejects_voice_spec_for_another_subject() -> None:
+    with pytest.raises(ValidationError, match="voice_spec.subject_id"):
+        AresSpeakerSlotV2.model_validate(
+            {
+                "role": "lead",
+                "subject_id": SUBJECT_ID,
+                "display_name": "수영하는 엄마",
+                "voice_spec": _voice_spec("someone-else"),
             }
         )

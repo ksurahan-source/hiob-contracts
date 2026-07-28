@@ -8,6 +8,7 @@ import {
   aresCreateScriptRequestSchemaDigest,
   aresCreateScriptResultSchemaDigest,
 } from './ares-create-script-v2.js';
+import {deriveVoiceSpecDigestV1} from './voice-spec-v1.js';
 
 function digest(value: unknown): string {
   const encoded = JSON.stringify(value);
@@ -18,6 +19,18 @@ const IDENTITY = digest({ identity: 'lead-v3' });
 const PRODUCT = digest({ product: 'xl-serum' });
 
 function sampleRequest() {
+  const voiceSpecBody = {
+    contract_version: 'VoiceSpec.v1' as const,
+    subject_id: 'mom',
+    rhythm: '짧고 솔직하게',
+    vocabulary: ['솔직히', '딱'],
+    forbidden_phrases: ['혁신적인'],
+    approved_examples: [
+      '솔직히 이건 좀 놀랐어.',
+      '딱 한 번이면 감이 와.',
+      '은근 이런 데서 차이가 나.',
+    ],
+  };
   const targetInput = {
     brand_slug: 'viewok',
     protagonist_name: '정원이',
@@ -60,6 +73,10 @@ function sampleRequest() {
           role: 'lead',
           subject_id: 'mom',
           display_name: '정원이',
+          voice_spec: {
+            ...voiceSpecBody,
+            voice_spec_digest: deriveVoiceSpecDigestV1(voiceSpecBody),
+          },
         },
       ],
       locale: 'ko',
