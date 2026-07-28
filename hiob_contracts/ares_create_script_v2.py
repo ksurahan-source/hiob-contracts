@@ -44,6 +44,8 @@ from .ares_script_revision_v1 import (
     canonical_contract_digest_v1,
 )
 from .factory import KarmaEdgeReceipt, sha256_digest
+from .character_identity_v1 import character_identity_binding_errors_v1
+from .voice_spec_v1 import VoiceSpecV1
 from .provenance import ClaimProvenance
 
 
@@ -91,6 +93,19 @@ class AresSpeakerSlotV2(BaseModel):
     display_name: NonBlankStr
     voice_id: NonBlankStr | None = None
     face_id: NonBlankStr | None = None
+    identity_binding_digest: DigestStr | None = None
+
+    @model_validator(mode="after")
+    def _atomic_face_and_voice(self) -> "AresSpeakerSlotV2":
+        errors = character_identity_binding_errors_v1(
+            subject_id=self.subject_id,
+            face_id=self.face_id,
+            voice_id=self.voice_id,
+            identity_binding_digest=self.identity_binding_digest,
+        )
+        if errors:
+            raise ValueError(errors[0])
+        return self
 
 
 class AresIdentitySealedV2(BaseModel):
@@ -101,6 +116,7 @@ class AresIdentitySealedV2(BaseModel):
     identity_lock_digest: DigestStr
     cast_sheet_digest: DigestStr
     speakers: tuple[AresSpeakerSlotV2, ...] = Field(min_length=1)
+    voice_spec: VoiceSpecV1 | None = None
     locale: NonBlankStr = "ko"
     audience_lock: NonBlankStr | None = None
 
@@ -114,6 +130,11 @@ class AresIdentitySealedV2(BaseModel):
         roles = [slot.role for slot in self.speakers]
         if len(roles) != len(set(roles)):
             raise ValueError("speakers roles must be unique")
+        if self.voice_spec is not None:
+            if len(self.speakers) != 1:
+                raise ValueError("voice_spec requires exactly one sealed speaker")
+            if self.voice_spec.subject_id != self.speakers[0].subject_id:
+                raise ValueError("voice_spec.subject_id must match the sealed speaker")
         return self
 
 
@@ -475,9 +496,30 @@ class AresCreateScriptResultV2(BaseModel):
         return self
 
 
-def ares_create_script_request_schema_digest() -> str:
-    """Stable schema digest for request envelope field shape."""
-    schema = {
+def ares_identity_schema_descriptor_v2() -> dict[str, Any]:
+    return {
+        "speaker_fields": sorted(AresSpeakerSlotV2.model_fields),
+        "voice_spec_fields": sorted(VoiceSpecV1.model_fields),
+        "speaker_invariants": [
+            "face_id_and_voice_id_sealed_together",
+            "identity_binding_digest_matches_subject_face_voice",
+        ],
+        "identity_invariants": [
+            "speaker_face_voice_atomic_binding",
+            "speaker_roles_unique",
+            "voice_spec_requires_exactly_one_speaker",
+            "voice_spec_subject_matches_speaker",
+        ],
+        "voice_spec_invariants": [
+            "approved_examples_3_to_5",
+            "voice_spec_digest_matches_content",
+        ],
+    }
+
+
+def ares_create_script_request_schema_descriptor_v2() -> dict[str, Any]:
+    """Canonical request shape and cross-field invariants."""
+    return {
         "contract_version": "AresCreateScriptRequest.v2",
         "fields": sorted(AresCreateScriptRequestV2.model_fields.keys()),
         "authority_fields": sorted(AresAuthorityV2.model_fields.keys()),
@@ -486,8 +528,13 @@ def ares_create_script_request_schema_digest() -> str:
         "evidence_fields": sorted(AresEvidenceAndClaimsSealedV2.model_fields.keys()),
         "hook_fields": sorted(AresHookDirectiveV2.model_fields.keys()),
         "constraints_fields": sorted(AresCreativeConstraintsV2.model_fields.keys()),
+        **ares_identity_schema_descriptor_v2(),
     }
-    return sha256_digest(schema)
+
+
+def ares_create_script_request_schema_digest() -> str:
+    """Stable schema digest for request envelope field shape."""
+    return sha256_digest(ares_create_script_request_schema_descriptor_v2())
 
 
 def ares_create_script_result_schema_digest() -> str:
@@ -524,6 +571,8 @@ __all__ = [
     "AresGenerateUsageV2",
     "AresCreateScriptResultV2",
     "ares_create_script_request_schema_digest",
+    "ares_create_script_request_schema_descriptor_v2",
+    "ares_identity_schema_descriptor_v2",
     "ares_create_script_result_schema_digest",
     "request_content_digest",
 ]

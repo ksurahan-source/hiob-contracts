@@ -55,8 +55,10 @@ def identity_payload() -> dict:
                 "display_name": "정원이",
                 "voice_id": None,
                 "face_id": None,
+                "identity_binding_digest": None,
             }
         ],
+        "voice_spec": None,
         "locale": "ko",
         "audience_lock": None,
     }
@@ -784,7 +786,7 @@ def test_v3_schema_digests_are_stable_and_distinct():
     result_digest = ares_create_script_result_v3_schema_digest()
     # These are also asserted by the TypeScript mirror test.
     assert request_digest == (
-        "sha256:f70720ef05786605cd31a50cdd68201b81306b87fb95e200e2aa1b8dcca0cabc"
+        "sha256:e3043b68c15ecdc9c560912067c8b7c6b7f25cdce3bce6dfb0facf20204be8b6"
     )
     assert result_digest == (
         "sha256:72a50c6d3305b158441328e024d630a9cdd0fe3f974d76bce7ab80d9d52c8de0"

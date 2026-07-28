@@ -23,6 +23,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, asdict
 from typing import Any, Iterable, Optional, Union
 
+from .character_identity_v1 import character_identity_binding_errors_v1
+
 LOCK_STATUSES = ("draft", "approved")
 ELEMENT_KINDS = ("character", "product", "background")
 
@@ -71,6 +73,9 @@ class CharacterLock:
     persona_id: str
     hero_cut: Optional[ElementRef] = None
     voice_persona: Optional[str] = None       # 기존 voice_face_lock과 이중 락
+    face_id: Optional[str] = None
+    voice_id: Optional[str] = None
+    identity_binding_digest: Optional[str] = None
     sheet: dict = field(default_factory=dict)
     wardrobe: dict = field(default_factory=dict)   # {outfit, palette, forbidden[]}
 
@@ -80,6 +85,14 @@ class CharacterLock:
             errs.append("CharacterLock.persona_id 없음")
         if self.hero_cut is not None:
             errs.extend(self.hero_cut.validate())
+        errs.extend(
+            character_identity_binding_errors_v1(
+                subject_id=self.persona_id,
+                face_id=self.face_id,
+                voice_id=self.voice_id,
+                identity_binding_digest=self.identity_binding_digest,
+            )
+        )
         return errs
 
 
@@ -256,6 +269,9 @@ class ElementLocks:
                 persona_id=_s(pid),
                 hero_cut=_ref_from(cd.get("hero_cut"), "character"),
                 voice_persona=_s(cd.get("voice_persona")) or None,
+                face_id=_s(cd.get("face_id")) or None,
+                voice_id=_s(cd.get("voice_id")) or None,
+                identity_binding_digest=_s(cd.get("identity_binding_digest")) or None,
                 sheet=dict(cd.get("sheet") or {}),
                 wardrobe=dict((cd.get("sheet") or {}).get("wardrobe") or cd.get("wardrobe") or {}),
             )
@@ -298,6 +314,9 @@ class ElementLocks:
                 pid: {
                     "hero_cut": c.hero_cut.to_dict() if c.hero_cut else None,
                     "voice_persona": c.voice_persona,
+                    "face_id": c.face_id,
+                    "voice_id": c.voice_id,
+                    "identity_binding_digest": c.identity_binding_digest,
                     "sheet": c.sheet,
                     "wardrobe": c.wardrobe,
                 }

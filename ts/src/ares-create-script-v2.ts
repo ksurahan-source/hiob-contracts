@@ -8,8 +8,13 @@
 import { z } from 'zod';
 
 import { sha256Digest } from './factory/digest.js';
+import { characterIdentityBindingErrorV1 } from './character-identity-v1.js';
+import { VoiceSpecV1Schema } from './voice-spec-v1.js';
 
-const NonEmptyString = z.string().trim().min(1);
+const NonEmptyString = z.string().refine(
+  (value) => value.trim().length > 0,
+  'string must not be blank',
+);
 const DigestSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, 'digest must be sha256:<64 lowercase hex>');
@@ -106,18 +111,56 @@ export const AresSpeakerSlotV2Schema = z
     display_name: NonEmptyString,
     voice_id: NonEmptyString.nullable().optional(),
     face_id: NonEmptyString.nullable().optional(),
+    identity_binding_digest: DigestSchema.nullable().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const error = characterIdentityBindingErrorV1(value);
+    if (error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: error,
+        path: ['identity_binding_digest'],
+      });
+    }
+  });
 
 export const AresIdentitySealedV2Schema = z
   .object({
     identity_lock_digest: DigestSchema,
     cast_sheet_digest: DigestSchema,
     speakers: z.array(AresSpeakerSlotV2Schema).min(1),
+    voice_spec: VoiceSpecV1Schema.nullable().optional(),
     locale: NonEmptyString.default('ko'),
     audience_lock: NonEmptyString.nullable().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const roles = value.speakers.map((speaker) => speaker.role);
+    if (new Set(roles).size !== roles.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'speakers roles must be unique',
+        path: ['speakers'],
+      });
+    }
+    if (value.voice_spec && value.speakers.length !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'voice_spec requires exactly one sealed speaker',
+        path: ['voice_spec'],
+      });
+    } else if (
+      value.voice_spec
+      && value.voice_spec.subject_id !== value.speakers[0].subject_id
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'voice_spec.subject_id must match the sealed speaker',
+        path: ['voice_spec', 'subject_id'],
+      });
+    }
+  });
 
 export const AresProductFactsSealedV2Schema = z
   .object({
@@ -349,9 +392,45 @@ export const AresCreateScriptResultV2Schema = z
     }
   });
 
-/** Field-shape digests — keep keys sorted to match Python schema digests. */
-export function aresCreateScriptRequestSchemaDigest(): string {
-  return sha256Digest({
+export function aresIdentitySchemaDescriptorV2() {
+  return {
+    speaker_fields: [
+      'display_name',
+      'face_id',
+      'identity_binding_digest',
+      'role',
+      'subject_id',
+      'voice_id',
+    ].sort(),
+    voice_spec_fields: [
+      'approved_examples',
+      'contract_version',
+      'forbidden_phrases',
+      'rhythm',
+      'subject_id',
+      'voice_spec_digest',
+      'vocabulary',
+    ].sort(),
+    speaker_invariants: [
+      'face_id_and_voice_id_sealed_together',
+      'identity_binding_digest_matches_subject_face_voice',
+    ],
+    identity_invariants: [
+      'speaker_face_voice_atomic_binding',
+      'speaker_roles_unique',
+      'voice_spec_requires_exactly_one_speaker',
+      'voice_spec_subject_matches_speaker',
+    ],
+    voice_spec_invariants: [
+      'approved_examples_3_to_5',
+      'voice_spec_digest_matches_content',
+    ],
+  };
+}
+
+/** Field-shape descriptors — keep keys sorted to match Python. */
+export function aresCreateScriptRequestSchemaDescriptorV2() {
+  return {
     contract_version: 'AresCreateScriptRequest.v2',
     fields: [
       'authority',
@@ -373,6 +452,7 @@ export function aresCreateScriptRequestSchemaDigest(): string {
       'identity_lock_digest',
       'locale',
       'speakers',
+      'voice_spec',
     ].sort(),
     product_fields: [
       'brand_display_name',
@@ -413,7 +493,12 @@ export function aresCreateScriptRequestSchemaDigest(): string {
       'style_mode',
       'vertical_mode',
     ].sort(),
-  });
+    ...aresIdentitySchemaDescriptorV2(),
+  };
+}
+
+export function aresCreateScriptRequestSchemaDigest(): string {
+  return sha256Digest(aresCreateScriptRequestSchemaDescriptorV2());
 }
 
 export function aresCreateScriptResultSchemaDigest(): string {

@@ -43,6 +43,7 @@ export {
   AresCreateScriptResultV2Schema,
   ScriptPackageV2Schema,
   BeatPlanV2Schema,
+  aresCreateScriptRequestSchemaDescriptorV2,
   aresCreateScriptRequestSchemaDigest,
   aresCreateScriptResultSchemaDigest,
 } from './ares-create-script-v2';
@@ -67,12 +68,28 @@ export {
   AresGenerateProvenanceV3Schema,
   AresGenerateUsageV3Schema,
   AresCreateScriptResultV3Schema,
+  aresCreateScriptRequestV3SchemaDescriptor,
   aresCreateScriptRequestV3SchemaDigest,
   aresCreateScriptResultV3SchemaDigest,
   authorityRefReceiptDigestV3,
   aresP2ATargetProjectionV3SchemaDescriptor,
   aresP2ATargetProjectionV3SchemaDigest,
 } from './ares-create-script-v3';
+
+export {
+  characterIdentityBindingPayloadV1,
+  deriveCharacterIdentityBindingDigestV1,
+} from './character-identity-v1';
+export {
+  VoiceSpecV1Schema,
+  deriveVoiceSpecDigestV1,
+} from './voice-spec-v1';
+export type { VoiceSpecV1 } from './voice-spec-v1';
+export {
+  ParzifalVoiceEnvelopeV1Schema,
+  deriveParzifalVoiceEnvelopeDigestV1,
+} from './parzifal-voice-envelope-v1';
+export type { ParzifalVoiceEnvelopeV1 } from './parzifal-voice-envelope-v1';
 export type {
   AresRequestScopeV3,
   AresAuthorityArtifactRefV3,

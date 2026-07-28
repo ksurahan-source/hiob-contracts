@@ -9,6 +9,7 @@ import {
   AresP2ATargetProjectionV3Schema,
   AresRequestScopeV3Schema,
   AresSemanticBeatV3Schema,
+  AresSpeakerSlotV3InputSchema,
   ScriptPackageV3Schema,
   aresCreateScriptRequestV3SchemaDigest,
   aresCreateScriptResultV3SchemaDigest,
@@ -16,6 +17,7 @@ import {
   aresP2ATargetProjectionV3SchemaDigest,
   authorityRefReceiptDigestV3,
 } from './ares-create-script-v3.js';
+import { deriveCharacterIdentityBindingDigestV1 } from './character-identity-v1.js';
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -75,7 +77,9 @@ function sampleRequest() {
       display_name: '정원이',
       voice_id: null,
       face_id: null,
+      identity_binding_digest: null,
     }],
+    voice_spec: null,
     locale: 'ko',
     audience_lock: null,
   };
@@ -207,6 +211,29 @@ function sampleRequest() {
     creative_constraints: creativeConstraints,
   };
 }
+
+test('V3 speaker requires the atomic face and voice binding', () => {
+  const speaker = {
+    role: 'lead',
+    subject_id: 'mom',
+    display_name: '정원이',
+    face_id: 'face-mom-1',
+    voice_id: 'voice-mom-1',
+    identity_binding_digest: deriveCharacterIdentityBindingDigestV1({
+      subject_id: 'mom',
+      face_id: 'face-mom-1',
+      voice_id: 'voice-mom-1',
+    }),
+  };
+  assert.equal(AresSpeakerSlotV3InputSchema.safeParse(speaker).success, true);
+  assert.equal(
+    AresSpeakerSlotV3InputSchema.safeParse({
+      ...speaker,
+      identity_binding_digest: digest({ wrong: true }),
+    }).success,
+    false,
+  );
+});
 
 test('projection schema rejects cross-scope and wrong-owner refs directly', () => {
   const base = sampleRequest().authority.accepted_p2a_receipt.target_input;
@@ -644,7 +671,7 @@ test('Python and TS schema shape digests are stable', () => {
   const resultDigest = aresCreateScriptResultV3SchemaDigest();
   assert.equal(
     requestDigest,
-    'sha256:f70720ef05786605cd31a50cdd68201b81306b87fb95e200e2aa1b8dcca0cabc',
+    'sha256:e3043b68c15ecdc9c560912067c8b7c6b7f25cdce3bce6dfb0facf20204be8b6',
   );
   assert.equal(
     resultDigest,

@@ -41,6 +41,15 @@ from .element_locks import (
     ElementLocks, ElementRef, CharacterLock, ProductLock, BackgroundLock,
     LOCK_STATUSES, ELEMENT_KINDS, standing_lookup,
 )
+from .character_identity_v1 import (
+    character_identity_binding_payload_v1,
+    derive_character_identity_binding_digest_v1,
+)
+from .voice_spec_v1 import VoiceSpecV1, derive_voice_spec_digest_v1
+from .parzifal_voice_envelope_v1 import (
+    ParzifalVoiceEnvelopeV1,
+    derive_parzifal_voice_envelope_digest_v1,
+)
 from .planet_envelopes import VisualContext, VisualRequest, AudioRequest, SFXRequest, RenderJobRequest, RenderJobResponse, ProcessInsightsRequest
 from .planet_io import PlanetIO, PLANET_IO, Conformance, io_for, needs_new_contract, dsl_ready
 from .envelope_validation import (
@@ -124,6 +133,7 @@ from .ares_create_script_v2 import (
     AresGenerateUsageV2,
     AresCreateScriptResultV2,
     ares_create_script_request_schema_digest,
+    ares_create_script_request_schema_descriptor_v2,
     ares_create_script_result_schema_digest,
     request_content_digest,
 )
@@ -146,6 +156,7 @@ from .ares_create_script_v3 import (
     AresGenerateUsageV3,
     AresCreateScriptResultV3,
     ares_create_script_request_v3_schema_digest,
+    ares_create_script_request_v3_schema_descriptor,
     ares_create_script_result_v3_schema_digest,
     request_content_digest_v3,
 )
@@ -252,6 +263,7 @@ __all__ = [
     "BeatPlanV2", "AresQualityFindingV2", "AresGenerateProvenanceV2",
     "AresGenerateUsageV2", "AresCreateScriptResultV2",
     "ares_create_script_request_schema_digest",
+    "ares_create_script_request_schema_descriptor_v2",
     "ares_create_script_result_schema_digest", "request_content_digest",
     "AresRequestScopeV3", "authority_ref_receipt_digest_v3",
     "AresAuthorityArtifactRefV3", "AresP2ATargetProjectionV3",
@@ -264,6 +276,7 @@ __all__ = [
     "AresQualityFindingV3", "AresGenerateProvenanceV3",
     "AresGenerateUsageV3", "AresCreateScriptResultV3",
     "ares_create_script_request_v3_schema_digest",
+    "ares_create_script_request_v3_schema_descriptor",
     "ares_create_script_result_v3_schema_digest", "request_content_digest_v3",
 
     "canonical_contract_json_v1", "canonical_contract_digest_v1",
@@ -284,6 +297,11 @@ __all__ = [
     "VisualContext","VisualRequest","AudioRequest","SFXRequest","RenderJobRequest","RenderJobResponse","ProcessInsightsRequest",
     "BeatPersona", "BeatPersonas",
     "ElementLocks", "ElementRef", "CharacterLock", "ProductLock", "BackgroundLock",
+    "character_identity_binding_payload_v1",
+    "derive_character_identity_binding_digest_v1",
+    "VoiceSpecV1", "derive_voice_spec_digest_v1",
+    "ParzifalVoiceEnvelopeV1",
+    "derive_parzifal_voice_envelope_digest_v1",
     "LOCK_STATUSES", "ELEMENT_KINDS", "standing_lookup",
     "PlanetIO", "PLANET_IO", "Conformance", "io_for", "needs_new_contract", "dsl_ready",
     "Intake13Q", "JanusBrief",
