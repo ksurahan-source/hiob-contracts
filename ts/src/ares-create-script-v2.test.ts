@@ -9,6 +9,7 @@ import {
   aresCreateScriptResultSchemaDigest,
 } from './ares-create-script-v2.js';
 import {deriveVoiceSpecDigestV1} from './voice-spec-v1.js';
+import {deriveCharacterIdentityBindingDigestV1} from './character-identity-v1.js';
 
 function digest(value: unknown): string {
   const encoded = JSON.stringify(value);
@@ -19,6 +20,8 @@ const IDENTITY = digest({ identity: 'lead-v3' });
 const PRODUCT = digest({ product: 'xl-serum' });
 
 function sampleRequest() {
+  const faceId = 'face_mom_1';
+  const voiceId = 'tc_voice_1';
   const voiceSpecBody = {
     contract_version: 'VoiceSpec.v1' as const,
     subject_id: 'mom',
@@ -73,6 +76,13 @@ function sampleRequest() {
           role: 'lead',
           subject_id: 'mom',
           display_name: '정원이',
+          face_id: faceId,
+          voice_id: voiceId,
+          identity_binding_digest: deriveCharacterIdentityBindingDigestV1({
+            subject_id: 'mom',
+            face_id: faceId,
+            voice_id: voiceId,
+          }),
           voice_spec: {
             ...voiceSpecBody,
             voice_spec_digest: deriveVoiceSpecDigestV1(voiceSpecBody),
@@ -124,6 +134,20 @@ test('request schema rejects blocked receipt', () => {
   authority.accepted_p2a_receipt = receipt;
   body.authority = authority;
   assert.equal(AresCreateScriptRequestV2Schema.safeParse(body).success, false);
+});
+
+test('request schema rejects absent or mismatched speaker identity seal', () => {
+  const absent = sampleRequest();
+  const absentSpeaker = absent.identity.speakers[0] as Record<string, unknown>;
+  absentSpeaker.face_id = null;
+  absentSpeaker.voice_id = null;
+  absentSpeaker.identity_binding_digest = null;
+  assert.equal(AresCreateScriptRequestV2Schema.safeParse(absent).success, false);
+
+  const mismatch = sampleRequest();
+  mismatch.identity.speakers[0].identity_binding_digest =
+    `sha256:${'0'.repeat(64)}`;
+  assert.equal(AresCreateScriptRequestV2Schema.safeParse(mismatch).success, false);
 });
 
 test('result schema rejects package on blocked status', () => {

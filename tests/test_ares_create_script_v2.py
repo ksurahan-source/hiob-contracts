@@ -414,6 +414,24 @@ def test_request_rejects_empty_speakers():
         AresCreateScriptRequestV2.model_validate(data)
 
 
+@pytest.mark.parametrize("case", ["absent", "mismatch"])
+def test_request_rejects_unsealed_speaker_identity(case: str):
+    data = request_data()
+    speaker = data["identity"]["speakers"][0]
+    if case == "absent":
+        for field in (
+            "face_id",
+            "voice_id",
+            "identity_binding_digest",
+        ):
+            speaker.pop(field, None)
+    else:
+        speaker["identity_binding_digest"] = "sha256:" + "0" * 64
+
+    with pytest.raises(ValidationError):
+        AresCreateScriptRequestV2.model_validate(data)
+
+
 def test_request_rejects_claim_not_in_allowlist():
     data = request_data()
     data["evidence_and_claims"]["allowed_claim_ids"] = ["other"]

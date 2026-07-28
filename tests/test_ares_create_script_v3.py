@@ -19,6 +19,7 @@ from hiob_contracts import (
     ares_create_script_request_v3_schema_digest,
     ares_create_script_result_v3_schema_digest,
     canonical_contract_digest_v1,
+    derive_character_identity_binding_digest_v1,
     request_content_digest_v3,
     sha256_digest,
     derive_voice_spec_digest_v1,
@@ -46,6 +47,8 @@ KARMA_OUTPUT_DIGEST = sha256_digest({"karma": "p2a-output-1"})
 
 
 def identity_payload() -> dict:
+    face_id = "face_mom_1"
+    voice_id = "tc_voice_1"
     voice_spec_body = {
         "contract_version": "VoiceSpec.v1",
         "subject_id": "mom",
@@ -66,9 +69,15 @@ def identity_payload() -> dict:
                 "role": "lead",
                 "subject_id": "mom",
                 "display_name": "정원이",
-                "voice_id": None,
-                "face_id": None,
-                "identity_binding_digest": None,
+                "voice_id": voice_id,
+                "face_id": face_id,
+                "identity_binding_digest": (
+                    derive_character_identity_binding_digest_v1(
+                        subject_id="mom",
+                        face_id=face_id,
+                        voice_id=voice_id,
+                    )
+                ),
                 "voice_spec": {
                     **voice_spec_body,
                     "voice_spec_digest": derive_voice_spec_digest_v1(
@@ -189,8 +198,8 @@ def authority_ref(
     return body
 
 
-def request_data() -> dict:
-    identity = identity_payload()
+def request_data(identity_override: dict | None = None) -> dict:
+    identity = identity_override or identity_payload()
     product = product_payload()
     evidence = evidence_payload()
     hook = hook_payload()
@@ -425,6 +434,25 @@ def test_v3_accepts_five_producer_issued_refs_and_full_scope():
         ],
     }
     assert request_content_digest_v3(request).startswith("sha256:")
+
+
+@pytest.mark.parametrize("case", ["absent", "mismatch"])
+def test_v3_rejects_unsealed_speaker_identity(case: str):
+    identity = identity_payload()
+    speaker = identity["speakers"][0]
+    if case == "absent":
+        for field in (
+            "face_id",
+            "voice_id",
+            "identity_binding_digest",
+        ):
+            speaker.pop(field, None)
+    else:
+        speaker["identity_binding_digest"] = "sha256:" + "0" * 64
+    body = request_data(identity)
+
+    with pytest.raises(ValidationError):
+        AresCreateScriptRequestV3.model_validate(body)
 
 
 @pytest.mark.parametrize(

@@ -127,6 +127,15 @@ test('AresSpeakerSlotV2 atomically consumes identity and matching VoiceSpec', ()
   assert.equal(AresSpeakerSlotV2Schema.safeParse(speaker).success, true);
   assert.equal(
     AresSpeakerSlotV2Schema.safeParse({
+      role: speaker.role,
+      subject_id: speaker.subject_id,
+      display_name: speaker.display_name,
+      voice_spec: speaker.voice_spec,
+    }).success,
+    false,
+  );
+  assert.equal(
+    AresSpeakerSlotV2Schema.safeParse({
       ...speaker,
       identity_binding_digest: `sha256:${'0'.repeat(64)}`,
     }).success,

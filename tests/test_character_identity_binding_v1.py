@@ -127,6 +127,7 @@ def test_ares_speaker_consumes_the_same_atomic_binding() -> None:
 @pytest.mark.parametrize(
     "updates",
     [
+        {},
         {"face_id": FACE_ID},
         {"voice_id": VOICE_ID},
         {"face_id": FACE_ID, "voice_id": VOICE_ID},

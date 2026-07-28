@@ -17,6 +17,7 @@ import {
   authorityRefReceiptDigestV3,
 } from './ares-create-script-v3.js';
 import {deriveVoiceSpecDigestV1} from './voice-spec-v1.js';
+import {deriveCharacterIdentityBindingDigestV1} from './character-identity-v1.js';
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -66,7 +67,11 @@ function authorityRef(
   };
 }
 
-function sampleRequest() {
+function sampleRequest(
+  speakerSeal: 'valid' | 'absent' | 'mismatch' = 'valid',
+) {
+  const faceId = 'face_mom_1';
+  const voiceId = 'tc_voice_1';
   const voiceSpecBody = {
     contract_version: 'VoiceSpec.v1' as const,
     subject_id: 'mom',
@@ -86,9 +91,13 @@ function sampleRequest() {
       role: 'lead',
       subject_id: 'mom',
       display_name: '정원이',
-      voice_id: null,
-      face_id: null,
-      identity_binding_digest: null,
+      voice_id: voiceId,
+      face_id: faceId,
+      identity_binding_digest: deriveCharacterIdentityBindingDigestV1({
+        subject_id: 'mom',
+        face_id: faceId,
+        voice_id: voiceId,
+      }),
       voice_spec: {
         ...voiceSpecBody,
         voice_spec_digest: deriveVoiceSpecDigestV1(voiceSpecBody),
@@ -97,6 +106,14 @@ function sampleRequest() {
     locale: 'ko',
     audience_lock: null,
   };
+  const speaker = identity.speakers[0] as Record<string, unknown>;
+  if (speakerSeal === 'absent') {
+    speaker.face_id = null;
+    speaker.voice_id = null;
+    speaker.identity_binding_digest = null;
+  } else if (speakerSeal === 'mismatch') {
+    speaker.identity_binding_digest = `sha256:${'0'.repeat(64)}`;
+  }
   const product = {
     product_truth_digest: productDigest,
     brand_slug: 'viewok',
@@ -355,6 +372,14 @@ test('V3 accepts five producer-issued refs and full scope', () => {
   const parsed = AresCreateScriptRequestV3Schema.parse(sampleRequest());
   assert.equal(parsed.authority.identity_ref.producer, 'parzifal');
   assert.equal(parsed.scope.operation_id, 'op-script-v3-1');
+});
+
+test('V3 rejects absent or mismatched speaker identity seal', () => {
+  const absent = sampleRequest('absent');
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(absent).success, false);
+
+  const mismatch = sampleRequest('mismatch');
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(mismatch).success, false);
 });
 
 test('V3 rejects Star-minted identity authority', () => {
