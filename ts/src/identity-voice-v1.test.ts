@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  characterIdentityBindingErrorV1,
   deriveCharacterIdentityBindingDigestV1,
 } from './character-identity-v1.js';
 import {AresSpeakerSlotV2Schema} from './ares-create-script-v2.js';
-import {characterIdentityBindingErrorV1} from './index.js';
 import {
   VoiceSpecV1Schema,
   deriveVoiceSpecDigestV1,

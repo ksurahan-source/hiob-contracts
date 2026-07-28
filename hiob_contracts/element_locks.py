@@ -357,6 +357,8 @@ def standing_lookup(
             continue
         el = rec if isinstance(rec, ElementLocks) else ElementLocks.from_dict(rec if isinstance(rec, dict) else None)
         if el.matches_scope(ws, br):
+            if el.is_approved and el.validate():
+                return None
             return el
     return None
 

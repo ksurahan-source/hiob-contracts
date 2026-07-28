@@ -8,6 +8,8 @@
 import { z } from 'zod';
 
 import { sha256Digest } from './factory/digest.js';
+import {characterIdentityBindingErrorV1} from './character-identity-v1.js';
+import {VoiceSpecV1Schema} from './voice-spec-v1.js';
 
 const NonEmptyString = z.string().trim().min(1);
 const DigestSchema = z
@@ -106,8 +108,27 @@ export const AresSpeakerSlotV2Schema = z
     display_name: NonEmptyString,
     voice_id: NonEmptyString.nullable().optional(),
     face_id: NonEmptyString.nullable().optional(),
+    identity_binding_digest: DigestSchema.nullable().optional(),
+    voice_spec: VoiceSpecV1Schema,
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    const bindingError = characterIdentityBindingErrorV1(value);
+    if (bindingError) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: bindingError,
+        path: ['identity_binding_digest'],
+      });
+    }
+    if (value.voice_spec.subject_id !== value.subject_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'voice_spec.subject_id must match speaker subject_id',
+        path: ['voice_spec', 'subject_id'],
+      });
+    }
+  });
 
 export const AresIdentitySealedV2Schema = z
   .object({
@@ -373,6 +394,24 @@ export function aresCreateScriptRequestSchemaDigest(): string {
       'identity_lock_digest',
       'locale',
       'speakers',
+    ].sort(),
+    speaker_fields: [
+      'display_name',
+      'face_id',
+      'identity_binding_digest',
+      'role',
+      'subject_id',
+      'voice_id',
+      'voice_spec',
+    ].sort(),
+    voice_spec_fields: [
+      'approved_examples',
+      'contract_version',
+      'forbidden_phrases',
+      'rhythm',
+      'subject_id',
+      'vocabulary',
+      'voice_spec_digest',
     ].sort(),
     product_fields: [
       'brand_display_name',

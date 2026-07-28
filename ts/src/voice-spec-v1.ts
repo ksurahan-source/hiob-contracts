@@ -24,9 +24,10 @@ export function deriveVoiceSpecDigestV1(
   value: VoiceSpecDigestInputV1 | Record<string, unknown>,
 ): string {
   const input = value as Record<string, unknown>;
-  const payload: Record<string, unknown> = {};
+  const payload: Record<string, unknown> = {
+    contract_version: input.contract_version ?? 'VoiceSpec.v1',
+  };
   for (const key of [
-    'contract_version',
     'subject_id',
     'rhythm',
     'vocabulary',
@@ -36,6 +37,22 @@ export function deriveVoiceSpecDigestV1(
     if (key in input) payload[key] = input[key];
   }
   return sha256Digest(payload);
+}
+
+type DeepReadonly<T> = T extends readonly (infer Item)[]
+  ? readonly DeepReadonly<Item>[]
+  : T extends object
+    ? {readonly [Key in keyof T]: DeepReadonly<T[Key]>}
+    : T;
+
+function deepFreeze<T>(value: T): DeepReadonly<T> {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value as Record<string, unknown>)) {
+      deepFreeze(nested);
+    }
+    Object.freeze(value);
+  }
+  return value as DeepReadonly<T>;
 }
 
 export const VoiceSpecV1Schema = z
@@ -60,6 +77,7 @@ export const VoiceSpecV1Schema = z
         path: ['voice_spec_digest'],
       });
     }
-  });
+  })
+  .transform(deepFreeze);
 
-export type VoiceSpecV1 = z.infer<typeof VoiceSpecV1Schema>;
+export type VoiceSpecV1 = z.output<typeof VoiceSpecV1Schema>;

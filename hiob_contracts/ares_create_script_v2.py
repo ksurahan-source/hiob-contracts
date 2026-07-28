@@ -46,6 +46,7 @@ from .ares_script_revision_v1 import (
 from .factory import KarmaEdgeReceipt, sha256_digest
 from .character_identity_v1 import character_identity_binding_errors_v1
 from .provenance import ClaimProvenance
+from .voice_spec_v1 import VoiceSpecV1
 
 
 # ── Sealed request sections ────────────────────────────────────────────────
@@ -93,6 +94,7 @@ class AresSpeakerSlotV2(BaseModel):
     voice_id: NonBlankStr | None = None
     face_id: NonBlankStr | None = None
     identity_binding_digest: DigestStr | None = None
+    voice_spec: VoiceSpecV1
 
     @model_validator(mode="after")
     def _atomic_face_and_voice(self) -> "AresSpeakerSlotV2":
@@ -104,6 +106,10 @@ class AresSpeakerSlotV2(BaseModel):
         )
         if errors:
             raise ValueError(errors[0])
+        if self.voice_spec.subject_id != self.subject_id:
+            raise ValueError(
+                "voice_spec.subject_id must match speaker subject_id"
+            )
         return self
 
 
@@ -496,6 +502,8 @@ def ares_create_script_request_schema_digest() -> str:
         "fields": sorted(AresCreateScriptRequestV2.model_fields.keys()),
         "authority_fields": sorted(AresAuthorityV2.model_fields.keys()),
         "identity_fields": sorted(AresIdentitySealedV2.model_fields.keys()),
+        "speaker_fields": sorted(AresSpeakerSlotV2.model_fields.keys()),
+        "voice_spec_fields": sorted(VoiceSpecV1.model_fields.keys()),
         "product_fields": sorted(AresProductFactsSealedV2.model_fields.keys()),
         "evidence_fields": sorted(AresEvidenceAndClaimsSealedV2.model_fields.keys()),
         "hook_fields": sorted(AresHookDirectiveV2.model_fields.keys()),

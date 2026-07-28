@@ -29,8 +29,10 @@ from .ares_create_script_v2 import (
     AresEvidenceAndClaimsSealedV2,
     AresHookDirectiveV2,
     AresIdentitySealedV2,
+    AresSpeakerSlotV2,
     AresProductFactsSealedV2,
 )
+from .voice_spec_v1 import VoiceSpecV1
 from .ares_script_revision_v1 import (
     AresScriptSegmentV1,
     DigestStr,
@@ -802,6 +804,8 @@ def ares_create_script_request_v3_schema_digest() -> str:
         "authority_fields": sorted(AresAuthorityBundleV3.model_fields),
         "authority_ref_fields": sorted(AresAuthorityArtifactRefV3.model_fields),
         "identity_fields": sorted(AresIdentitySealedV2.model_fields),
+        "speaker_fields": sorted(AresSpeakerSlotV2.model_fields),
+        "voice_spec_fields": sorted(VoiceSpecV1.model_fields),
         "product_fields": sorted(AresProductFactsSealedV2.model_fields),
         "evidence_fields": sorted(AresEvidenceAndClaimsSealedV2.model_fields),
         "hook_fields": sorted(AresHookDirectiveV2.model_fields),

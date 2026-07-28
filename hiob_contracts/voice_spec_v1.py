@@ -22,18 +22,23 @@ def _voice_spec_payload_v1(
         if isinstance(value, BaseModel)
         else dict(value)
     )
-    return {
-        key: data[key]
-        for key in (
-            "contract_version",
-            "subject_id",
-            "rhythm",
-            "vocabulary",
-            "forbidden_phrases",
-            "approved_examples",
-        )
-        if key in data
+    payload = {
+        "contract_version": data.get("contract_version", "VoiceSpec.v1")
     }
+    payload.update(
+        {
+            key: data[key]
+            for key in (
+                "subject_id",
+                "rhythm",
+                "vocabulary",
+                "forbidden_phrases",
+                "approved_examples",
+            )
+            if key in data
+        }
+    )
+    return payload
 
 
 def derive_voice_spec_digest_v1(

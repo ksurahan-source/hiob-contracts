@@ -75,6 +75,7 @@ export {
 } from './ares-create-script-v3';
 export {
   characterIdentityBindingPayloadV1,
+  characterIdentityBindingErrorV1,
   deriveCharacterIdentityBindingDigestV1,
 } from './character-identity-v1';
 export {
