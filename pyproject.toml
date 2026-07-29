@@ -15,3 +15,6 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["hiob_contracts*"]
+
+[tool.setuptools.package-data]
+hiob_contracts = ["runtime_node_manifest.json"]

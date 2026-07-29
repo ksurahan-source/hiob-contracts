@@ -15,7 +15,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:09457787ff978494950fdba481a00050e6b6f28038eb6c88b1bdc92988cf8bc3"
+      "contract_source": "hiob_apollo/node_server/registry.py",
+      "entry_digest": "sha256:11b4c77012c3f44eea337a95df674bccdde85931c814f1bc70a866a003a9d6a0"
     },
     {
       "node_id": "apollo.sfx.materialize",
@@ -30,7 +31,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:9dd138099ccec55c566d2165d48b3ae489a39a30b2c4f5c7d4c8a0a3592f1799"
+      "contract_source": "hiob_apollo/node_server/registry.py",
+      "entry_digest": "sha256:7abd4cb2927bfc6b8b9324e2b57761f3ff6934be8d0897b16c48def09cb4f3dc"
     },
     {
       "node_id": "apollo.sfx.select",
@@ -45,7 +47,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:7cc4abac15a51ea52b327ca5b08853fff558817470cfb07ee459568837f1890b"
+      "contract_source": "hiob_apollo/node_server/registry.py",
+      "entry_digest": "sha256:4b2255dfcb3b78639ad2d8d597b56c138c8c8a7daa6aa48729fdaa1241b35ca5"
     },
     {
       "node_id": "ares.plan.assemble_revision",
@@ -60,7 +63,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:87b4a797079aada84646e0b2d3ff7ae81fd8cc505c230f234d4bd325a56f40da"
+      "contract_source": "hiob_ares/node_server/registry.py",
+      "entry_digest": "sha256:e8d5395ab2399217a96907ec2cf08136267194203bad87409ffbaa1c2a990698"
     },
     {
       "node_id": "ares.revision.assemble_pair",
@@ -75,7 +79,8 @@
       "status": "blocked",
       "blocker": "MISSING_OUTPUT_SCHEMA_DIGEST",
       "output_schema_digest": null,
-      "entry_digest": "sha256:ba66d01cce08084e0739c37a27f1ea1f72092029995c2e7d01dd994975fbd8fb"
+      "contract_source": "hiob_ares/node_server/registry.py",
+      "entry_digest": "sha256:66bc00c98af1924a2d7ed9d267e1609e9771cbe2cb68f1a95711a376d007c051"
     },
     {
       "node_id": "ares.revision.seal_generated_pair",
@@ -90,7 +95,8 @@
       "status": "blocked",
       "blocker": "MISSING_OUTPUT_SCHEMA_DIGEST",
       "output_schema_digest": null,
-      "entry_digest": "sha256:695116b4dd2d61fce11b2605da711d10cea2f6b0282b52108bfd1797980cdd62"
+      "contract_source": "hiob_ares/node_server/registry.py",
+      "entry_digest": "sha256:db0e36c2b1d353b04bb4443e085d7cbcef0659d5b9fb5cd3bee6a7159d7f8af5"
     },
     {
       "node_id": "ares.script.assemble_revision",
@@ -105,7 +111,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:1925bd710a5eca858bc3e43a7fe2dfb2f2c93a6856f8843d11fb459c45e2a4b4"
+      "contract_source": "hiob_ares/node_server/registry.py",
+      "entry_digest": "sha256:cd36ea3a24a5c17bad327fc04cdfc417f3005a6b0a19b2b296eea461bdb3bfbb"
     },
     {
       "node_id": "ares.script.build",
@@ -120,7 +127,8 @@
       "status": "blocked",
       "blocker": "MISSING_OUTPUT_SCHEMA_DIGEST",
       "output_schema_digest": null,
-      "entry_digest": "sha256:ae2ebee7738913ac14832abffe368a8d7552687572412b605c92f4d14e5c8cb9"
+      "contract_source": "hiob_ares/node_server/registry.py",
+      "entry_digest": "sha256:4b35c3b3d5e85c2f37a523bf603033cf3ba0c42eeacb7d5343de2c4a927b43a3"
     },
     {
       "node_id": "ares.script.build_kit",
@@ -135,7 +143,8 @@
       "status": "blocked",
       "blocker": "MISSING_OUTPUT_SCHEMA_DIGEST",
       "output_schema_digest": null,
-      "entry_digest": "sha256:b077c7929b6052f41d54d44858112d950a605f8069f16b478d04d9666b40f7b3"
+      "contract_source": "hiob_ares/node_server/registry.py",
+      "entry_digest": "sha256:e24db5238974ace46bc5f7b66861a73d766c414f547750e932e969edc01573c6"
     },
     {
       "node_id": "ares.script.critic_review",
@@ -152,7 +161,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:fd8dd1fd8039d1d238afc684289c73f914ecb32ea42c6dc3639e59d95e80c9a4"
+      "contract_source": "hiob_ares/node_server/registry.py",
+      "entry_digest": "sha256:f4d403049fc8a6c3be156cbfc5de811cf667f2eaacbc574944746d5f03a0fa9f"
     },
     {
       "node_id": "ares.script.prepare_generation",
@@ -167,7 +177,8 @@
       "status": "blocked",
       "blocker": "MISSING_OUTPUT_SCHEMA_DIGEST",
       "output_schema_digest": null,
-      "entry_digest": "sha256:30a693c857116438b0090075e2acf976a615bd10adb76a521f90f6e0f0a00c74"
+      "contract_source": "hiob_ares/node_server/registry.py",
+      "entry_digest": "sha256:c722d7721c32a8bfdf7d2a87fc4faa281ecc7a86ffd73740781de80441899fb9"
     },
     {
       "node_id": "ares.visual.seal",
@@ -182,7 +193,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:a60461211deeefc30214e9c638d9ef008bab9f7bf3b4edda9c37527aa572fa7c"
+      "contract_source": "hiob_ares/node_server/registry.py",
+      "entry_digest": "sha256:b816366269c060266b196dce4aaf9cecdeda484c22f388987b6d6a5b6e7c577d"
     },
     {
       "node_id": "ares.voice.review",
@@ -197,7 +209,8 @@
       "status": "blocked",
       "blocker": "MISSING_OUTPUT_SCHEMA_DIGEST",
       "output_schema_digest": null,
-      "entry_digest": "sha256:0c73ab9dea8535565c3312c8c0c8ba7c1ca0efb1a7d0918296331de66c970adc"
+      "contract_source": "hiob_ares/node_server/registry.py",
+      "entry_digest": "sha256:5f7e24d4c0f7382299e0588e01d549939a2eb92c137cd851c1a35563d82710db"
     },
     {
       "node_id": "artemis.evidence.seal",
@@ -212,7 +225,8 @@
       "status": "blocked",
       "blocker": "MISSING_OUTPUT_SCHEMA_DIGEST",
       "output_schema_digest": null,
-      "entry_digest": "sha256:e096e3fdc34981c7c4a91771d25ed7d9ccf9c79dad3a7a9a2bee361174ab79c9"
+      "contract_source": "hiob_artemis/node_server/registry.py",
+      "entry_digest": "sha256:f1c5374cbd25427aec564bfa7644b23edb8d62866d9bef902458e236f0794ce6"
     },
     {
       "node_id": "artemis.references.snapshot",
@@ -227,7 +241,8 @@
       "status": "blocked",
       "blocker": "MISSING_OUTPUT_SCHEMA_DIGEST",
       "output_schema_digest": null,
-      "entry_digest": "sha256:c92b4149305eab1145c6b761a73ce08b808613222e8c7f43c6c49782d1942178"
+      "contract_source": "hiob_artemis/node_server/app.py",
+      "entry_digest": "sha256:2cddac9b620fee2d141d9567c45e02d7967e2a33b1c89cc19889a9867ab10a38"
     },
     {
       "node_id": "athena.director.plan",
@@ -242,7 +257,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:7455e05c62c4455608bddf63373a6f4480ddd800f60279471e29dd1ce130b76b"
+      "contract_source": "hiob_athena/node_server/registry.py",
+      "entry_digest": "sha256:122ffc1cf16ccf76dd1f40f1da1f9473816822e66caa3036fb448d9fee3f9bc5"
     },
     {
       "node_id": "athena.visual.frame_plan",
@@ -257,7 +273,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:b4e71f832bbfea732fcc8c08dc7c7898ba317c55c8d60d2ca071b5f1e58daae0"
+      "contract_source": "hiob_athena/node_server/registry.py",
+      "entry_digest": "sha256:d7bd58973a2b25c571c0967909e34b565362a068260cea8a1767445bef108497"
     },
     {
       "node_id": "athena.visual.from_ares_revision",
@@ -272,7 +289,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:a0fdf028beea2226b75945818652c83dbbe1597cd0ad22b0ca57df961533b872"
+      "contract_source": "hiob_athena/node_server/registry.py",
+      "entry_digest": "sha256:e6e6f3884147e6fc09973917ccef0769764e3be525af4741f3e025c59697fd4b"
     },
     {
       "node_id": "athena.visual.materialize_receipt",
@@ -287,7 +305,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:29d56da0575fc221e08f4aff20466ead5cdbb30a6fda9b4c9a0be55c6b630ded"
+      "contract_source": "hiob_athena/node_server/registry.py",
+      "entry_digest": "sha256:2d2a89c3c3ece87541e613cac2e55fe7a7d30b575d2cd3571335153aa65c6800"
     },
     {
       "node_id": "athena.visual.plan",
@@ -302,7 +321,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:19fb3a2d932f72ba84b5061137c2230ac76eb0862a462f28d9aa244215fda733"
+      "contract_source": "hiob_athena/node_server/registry.py",
+      "entry_digest": "sha256:69fae6a0b71ea49a072d677da94176f3931227a1d4b786da09e75e55c794b5b4"
     },
     {
       "node_id": "athena.visual.safe_prompt",
@@ -317,7 +337,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:f23644f9549427fef7e221ec6f07fc01f0ae52c134dae592f62f747c6c56466c"
+      "contract_source": "hiob_athena/node_server/registry.py",
+      "entry_digest": "sha256:6a0af47f107a9b26b579b6a3ded982325c18b22c5311f6f28aea08022e04a25a"
     },
     {
       "node_id": "atropos.ares.persist_plan_revision",
@@ -334,7 +355,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:1d6f8efbe78909fb70c33e126df6ec00746583cbc8b4b9764bdcc6862356c21b"
+      "contract_source": "hiob_atropos/node_server/registry.py",
+      "entry_digest": "sha256:fc54f93861b22fe2e3c472cb6df2d8cad7616b06fcd26f96f4be798f5eab41f9"
     },
     {
       "node_id": "atropos.ares.persist_script_revision",
@@ -351,7 +373,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:fc70575c903d492cad4578c2b97f89185cebbe0e5a8119ec6822c69c85740f24"
+      "contract_source": "hiob_atropos/node_server/registry.py",
+      "entry_digest": "sha256:c72366d0566cfc558f0f8438d2bd7bd1286adc3b4de15995316b10f858098c50"
     },
     {
       "node_id": "atropos.compose_and_render_v2",
@@ -369,7 +392,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:4ad985a14aa32c682780f6630d7e1e7af2b51bf9d578a51a2b8f3d5b88e1301b"
+      "contract_source": "hiob_atropos/node_server/registry.py",
+      "entry_digest": "sha256:ef6530c7905e45ab36a995694bb8de6654467d24687050872eace66bf69fc44d"
     },
     {
       "node_id": "atropos.draft",
@@ -384,7 +408,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:3f8e7524ee8e610d873c68fde8f18af8a9fc01b2c1fa8e367fd19d78ca447c6e"
+      "contract_source": "hiob_atropos/node_server/registry.py",
+      "entry_digest": "sha256:a2df5274884eb7584e7535851e7fce671296ae1379bc4a16dba0d5a91eadda9d"
     },
     {
       "node_id": "atropos.typed_snapshot",
@@ -399,7 +424,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:0d7f06b2334b9331412fc8e0d2712f56d08ed93422d0d2394b42c31d74242e14"
+      "contract_source": "hiob_atropos/node_server/registry.py",
+      "entry_digest": "sha256:7aa85beea87d53e6ee8b9cbdea659c9e609d582b8bae8ee34ee2fc89574e30bf"
     },
     {
       "node_id": "janus.intake.interpret",
@@ -414,7 +440,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:2116c6568837d7575083cc0cd1f2d4ae8af7dad5dcab3d2ecc06f87bcb527397"
+      "contract_source": "hiob_janus/node_server/registry.py",
+      "entry_digest": "sha256:c761254bbfa97d6cd01b8184b13e7764eb58acc5c9cfc09ec1ef8191620ff99c"
     },
     {
       "node_id": "janus.product.seal",
@@ -429,7 +456,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:6c33d05233fb3d00095c2d2e9c1e4715909c3e91303ed5a8c4d7df5e856dcdec"
+      "contract_source": "hiob_janus/node_server/registry.py",
+      "entry_digest": "sha256:07dbc92e56661568104683863a3ccfcf4936028ddd8157674da011d23e2bdd02"
     },
     {
       "node_id": "janus.proof.harvest",
@@ -444,7 +472,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:1aea8f67eb0399c1f5470aac5e698bf880d16bab128f99e16711d27e2b05f405"
+      "contract_source": "hiob_janus/node_server/registry.py",
+      "entry_digest": "sha256:8dc4d07c788cb538b2f04c7acbbd9ba67e476b2cea4c643553ede1648ab50fd0"
     },
     {
       "node_id": "janus.url.ingest",
@@ -463,7 +492,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:3e7fe531ba614e4aa10dee9f1082c323db71b14b4d3a5760d27ad6d1bc887a66"
+      "contract_source": "hiob_janus/node_server/registry.py",
+      "entry_digest": "sha256:45c3b0f34248b6cf6469e7d8fab14a4a658622554840cac8ebda28950579a83b"
     },
     {
       "node_id": "karma.edge.refine",
@@ -478,7 +508,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:90d4f1dc2ace932e78159d99c4201833f17f31c0d2defa7f718890fec5e8c88d"
+      "contract_source": "hiob_karma/node_server/registry.py",
+      "entry_digest": "sha256:1ead9bab90ac603623ade808263e5d7744d7a788d91ab28670fe9c8f5de930eb"
     },
     {
       "node_id": "karma.reconcile",
@@ -495,7 +526,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:3e0197e3d7df695245b3c367e7f6806926f2d2a81a46abc6ea2ed07a2b4bef28"
+      "contract_source": "hiob_karma/node_server/registry.py",
+      "entry_digest": "sha256:25f11d4dcad79a887d260482ddd5a01c7b98a814958a1105609b4bcdb4a68192"
     },
     {
       "node_id": "orpheus.audio.consume_sealed_voice",
@@ -510,7 +542,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:98a7698c3e664ef0a0448843572bfa95631daf21b970d930c13416052f90d3cf"
+      "contract_source": "hiob_orpheus/node_server/registry.py",
+      "entry_digest": "sha256:7eae32a732b9ec79597f645ec597e26ca7113a4cfb56c60d234618eb51aa7317"
     },
     {
       "node_id": "orpheus.audio.materialize_receipt",
@@ -525,7 +558,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:bce92d840e5faf29a2073a3b724e181f2c5af184cbd578056f4bdb09386bd91c"
+      "contract_source": "hiob_orpheus/node_server/registry.py",
+      "entry_digest": "sha256:201744744f26c7e457c4d95047b24cff1b21f4945514158965937b354fadbaab"
     },
     {
       "node_id": "orpheus.audio.render_tts",
@@ -542,7 +576,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:d9cc0bb6c23a65e25039e48a9f45c753af729ba5934e42fb8feee188ec0b4f08"
+      "contract_source": "hiob_orpheus/node_server/registry.py",
+      "entry_digest": "sha256:7b502627b0131071c6f06356d5076964e6a986fbd9872eb8ceead6faca734f46"
     },
     {
       "node_id": "orpheus.audio.resolve_voice",
@@ -557,7 +592,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:80afb6011f625d03265f827e5d1281f99797e2123be8b8476908e85f3ae1ad73"
+      "contract_source": "hiob_orpheus/node_server/registry.py",
+      "entry_digest": "sha256:6961e9246b458135ee0eaa7cf88f7c912c71d76cfb0273395c21db4632129b66"
     },
     {
       "node_id": "orpheus.audio.select_music",
@@ -572,7 +608,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:11b499ba7db1a9d8f0c0e377df4157e05ab6af0ccf92fa9d89f9972df14280eb"
+      "contract_source": "hiob_orpheus/node_server/registry.py",
+      "entry_digest": "sha256:45c191050a65bc2ec998b0c0f5429bfb94e428bb7d6b633dff805f0b92cf3c16"
     },
     {
       "node_id": "orpheus.audio.synthesize_voice",
@@ -587,7 +624,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:e8e2c8bf8c74b207ae293be4b1bf6cd4beffc65fdeee968a8ea41eae3af33580"
+      "contract_source": "hiob_orpheus/node_server/registry.py",
+      "entry_digest": "sha256:1ee07a272ed81e67e80b96badd36acadd19a09fccfdfcdde0530dec343036ceb"
     },
     {
       "node_id": "orpheus.audio.validate_sealed_clip",
@@ -602,7 +640,8 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:e3da252ab76dd6a6598ea733db66ebc3cf517b11565e69a972d3603ab8c04eb3"
+      "contract_source": "hiob_orpheus/node_server/registry.py",
+      "entry_digest": "sha256:3b81004753c0b92f38003637ddc481c0165c907a2c58e18d24793e60ad101ae8"
     },
     {
       "node_id": "orpheus.audio.validate_sealed_music_clip",
@@ -617,82 +656,88 @@
       "status": "blocked",
       "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
       "output_schema_digest": null,
-      "entry_digest": "sha256:31a4a9e475bf00995dba596e6d8118eac6704f8a450aa2be85a3e8f62989d361"
+      "contract_source": "hiob_orpheus/node_server/registry.py",
+      "entry_digest": "sha256:dadddf693fd304b19ae6168265a7af8409605722d4f867647a5599a8d69251b4"
     },
     {
       "node_id": "parzifal.identity.seal",
       "owner": "parzifal",
       "input": "AresIdentitySealInput",
-      "output": null,
+      "output": "IdentityLock@v3",
       "error": "NodeError",
       "version": "0.1.0",
       "side_effects": [],
       "source_revision": "21c8cdac5fb5627d189c97ddf806532742868293",
       "registry_source": "hiob_parzifal/node_server/registry.py",
-      "status": "blocked",
-      "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
-      "output_schema_digest": null,
-      "entry_digest": "sha256:a03aea377d4493feb19f41e5272a2e688a2eae7966c73437bc1e4315c84ca517"
+      "status": "active",
+      "blocker": null,
+      "output_schema_digest": "sha256:4755990df4fa36f9d4b057432e0d3a520509781bf1ae6cc8ccc4a20acb4f407f",
+      "contract_source": "hiob_parzifal/node_server/core.py",
+      "entry_digest": "sha256:d381035738b65ee4447dbd6a54f89011e4d53779711a7a5da757f352bd5b83b3"
     },
     {
       "node_id": "parzifal.references.snapshot",
       "owner": "parzifal",
       "input": "CharacterReferenceSnapshotsInput",
-      "output": null,
+      "output": "hiob.reference_snapshot_bundle.v1@1.0.0",
       "error": "NodeError",
       "version": "0.1.0",
       "side_effects": [],
       "source_revision": "21c8cdac5fb5627d189c97ddf806532742868293",
       "registry_source": "hiob_parzifal/node_server/registry.py",
-      "status": "blocked",
-      "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
-      "output_schema_digest": null,
-      "entry_digest": "sha256:93c90d35a4f8657f20740475f5516a52826642ab30fed7fb02c2d4c7d190b690"
+      "status": "active",
+      "blocker": null,
+      "output_schema_digest": "sha256:08366ab34b7e713cb7dfe42a12717879456ebb05fb5c626f317cda34056633bc",
+      "contract_source": "hiob_parzifal/node_server/core.py",
+      "entry_digest": "sha256:2086b74cbaa658437036a4357129b5a0eff57602b336824072b3ce3868e303ca"
     },
     {
       "node_id": "parzifal.target.consolidate",
       "owner": "parzifal",
       "input": "ConsolidateTargetInput",
-      "output": null,
+      "output": "hiob.parzifal.target-profile@1.0.0",
       "error": "NodeError",
       "version": "0.1.0",
       "side_effects": [],
       "source_revision": "21c8cdac5fb5627d189c97ddf806532742868293",
       "registry_source": "hiob_parzifal/node_server/registry.py",
-      "status": "blocked",
-      "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
-      "output_schema_digest": null,
-      "entry_digest": "sha256:dc490c4642c47e6b06abede318ef1de594d83de595f088b2fce5c862f9b41a07"
+      "status": "active",
+      "blocker": null,
+      "output_schema_digest": "sha256:f7c71ea1b5778476e1c36279f5f60d59429c36da00fe9310326a6c209ca582c8",
+      "contract_source": "hiob_parzifal/node_server/core.py",
+      "entry_digest": "sha256:c19a96cb3b15ede29b4de2a09b3d84ccbb0a424cffb98124b21c410a6c43d926"
     },
     {
       "node_id": "parzifal.target.generate",
       "owner": "parzifal",
       "input": "GenerateTargetInput",
-      "output": null,
+      "output": "hiob.parzifal.target-profile@1.0.0",
       "error": "NodeError",
       "version": "0.1.0",
       "side_effects": [],
       "source_revision": "21c8cdac5fb5627d189c97ddf806532742868293",
       "registry_source": "hiob_parzifal/node_server/registry.py",
-      "status": "blocked",
-      "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
-      "output_schema_digest": null,
-      "entry_digest": "sha256:469288ef1ca474608c1435d4dfe36ab266f264a0f8e169a9e5a3347ac6246446"
+      "status": "active",
+      "blocker": null,
+      "output_schema_digest": "sha256:f7c71ea1b5778476e1c36279f5f60d59429c36da00fe9310326a6c209ca582c8",
+      "contract_source": "hiob_parzifal/node_server/core.py",
+      "entry_digest": "sha256:39a3d793e2a75e94159553a3b2c6290bf36cae3b219779699593c573d373b082"
     },
     {
       "node_id": "parzifal.voice.seal",
       "owner": "parzifal",
       "input": "VoiceSealInput",
-      "output": null,
+      "output": "ParzifalVoiceEnvelope@v1",
       "error": "NodeError",
       "version": "0.1.0",
       "side_effects": [],
       "source_revision": "21c8cdac5fb5627d189c97ddf806532742868293",
       "registry_source": "hiob_parzifal/node_server/registry.py",
-      "status": "blocked",
-      "blocker": "MISSING_TYPED_OUTPUT_CONTRACT",
-      "output_schema_digest": null,
-      "entry_digest": "sha256:54c54400c46241c0e0680b861bc2ae04c787e3baccc9d3f64b4fedb75e1babcb"
+      "status": "active",
+      "blocker": null,
+      "output_schema_digest": "sha256:7809b135709e6d262aaa88103ba4f9e9302f0cb331b678e012b078dbbdc0048f",
+      "contract_source": "hiob_parzifal/node_server/core.py",
+      "entry_digest": "sha256:7a34be3d4e94a0327bb41ce2888a4d0b925c9cf7afea29de14014d4e50c27927"
     }
   ]
 }

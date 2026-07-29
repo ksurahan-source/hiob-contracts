@@ -89,6 +89,7 @@ REQUIRED_FIELDS = {
     "side_effects",
     "source_revision",
     "registry_source",
+    "contract_source",
     "status",
     "blocker",
 }
@@ -138,6 +139,10 @@ def test_every_node_pins_required_contract_and_source_fields() -> None:
             else f"hiob_{node['owner']}/node_server/registry.py"
         )
         assert node["registry_source"] == expected_registry
+        assert node["contract_source"].startswith(
+            f"hiob_{node['owner']}/node_server/"
+        )
+        assert node["contract_source"].endswith(".py")
         assert node["input"]
         assert node["error"]
         assert node["version"]
@@ -187,7 +192,10 @@ def test_parzifal_manifest_matches_pinned_core_contract_truth() -> None:
     for node_id, expected in truth["nodes"].items():
         actual = manifest_nodes[node_id]
         assert actual["source_revision"] == truth["source_revision"]
-        assert actual["registry_source"] == truth["registry_source"]
+        assert actual["registry_source"] == (
+            "hiob_parzifal/node_server/registry.py"
+        )
+        assert actual["contract_source"] == truth["contract_source"]
         assert actual["output"] == expected["output"]
         assert actual["output_schema_digest"] == (
             expected["output_schema_digest"]

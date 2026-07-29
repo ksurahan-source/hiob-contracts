@@ -1,6 +1,6 @@
 {
   "source_revision": "21c8cdac5fb5627d189c97ddf806532742868293",
-  "registry_source": "hiob_parzifal/node_server/core.py",
+  "contract_source": "hiob_parzifal/node_server/core.py",
   "nodes": {
     "parzifal.identity.seal": {
       "output": "IdentityLock@v3",
