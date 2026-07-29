@@ -168,6 +168,12 @@ from .ares_v3_make_context_v1 import (
     AresV3MakeContextV1,
     derive_ares_v3_make_context_digest_v1,
 )
+from .planets.ares import (
+    AresCharacterIdentityProjectionV1,
+    AresProvenanceMemoryV1,
+    AresScriptGenerationInputV1,
+    derive_ares_script_generation_input_digest_v1,
+)
 from .ares_script_revision_v1 import (
     AresApprovalBeginCommandV1,
     AresApprovalCommandV1,
@@ -275,6 +281,9 @@ __all__ = [
     "ares_create_script_result_schema_digest", "request_content_digest",
     "AresRequestScopeV3", "authority_ref_receipt_digest_v3",
     "AresV3MakeContextV1", "derive_ares_v3_make_context_digest_v1",
+    "AresCharacterIdentityProjectionV1", "AresProvenanceMemoryV1",
+    "AresScriptGenerationInputV1",
+    "derive_ares_script_generation_input_digest_v1",
     "AresAuthorityArtifactRefV3", "AresP2ATargetProjectionV3",
     "ares_p2a_target_projection_v3",
     "ares_p2a_target_projection_v3_schema_descriptor",

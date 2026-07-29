@@ -139,6 +139,6 @@ def test_ares_generation_digest_has_fixed_python_typescript_vector() -> None:
 
     assert digest == derive_ares_script_generation_input_digest_v1(unsigned)
     assert digest == (
-        "sha256:TO_BE_FILLED_AFTER_RED"
+        "sha256:43b376a18dbdb3fda7035ce06bd36188"
+        "dff58191a2f9cdb6edf1078a6aa21f3f"
     )
-

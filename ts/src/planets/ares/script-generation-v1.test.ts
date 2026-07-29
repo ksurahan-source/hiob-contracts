@@ -97,6 +97,6 @@ test('Ares generation digest matches the fixed Python vector', () => {
   const value = payload();
   assert.equal(
     value.generation_input_digest,
-    'sha256:TO_BE_FILLED_AFTER_RED',
+    'sha256:43b376a18dbdb3fda7035ce06bd36188dff58191a2f9cdb6edf1078a6aa21f3f',
   );
 });
