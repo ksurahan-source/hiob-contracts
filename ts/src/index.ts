@@ -57,8 +57,6 @@ export type {
 // Ares pure generate V3 — explicit authority refs and semantic-only beat plan
 export {
   AresRequestScopeV3Schema,
-  AresV3MakeContextV1Schema,
-  deriveAresV3MakeContextDigestV1,
   AresAuthorityArtifactRefV3Schema,
   AresP2ATargetProjectionV3Schema,
   AresAuthorityBundleV3Schema,
@@ -99,7 +97,6 @@ export {
 export type { ParzifalVoiceEnvelopeV1 } from './parzifal-voice-envelope-v1.js';
 export type {
   AresRequestScopeV3,
-  AresV3MakeContextV1,
   AresAuthorityArtifactRefV3,
   AresP2ATargetProjectionV3,
   AresAuthorityBundleV3,
@@ -112,6 +109,13 @@ export type {
   AresGenerateUsageV3,
   AresCreateScriptResultV3,
 } from './ares-create-script-v3.js';
+export {
+  AresV3MakeContextV1Schema,
+  deriveAresV3MakeContextDigestV1,
+} from './ares-v3-make-context-v1.js';
+export type {
+  AresV3MakeContextV1,
+} from './ares-v3-make-context-v1.js';
 
 
 // CompositionSnapshot

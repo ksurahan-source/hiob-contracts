@@ -143,8 +143,6 @@ from .ares_create_script_v2 import (
 )
 from .ares_create_script_v3 import (
     AresRequestScopeV3,
-    AresV3MakeContextV1,
-    derive_ares_v3_make_context_digest_v1,
     authority_ref_receipt_digest_v3,
     AresAuthorityArtifactRefV3,
     AresP2ATargetProjectionV3,
@@ -165,6 +163,10 @@ from .ares_create_script_v3 import (
     ares_create_script_request_v3_schema_descriptor,
     ares_create_script_result_v3_schema_digest,
     request_content_digest_v3,
+)
+from .ares_v3_make_context_v1 import (
+    AresV3MakeContextV1,
+    derive_ares_v3_make_context_digest_v1,
 )
 from .ares_script_revision_v1 import (
     AresApprovalBeginCommandV1,

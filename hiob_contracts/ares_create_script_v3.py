@@ -47,6 +47,10 @@ from .ares_script_revision_v1 import (
     _validate_json,
     canonical_contract_digest_v1,
 )
+from .ares_v3_make_context_v1 import (
+    AresV3MakeContextV1,
+    derive_ares_v3_make_context_digest_v1,
+)
 from .factory import KarmaEdgeReceipt, sha256_digest
 
 
@@ -95,77 +99,6 @@ class AresRequestScopeV3(BaseModel):
     run_id: NonBlankStr
     operation_id: NonBlankStr
     idempotency_key: NonBlankStr
-
-
-_ARES_V3_MAKE_CONTEXT_FIELDS = (
-    "workspace_id",
-    "run_id",
-    "brand_id",
-    "subject_id",
-    "product_id",
-    "character_lock_digest",
-    "character_lock_version",
-    "product_lock_digest",
-    "artemis_approval_receipt_id",
-    "artemis_approval_receipt_digest",
-    "artemis_approval_state_revision",
-)
-
-
-def derive_ares_v3_make_context_digest_v1(
-    value: Mapping[str, Any] | BaseModel,
-) -> str:
-    """Digest the server-owned ready snapshot, excluding command execution IDs."""
-
-    data = (
-        value.model_dump(mode="json")
-        if isinstance(value, BaseModel)
-        else dict(value)
-    )
-    snapshot = {
-        field: data[field]
-        for field in _ARES_V3_MAKE_CONTEXT_FIELDS
-    }
-    return sha256_digest(snapshot)
-
-
-class AresV3MakeContextV1(BaseModel):
-    """Atomic ready snapshot nested inside Star's existing V3 command payload."""
-
-    model_config = _FROZEN_STRICT
-
-    contract_version: Literal["AresV3MakeContext.v1"]
-    workspace_id: UuidStr
-    run_id: UuidStr
-    brand_id: UuidStr
-    subject_id: NonBlankStr
-    product_id: NonBlankStr
-    character_lock_digest: DigestStr
-    character_lock_version: int = Field(
-        gt=0,
-        le=9_007_199_254_740_991,
-        strict=True,
-    )
-    product_lock_digest: DigestStr
-    artemis_approval_receipt_id: NonBlankStr
-    artemis_approval_receipt_digest: DigestStr
-    artemis_approval_state_revision: int = Field(
-        gt=0,
-        le=9_007_199_254_740_991,
-        strict=True,
-    )
-    make_context_digest: DigestStr
-
-    @model_validator(mode="after")
-    def _bind_make_context(self) -> "AresV3MakeContextV1":
-        if (
-            self.make_context_digest
-            != derive_ares_v3_make_context_digest_v1(self)
-        ):
-            raise ValueError(
-                "make_context_digest does not match server make context"
-            )
-        return self
 
 
 def authority_ref_receipt_digest_v3(
