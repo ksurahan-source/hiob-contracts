@@ -122,6 +122,45 @@ test('Star make context accepts text brand scope and binds it exactly', () => {
   assert.equal(AresV3MakeContextV1Schema.safeParse(value).success, false);
 });
 
+test('Star make context fixes the Unicode brand digest across languages', () => {
+  const value = payload();
+  value.brand_slug = '히옵 마케팅';
+  delete value.make_context_digest;
+
+  assert.equal(
+    deriveAresV3MakeContextDigestV1(value),
+    'sha256:14138818726833b7bcb4efb177accb21b340b0ea9ef6895495536b2ae4c4c760',
+  );
+});
+
+test('Star make context rejects noncanonical brand slug text', () => {
+  for (const brandSlug of [
+    ' viewok',
+    'viewok ',
+    'viewok\u0000control',
+    '\ud800',
+  ]) {
+    const value = payload();
+    value.brand_slug = brandSlug;
+    value.make_context_digest = `sha256:${'0'.repeat(64)}`;
+
+    assert.throws(
+      () => deriveAresV3MakeContextDigestV1(value),
+      /brand_slug|Unicode|canonical/,
+    );
+    const parsed = AresV3MakeContextV1Schema.safeParse(value);
+    assert.equal(parsed.success, false);
+    if (!parsed.success) {
+      assert.equal(
+        parsed.error.issues.some(
+          (issue) => issue.path.join('.') === 'brand_slug',
+        ),
+        true,
+      );
+    }
+  }
+});
+
 test('Star make context forbids the brand_id alias', () => {
   const value = payload();
   value.brand_id = '2a86daca-f5f2-4a3d-a868-f283a0a57d84';

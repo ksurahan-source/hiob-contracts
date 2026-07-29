@@ -159,6 +159,44 @@ def test_make_context_accepts_text_brand_scope_and_binds_it_exactly() -> None:
         AresV3MakeContextV1.model_validate(value)
 
 
+def test_make_context_unicode_brand_slug_has_fixed_cross_language_digest() -> None:
+    value = _payload()
+    value["brand_slug"] = "히옵 마케팅"
+    del value["make_context_digest"]
+
+    assert derive_ares_v3_make_context_digest_v1(value) == (
+        "sha256:14138818726833b7bcb4efb177accb21"
+        "b340b0ea9ef6895495536b2ae4c4c760"
+    )
+
+
+@pytest.mark.parametrize(
+    "brand_slug",
+    [
+        " viewok",
+        "viewok ",
+        "view\u0000ok",
+        "\ud800",
+    ],
+)
+def test_make_context_rejects_noncanonical_brand_slug(
+    brand_slug: str,
+) -> None:
+    value = _payload()
+    value["brand_slug"] = brand_slug
+    value["make_context_digest"] = "sha256:" + "0" * 64
+
+    with pytest.raises(ValueError):
+        derive_ares_v3_make_context_digest_v1(value)
+
+    with pytest.raises(ValidationError) as exc_info:
+        AresV3MakeContextV1.model_validate(value)
+    assert any(
+        error["loc"] == ("brand_slug",)
+        for error in exc_info.value.errors()
+    )
+
+
 def test_make_context_forbids_brand_id_alias() -> None:
     value = _payload()
     value["brand_id"] = "2a86daca-f5f2-4a3d-a868-f283a0a57d84"
