@@ -45,6 +45,10 @@ from .character_identity_v1 import (
     character_identity_binding_payload_v1,
     derive_character_identity_binding_digest_v1,
 )
+from .character_lock_v1 import (
+    CharacterLockV1,
+    derive_character_lock_digest_v1,
+)
 from .voice_spec_v1 import VoiceSpecV1, derive_voice_spec_digest_v1
 from .parzifal_voice_envelope_v1 import (
     ParzifalVoiceEnvelopeV1,
@@ -304,6 +308,7 @@ __all__ = [
     "VisualContext","VisualRequest","AudioRequest","SFXRequest","RenderJobRequest","RenderJobResponse","ProcessInsightsRequest",
     "BeatPersona", "BeatPersonas",
     "ElementLocks", "ElementRef", "CharacterLock", "ProductLock", "BackgroundLock",
+    "CharacterLockV1", "derive_character_lock_digest_v1",
     "character_identity_binding_payload_v1",
     "derive_character_identity_binding_digest_v1",
     "VoiceSpecV1", "derive_voice_spec_digest_v1",

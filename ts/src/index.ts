@@ -81,6 +81,11 @@ export {
   deriveCharacterIdentityBindingDigestV1,
 } from './character-identity-v1';
 export {
+  CharacterLockV1Schema,
+  deriveCharacterLockDigestV1,
+} from './character-lock-v1';
+export type { CharacterLockV1 } from './character-lock-v1';
+export {
   VoiceSpecV1Schema,
   deriveVoiceSpecDigestV1,
 } from './voice-spec-v1';
