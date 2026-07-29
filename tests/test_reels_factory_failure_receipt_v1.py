@@ -72,3 +72,26 @@ def test_failure_receipt_rejects_digest_drift_and_extra_fields() -> None:
         ReelsFactoryFailureReceiptV1.model_validate(
             {**_receipt(), "retryable": False}
         )
+
+
+@pytest.mark.parametrize(
+    "stage",
+    [
+        "authority",
+        "script",
+        "project_script",
+        "plan",
+        "project_plan",
+        "scheduler",
+        "image",
+        "voice",
+        "render",
+    ],
+)
+def test_failure_receipt_names_the_exact_factory_stage(stage: str) -> None:
+    assert (
+        ReelsFactoryFailureReceiptV1.model_validate(
+            _receipt(stage=stage)
+        ).stage
+        == stage
+    )
