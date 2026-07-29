@@ -97,20 +97,6 @@ export {
   deriveParzifalVoiceEnvelopeDigestV1,
 } from './parzifal-voice-envelope-v1.js';
 export type { ParzifalVoiceEnvelopeV1 } from './parzifal-voice-envelope-v1.js';
-export {
-  StarMakeReadyRequestV1Schema,
-  StarMakeReadyReceiptV1Schema,
-  deriveStarMakeReadyRequestDigestV1,
-  deriveStarMakeReadyCommandIdV1,
-  deriveStarMakeReadyReceiptDigestV1,
-  starMakeReadyReceiptAuthorizesV1,
-} from './star-make-ready-v1.js';
-export type {
-  StarMakeReadyRequestV1,
-  StarMakeReadyReceiptV1,
-  StarMakeReadyAuthorityV1,
-  StarMakeReadyResolverV1,
-} from './star-make-ready-v1.js';
 export type {
   AresRequestScopeV3,
   AresV3MakeContextV1,

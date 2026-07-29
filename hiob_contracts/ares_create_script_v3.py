@@ -38,6 +38,7 @@ from .ares_script_revision_v1 import (
     NonBlankStr,
     NonEmptyStr,
     NonNegativeInt,
+    UuidStr,
     UtcTimestamp,
     _FROZEN_STRICT,
     _FrozenMapping,
@@ -134,9 +135,9 @@ class AresV3MakeContextV1(BaseModel):
     model_config = _FROZEN_STRICT
 
     contract_version: Literal["AresV3MakeContext.v1"]
-    workspace_id: NonBlankStr
-    run_id: NonBlankStr
-    brand_id: NonBlankStr
+    workspace_id: UuidStr
+    run_id: UuidStr
+    brand_id: UuidStr
     subject_id: NonBlankStr
     product_id: NonBlankStr
     character_lock_digest: DigestStr

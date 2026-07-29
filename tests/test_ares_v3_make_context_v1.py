@@ -111,12 +111,17 @@ def test_make_context_rejects_non_uuid_db_scope_after_rehash(
 )
 def test_make_context_rejects_authority_drift(field: str) -> None:
     value = _payload()
+    valid_uuid_drift = {
+        "workspace_id": "11111111-1111-4111-8111-111111111111",
+        "run_id": "22222222-2222-4222-8222-222222222222",
+        "brand_id": "33333333-3333-4333-8333-333333333333",
+    }
     value[field] = (
         value[field] + 1
         if isinstance(value[field], int)
         else "sha256:" + "9" * 64
         if field.endswith("digest")
-        else "changed"
+        else valid_uuid_drift.get(field, "changed")
     )
 
     with pytest.raises(ValidationError, match="make_context_digest"):

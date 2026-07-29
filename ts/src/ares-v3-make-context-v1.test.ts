@@ -83,6 +83,11 @@ test('Star make context rejects non-UUID DB scope after rehash', () => {
 });
 
 test('Star make context rejects authority drift', () => {
+  const validUuidDrift: Record<string, string> = {
+    workspace_id: '11111111-1111-4111-8111-111111111111',
+    run_id: '22222222-2222-4222-8222-222222222222',
+    brand_id: '33333333-3333-4333-8333-333333333333',
+  };
   for (const field of [
     'workspace_id',
     'run_id',
@@ -101,7 +106,7 @@ test('Star make context rejects authority drift', () => {
       ? value[field] + 1
       : field.endsWith('digest')
         ? `sha256:${'9'.repeat(64)}`
-        : 'changed';
+        : validUuidDrift[field] ?? 'changed';
     assert.equal(AresV3MakeContextV1Schema.safeParse(value).success, false);
   }
 });

@@ -20,6 +20,12 @@ const NonBlankString = z.string().refine(
 const DigestSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, 'digest must be sha256:<64 lowercase hex>');
+const UuidSchema = z
+  .string()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    'UUID must use canonical lowercase form',
+  );
 const NonNegativeInt = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const UTC_TIMESTAMP_RE =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?Z$/;
@@ -386,7 +392,7 @@ export const AresRequestScopeV3Schema = z
   .transform(deepFreeze);
 
 const AresV3MakeContextShape = {
-  brand_id: NonBlankString,
+  brand_id: UuidSchema,
   subject_id: NonBlankString,
   product_id: NonBlankString,
   character_lock_digest: DigestSchema,
@@ -426,8 +432,8 @@ export function deriveAresV3MakeContextDigestV1(
 export const AresV3MakeContextV1Schema = z
   .object({
     contract_version: z.literal('AresV3MakeContext.v1'),
-    workspace_id: NonBlankString,
-    run_id: NonBlankString,
+    workspace_id: UuidSchema,
+    run_id: UuidSchema,
     ...AresV3MakeContextShape,
     make_context_digest: DigestSchema,
   })
