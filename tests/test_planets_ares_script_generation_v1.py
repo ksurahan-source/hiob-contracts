@@ -308,6 +308,21 @@ def test_ares_generation_digest_helper_has_stable_missing_field_error() -> None:
         derive_ares_script_generation_input_digest_v1(unsigned)
 
 
+@pytest.mark.parametrize(
+    "invalid_revision",
+    [True, "7", 7.5, -1, 2_147_483_648],
+)
+def test_ares_generation_digest_helper_rejects_invalid_factory_revision(
+    invalid_revision: object,
+) -> None:
+    unsigned = _payload()
+    unsigned.pop("generation_input_digest")
+    unsigned["factory_revision"] = invalid_revision
+
+    with pytest.raises(ValueError, match="factory_revision"):
+        derive_ares_script_generation_input_digest_v1(unsigned)
+
+
 def test_ares_generation_digest_fields_equal_the_exact_wire_body() -> None:
     import hiob_contracts.planets.ares.script_generation_v1 as contract_module
 

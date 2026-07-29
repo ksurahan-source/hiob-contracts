@@ -181,6 +181,17 @@ test('Ares generation accepts JSON integer lexical parity', () => {
   }
 });
 
+test('Ares generation digest rejects invalid factory revisions', () => {
+  for (const invalid of [true, '7', 7.5, -1, 2_147_483_648]) {
+    const value = payload() as Record<string, unknown>;
+    value.factory_revision = invalid;
+    assert.throws(
+      () => deriveAresScriptGenerationInputDigestV1(value),
+      /factory_revision/,
+    );
+  }
+});
+
 test('Ares generation digest matches the fixed Python vector', () => {
   const value = payload();
   assert.equal(
