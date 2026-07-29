@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 import hiob_contracts
+import hiob_contracts.ares_create_script_v3 as legacy_module
 from hiob_contracts import (
     AresV3MakeContextV1,
     derive_ares_v3_make_context_digest_v1,
@@ -87,6 +88,16 @@ def test_make_context_has_one_dedicated_debug_module() -> None:
     assert find_spec(module_name) is not None
     assert AresV3MakeContextV1.__module__ == module_name
     assert derive_ares_v3_make_context_digest_v1.__module__ == module_name
+    assert legacy_module.AresV3MakeContextV1 is AresV3MakeContextV1
+    assert (
+        legacy_module.derive_ares_v3_make_context_digest_v1
+        is derive_ares_v3_make_context_digest_v1
+    )
+    assert "AresV3MakeContextV1" in legacy_module.__all__
+    assert (
+        "derive_ares_v3_make_context_digest_v1"
+        in legacy_module.__all__
+    )
 
 
 @pytest.mark.parametrize("field", ["workspace_id", "run_id", "brand_id"])

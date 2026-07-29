@@ -38,7 +38,6 @@ from .ares_script_revision_v1 import (
     NonBlankStr,
     NonEmptyStr,
     NonNegativeInt,
-    UuidStr,
     UtcTimestamp,
     _FROZEN_STRICT,
     _FrozenMapping,
