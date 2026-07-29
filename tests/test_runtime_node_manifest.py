@@ -74,9 +74,10 @@ REQUIRED_FIELDS = {
     "owner",
     "input",
     "output",
+    "output_schema_digest",
     "error",
     "version",
-    "schema_digest",
+    "entry_digest",
     "side_effects",
     "source_revision",
     "registry_source",
@@ -94,7 +95,7 @@ def _digest(node: dict) -> str:
     descriptor = {
         key: value
         for key, value in node.items()
-        if key != "schema_digest"
+        if key != "entry_digest"
     }
     canonical = json.dumps(
         descriptor,
@@ -123,10 +124,12 @@ def test_every_node_pins_required_contract_and_source_fields() -> None:
         assert set(node) == REQUIRED_FIELDS
         assert node["owner"] == node["node_id"].split(".", 1)[0]
         assert node["source_revision"] == EXPECTED_REVISIONS[node["owner"]]
-        assert node["registry_source"].startswith(
-            f"hiob_{node['owner']}/node_server/"
+        expected_registry = (
+            "hiob_artemis/node_server/app.py"
+            if node["node_id"] == "artemis.references.snapshot"
+            else f"hiob_{node['owner']}/node_server/registry.py"
         )
-        assert node["registry_source"].endswith(".py")
+        assert node["registry_source"] == expected_registry
         assert node["input"]
         assert node["error"]
         assert node["version"]
@@ -134,24 +137,42 @@ def test_every_node_pins_required_contract_and_source_fields() -> None:
         assert len(node["side_effects"]) == len(set(node["side_effects"]))
 
 
-def test_active_outputs_are_typed_and_untyped_outputs_fail_closed() -> None:
+def test_outputs_without_real_schema_digests_fail_closed() -> None:
     nodes = _load_manifest()["nodes"]
+    blockers = {
+        blocker: sum(node["blocker"] == blocker for node in nodes)
+        for blocker in {
+            "MISSING_TYPED_OUTPUT_CONTRACT",
+            "MISSING_OUTPUT_SCHEMA_DIGEST",
+        }
+    }
 
+    assert blockers == {
+        "MISSING_TYPED_OUTPUT_CONTRACT": 37,
+        "MISSING_OUTPUT_SCHEMA_DIGEST": 8,
+    }
     for node in nodes:
         if node["status"] == "active":
             assert node["output"]
             assert node["output"] != "UnspecifiedInternalOutput"
+            assert DIGEST_RE.fullmatch(node["output_schema_digest"])
+            assert node["output_schema_digest"] != "sha256:" + ("0" * 64)
             assert node["blocker"] is None
         else:
             assert node["status"] == "blocked"
-            assert node["output"] is None
-            assert node["blocker"] == "MISSING_TYPED_OUTPUT_CONTRACT"
+            assert node["output_schema_digest"] is None
+            if node["blocker"] == "MISSING_TYPED_OUTPUT_CONTRACT":
+                assert node["output"] is None
+            else:
+                assert node["blocker"] == "MISSING_OUTPUT_SCHEMA_DIGEST"
+                assert node["output"]
+                assert node["output"] != "UnspecifiedInternalOutput"
 
 
-def test_schema_digests_are_nonzero_and_bind_each_full_entry() -> None:
+def test_entry_digests_are_nonzero_and_bind_each_full_entry() -> None:
     nodes = _load_manifest()["nodes"]
 
     for node in nodes:
-        assert DIGEST_RE.fullmatch(node["schema_digest"])
-        assert node["schema_digest"] != "sha256:" + ("0" * 64)
-        assert node["schema_digest"] == _digest(node)
+        assert DIGEST_RE.fullmatch(node["entry_digest"])
+        assert node["entry_digest"] != "sha256:" + ("0" * 64)
+        assert node["entry_digest"] == _digest(node)
