@@ -49,6 +49,21 @@ from .character_lock_v1 import (
     CharacterLockV1,
     derive_character_lock_digest_v1,
 )
+from .render_persistence_v1 import RenderPersistenceV1
+from .reels_factory_progress_v1 import (
+    ReelsFactoryProgressReceiptV1,
+    ReelsFactoryProviderAttemptsV1,
+    derive_reels_factory_progress_receipt_digest_v1,
+)
+from .reels_factory_failure_v1 import (
+    ReelsFactoryFailureReceiptV1,
+    derive_reels_factory_failure_receipt_digest_v1,
+)
+from .star_reels_view_v1 import StarReelsViewV1
+from .accepted_identity_receipt_v1 import (
+    AcceptedIdentityReceiptV1,
+    derive_accepted_identity_receipt_digest_v1,
+)
 from .voice_spec_v1 import VoiceSpecV1, derive_voice_spec_digest_v1
 from .parzifal_voice_envelope_v1 import (
     ParzifalVoiceEnvelopeV1,
@@ -318,6 +333,15 @@ __all__ = [
     "BeatPersona", "BeatPersonas",
     "ElementLocks", "ElementRef", "CharacterLock", "ProductLock", "BackgroundLock",
     "CharacterLockV1", "derive_character_lock_digest_v1",
+    "RenderPersistenceV1",
+    "ReelsFactoryProgressReceiptV1",
+    "ReelsFactoryProviderAttemptsV1",
+    "derive_reels_factory_progress_receipt_digest_v1",
+    "ReelsFactoryFailureReceiptV1",
+    "derive_reels_factory_failure_receipt_digest_v1",
+    "StarReelsViewV1",
+    "AcceptedIdentityReceiptV1",
+    "derive_accepted_identity_receipt_digest_v1",
     "character_identity_binding_payload_v1",
     "derive_character_identity_binding_digest_v1",
     "VoiceSpecV1", "derive_voice_spec_digest_v1",
