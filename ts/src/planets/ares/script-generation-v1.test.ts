@@ -1,0 +1,102 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import * as PublicContracts from '../../index.js';
+import {
+  AresScriptGenerationInputV1Schema,
+  deriveAresScriptGenerationInputDigestV1,
+} from './script-generation-v1.js';
+import {
+  deriveCharacterIdentityBindingDigestV1,
+} from '../../character-identity-v1.js';
+import { deriveVoiceSpecDigestV1 } from '../../voice-spec-v1.js';
+
+function payload(): Record<string, any> {
+  const voice: Record<string, any> = {
+    contract_version: 'VoiceSpec.v1',
+    subject_id: 'lead',
+    rhythm: '짧고 단정하게',
+    vocabulary: ['진짜'],
+    forbidden_phrases: ['무조건'],
+    approved_examples: [
+      '먼저 확인해 보세요.',
+      '필요한 것만 담았습니다.',
+      '지금 비교해 보세요.',
+    ],
+  };
+  voice.voice_spec_digest = deriveVoiceSpecDigestV1(voice);
+  const body = {
+    contract_version: 'AresScriptGenerationInput.v1',
+    workspace_id: '00000000-0000-4000-8000-000000000001',
+    run_id: '00000000-0000-4000-8000-000000000002',
+    script_revision_id: '00000000-0000-4000-8000-000000000003',
+    plan_revision_id: '00000000-0000-4000-8000-000000000004',
+    factory_revision: 7,
+    character_lock: {
+      persona_id: 'lead',
+      face_id: 'face-lead-v1',
+      voice_id: 'voice-lead-v1',
+      identity_binding_digest: deriveCharacterIdentityBindingDigestV1({
+        subject_id: 'lead',
+        face_id: 'face-lead-v1',
+        voice_id: 'voice-lead-v1',
+      }),
+    },
+    voice_spec: voice,
+    current_character: '차분하고 정확한 전문가',
+    conflict: '과장 없이 차이를 증명한다',
+    adjacent_beat_summaries: ['문제를 짧게 제시'],
+    memories: [
+      {
+        text: '과장된 말투를 싫어함',
+        provenance: 'approved_edit:rev-1',
+      },
+    ],
+  };
+  return {
+    ...body,
+    generation_input_digest:
+      deriveAresScriptGenerationInputDigestV1(body),
+  };
+}
+
+test('Ares generation output is exported from one planet namespace', () => {
+  assert.equal(
+    PublicContracts.AresScriptGenerationInputV1Schema,
+    AresScriptGenerationInputV1Schema,
+  );
+});
+
+test('Ares generation output validates exact bounded provider input', () => {
+  const parsed = AresScriptGenerationInputV1Schema.parse(payload());
+  assert.equal(parsed.character_lock.face_id, 'face-lead-v1');
+  assert.equal(
+    parsed.voice_spec.subject_id,
+    parsed.character_lock.persona_id,
+  );
+  assert.deepEqual(parsed.adjacent_beat_summaries, ['문제를 짧게 제시']);
+  assert.equal(Object.isFrozen(parsed), true);
+});
+
+test('Ares generation output rejects drift and extra authority', () => {
+  const drift = payload();
+  drift.current_character = 'changed';
+  assert.equal(
+    AresScriptGenerationInputV1Schema.safeParse(drift).success,
+    false,
+  );
+
+  const extra = { ...payload(), production_plan: { unsealed: true } };
+  assert.equal(
+    AresScriptGenerationInputV1Schema.safeParse(extra).success,
+    false,
+  );
+});
+
+test('Ares generation digest matches the fixed Python vector', () => {
+  const value = payload();
+  assert.equal(
+    value.generation_input_digest,
+    'sha256:TO_BE_FILLED_AFTER_RED',
+  );
+});
