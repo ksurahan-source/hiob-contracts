@@ -156,6 +156,18 @@ DigestText = Annotated[
 ]
 
 
+def _normalize_factory_revision(value: Any) -> Any:
+    if isinstance(value, bool):
+        raise ValueError("factory_revision must be an integer")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise ValueError("factory_revision must be an integer")
+        return int(value)
+    return value
+
+
 def derive_ares_script_generation_input_digest_v1(
     value: Mapping[str, Any] | BaseModel,
 ) -> str:
@@ -171,6 +183,9 @@ def derive_ares_script_generation_input_digest_v1(
             raise ValueError(
                 f"{field} is required for generation input digest"
             )
+    data["factory_revision"] = _normalize_factory_revision(
+        data["factory_revision"]
+    )
     body = {field: data[field] for field in _DIGEST_FIELDS}
     _assert_json_unicode_scalars(body)
     return sha256_digest(body)
@@ -283,15 +298,7 @@ class AresScriptGenerationInputV1(BaseModel):
     @field_validator("factory_revision", mode="before")
     @classmethod
     def _json_integer_parity(cls, value: Any) -> Any:
-        if isinstance(value, bool):
-            raise ValueError("factory_revision must be an integer")
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            if not value.is_integer():
-                raise ValueError("factory_revision must be an integer")
-            return int(value)
-        return value
+        return _normalize_factory_revision(value)
 
     @field_validator(
         "adjacent_beat_summaries",
