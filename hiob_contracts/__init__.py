@@ -50,6 +50,10 @@ from .character_lock_v1 import (
     derive_character_lock_digest_v1,
 )
 from .render_persistence_v1 import RenderPersistenceV1
+from .accepted_identity_receipt_v1 import (
+    AcceptedIdentityReceiptV1,
+    derive_accepted_identity_receipt_digest_v1,
+)
 from .voice_spec_v1 import VoiceSpecV1, derive_voice_spec_digest_v1
 from .parzifal_voice_envelope_v1 import (
     ParzifalVoiceEnvelopeV1,
@@ -320,6 +324,8 @@ __all__ = [
     "ElementLocks", "ElementRef", "CharacterLock", "ProductLock", "BackgroundLock",
     "CharacterLockV1", "derive_character_lock_digest_v1",
     "RenderPersistenceV1",
+    "AcceptedIdentityReceiptV1",
+    "derive_accepted_identity_receipt_digest_v1",
     "character_identity_binding_payload_v1",
     "derive_character_identity_binding_digest_v1",
     "VoiceSpecV1", "derive_voice_spec_digest_v1",
