@@ -150,6 +150,25 @@ test('Ares generation rejects unpaired Unicode before hashing', () => {
   );
 });
 
+test('Ares generation uses the frozen nonblank Unicode parity set', () => {
+  for (const [text, accepted] of [
+    ['\u0085', true],
+    ['\uFEFF', false],
+  ] as const) {
+    const value = payload();
+    value.current_character = text;
+    const unsigned = { ...value };
+    delete unsigned.generation_input_digest;
+    value.generation_input_digest =
+      deriveAresScriptGenerationInputDigestV1(unsigned);
+
+    assert.equal(
+      AresScriptGenerationInputV1Schema.safeParse(value).success,
+      accepted,
+    );
+  }
+});
+
 test('Ares generation digest matches the fixed Python vector', () => {
   const value = payload();
   assert.equal(

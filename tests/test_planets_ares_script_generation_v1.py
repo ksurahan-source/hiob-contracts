@@ -221,6 +221,39 @@ def test_ares_generation_rejects_unpaired_unicode_before_hashing() -> None:
         AresScriptGenerationInputV1.model_validate(value, strict=True)
 
 
+@pytest.mark.parametrize(
+    ("value", "accepted"),
+    [
+        ("\u0085", True),
+        ("\uFEFF", False),
+    ],
+)
+def test_ares_generation_uses_frozen_nonblank_unicode_parity(
+    value: str,
+    accepted: bool,
+) -> None:
+    payload = _payload()
+    payload["current_character"] = value
+    unsigned = dict(payload)
+    unsigned.pop("generation_input_digest")
+    payload["generation_input_digest"] = (
+        derive_ares_script_generation_input_digest_v1(unsigned)
+    )
+
+    if accepted:
+        assert AresScriptGenerationInputV1.model_validate(
+            payload,
+            strict=True,
+        ).current_character == value
+    else:
+        _assert_generation_invalid(payload)
+
+
+def _assert_generation_invalid(value: dict) -> None:
+    with pytest.raises(ValidationError):
+        AresScriptGenerationInputV1.model_validate(value, strict=True)
+
+
 def test_ares_generation_digest_has_fixed_python_typescript_vector() -> None:
     value = _payload()
     unsigned = dict(value)
