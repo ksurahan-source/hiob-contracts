@@ -10,6 +10,46 @@ from pydantic import AfterValidator
 from .ares_script_revision_v1 import NonBlankStr
 
 
+_CONTRACT_WHITESPACE = frozenset(
+    {
+        "\u0009",
+        "\u000A",
+        "\u000B",
+        "\u000C",
+        "\u000D",
+        "\u0020",
+        "\u00A0",
+        "\u1680",
+        "\u2000",
+        "\u2001",
+        "\u2002",
+        "\u2003",
+        "\u2004",
+        "\u2005",
+        "\u2006",
+        "\u2007",
+        "\u2008",
+        "\u2009",
+        "\u200A",
+        "\u2028",
+        "\u2029",
+        "\u202F",
+        "\u205F",
+        "\u3000",
+        "\uFEFF",
+    }
+)
+
+
+def has_surrounding_contract_whitespace(value: str) -> bool:
+    """Apply the same frozen whitespace set in Python and TypeScript."""
+
+    return bool(value) and (
+        value[0] in _CONTRACT_WHITESPACE
+        or value[-1] in _CONTRACT_WHITESPACE
+    )
+
+
 def normalize_unicode_scalars(value: str) -> str:
     """Reject unpaired surrogates and normalize valid UTF-16 pairs."""
 
@@ -47,7 +87,7 @@ def canonical_brand_slug(value: str) -> str:
     if not isinstance(value, str):
         raise ValueError("brand_slug must be text")
     normalized = normalize_unicode_scalars(value)
-    if normalized != normalized.strip():
+    if has_surrounding_contract_whitespace(normalized):
         raise ValueError("brand_slug must not have surrounding whitespace")
     if any(unicodedata.category(char) == "Cc" for char in normalized):
         raise ValueError("brand_slug must not contain control characters")
@@ -63,5 +103,6 @@ CanonicalBrandSlug = Annotated[
 __all__ = [
     "CanonicalBrandSlug",
     "canonical_brand_slug",
+    "has_surrounding_contract_whitespace",
     "normalize_unicode_scalars",
 ]
