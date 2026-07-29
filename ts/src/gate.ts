@@ -7,9 +7,9 @@
  * Atropos가 CompositionSnapshot 만들기 전에 호출. 통과 못하면 렌더 금지.
  */
 
-import { BeatPlan } from './beat-plan';
-import { AudioClip } from './audio-clip';
-import { MediaArtifact } from './media-artifact';
+import { BeatPlan } from './beat-plan.js';
+import { AudioClip } from './audio-clip.js';
+import { MediaArtifact } from './media-artifact.js';
 
 export interface RenderReadiness {
   ok: boolean;
