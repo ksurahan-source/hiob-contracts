@@ -275,10 +275,14 @@ def test_ares_generation_accepts_json_integer_lexical_parity(
         '"factory_revision": 7',
         f'"factory_revision": {number_token}',
     )
+    decoded = json.loads(raw)
 
     parsed = AresScriptGenerationInputV1.model_validate_json(raw, strict=True)
     assert parsed.factory_revision == 7
     assert isinstance(parsed.factory_revision, int)
+    assert derive_ares_script_generation_input_digest_v1(decoded) == (
+        payload["generation_input_digest"]
+    )
 
 
 def test_ares_generation_digest_helper_has_stable_missing_field_error() -> None:
