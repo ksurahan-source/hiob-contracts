@@ -8,14 +8,15 @@ import pytest
 from pydantic import ValidationError
 
 from hiob_contracts import (
-    AresV3CommandScopeV1,
+    AresV3MakeContextV1,
     derive_ares_v3_make_context_digest_v1,
 )
 
 
 EXPECTED_KEYS = {
     "contract_version",
-    "scope",
+    "workspace_id",
+    "run_id",
     "brand_id",
     "subject_id",
     "product_id",
@@ -31,15 +32,9 @@ EXPECTED_KEYS = {
 
 def _payload() -> dict:
     make_context = {
-        "contract_version": "AresV3CommandScope.v1",
-        "scope": {
-            "workspace_id": "ws-v3-1",
-            "run_id": "run-v3-1",
-            "operation_id": "op-script-v3-1",
-            "idempotency_key": (
-                "ares-script-v3:ws-v3-1:run-v3-1:op-script-v3-1"
-            ),
-        },
+        "contract_version": "AresV3MakeContext.v1",
+        "workspace_id": "ws-v3-1",
+        "run_id": "run-v3-1",
         "brand_id": "2a86daca-f5f2-4a3d-a868-f283a0a57d84",
         "subject_id": "lead",
         "product_id": "c4404dda-a191-4bd3-942d-21a45f202554",
@@ -58,8 +53,8 @@ def _payload() -> dict:
     }
 
 
-def test_command_scope_is_one_exact_atomic_make_context() -> None:
-    parsed = AresV3CommandScopeV1.model_validate(_payload())
+def test_make_context_is_one_exact_atomic_authority_snapshot() -> None:
+    parsed = AresV3MakeContextV1.model_validate(_payload())
 
     assert set(parsed.model_dump(mode="json")) == EXPECTED_KEYS
     assert parsed.make_context_digest == (
@@ -71,6 +66,8 @@ def test_command_scope_is_one_exact_atomic_make_context() -> None:
 @pytest.mark.parametrize(
     "field",
     [
+        "workspace_id",
+        "run_id",
         "brand_id",
         "subject_id",
         "product_id",
@@ -82,7 +79,7 @@ def test_command_scope_is_one_exact_atomic_make_context() -> None:
         "artemis_approval_state_revision",
     ],
 )
-def test_command_scope_rejects_make_context_drift(field: str) -> None:
+def test_make_context_rejects_authority_drift(field: str) -> None:
     value = _payload()
     value[field] = (
         value[field] + 1
@@ -93,25 +90,7 @@ def test_command_scope_rejects_make_context_drift(field: str) -> None:
     )
 
     with pytest.raises(ValidationError, match="make_context_digest"):
-        AresV3CommandScopeV1.model_validate(value)
-
-
-def test_command_scope_rejects_scope_drift() -> None:
-    value = _payload()
-    value["scope"]["workspace_id"] = "other-workspace"
-
-    with pytest.raises(ValidationError, match="make_context_digest"):
-        AresV3CommandScopeV1.model_validate(value)
-
-
-def test_make_context_digest_excludes_command_execution_identity() -> None:
-    value = _payload()
-    value["scope"]["operation_id"] = "other-operation"
-    value["scope"]["idempotency_key"] = "other-idempotency-key"
-
-    parsed = AresV3CommandScopeV1.model_validate(value)
-
-    assert parsed.make_context_digest == _payload()["make_context_digest"]
+        AresV3MakeContextV1.model_validate(value)
 
 
 @pytest.mark.parametrize(
@@ -124,23 +103,26 @@ def test_make_context_digest_excludes_command_execution_identity() -> None:
         "provider_call",
         "dispatch",
         "make_ready_receipt",
+        "scope",
+        "operation_id",
+        "idempotency_key",
     ],
 )
-def test_command_scope_rejects_parallel_receipt_and_provider_authority(
+def test_make_context_rejects_command_receipt_and_provider_authority(
     legacy_or_provider_field: str,
 ) -> None:
     value = _payload()
     value[legacy_or_provider_field] = "client-owned"
 
     with pytest.raises(ValidationError):
-        AresV3CommandScopeV1.model_validate(value)
+        AresV3MakeContextV1.model_validate(value)
 
 
-def test_command_scope_is_immutable_and_digest_helper_requires_exact_source() -> None:
-    parsed = AresV3CommandScopeV1.model_validate(_payload())
+def test_make_context_is_immutable_and_digest_helper_requires_exact_source() -> None:
+    parsed = AresV3MakeContextV1.model_validate(_payload())
 
     with pytest.raises(ValidationError):
-        parsed.scope.operation_id = "mutated"
+        parsed.subject_id = "mutated"
 
     incomplete = deepcopy(_payload())
     del incomplete["make_context_digest"]

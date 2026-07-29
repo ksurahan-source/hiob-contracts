@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  AresV3CommandScopeV1Schema,
+  AresV3MakeContextV1Schema,
   deriveAresV3MakeContextDigestV1,
 } from './ares-create-script-v3.js';
 
@@ -17,20 +17,16 @@ const expectedKeys = [
   'make_context_digest',
   'product_id',
   'product_lock_digest',
-  'scope',
   'subject_id',
+  'workspace_id',
+  'run_id',
 ];
 
 function payload(): Record<string, any> {
   const makeContext = {
-    contract_version: 'AresV3CommandScope.v1' as const,
-    scope: {
-      workspace_id: 'ws-v3-1',
-      run_id: 'run-v3-1',
-      operation_id: 'op-script-v3-1',
-      idempotency_key:
-        'ares-script-v3:ws-v3-1:run-v3-1:op-script-v3-1',
-    },
+    contract_version: 'AresV3MakeContext.v1' as const,
+    workspace_id: 'ws-v3-1',
+    run_id: 'run-v3-1',
     brand_id: '2a86daca-f5f2-4a3d-a868-f283a0a57d84',
     subject_id: 'lead',
     product_id: 'c4404dda-a191-4bd3-942d-21a45f202554',
@@ -47,8 +43,8 @@ function payload(): Record<string, any> {
   };
 }
 
-test('Star command scope is one exact atomic make context', () => {
-  const parsed = AresV3CommandScopeV1Schema.parse(payload());
+test('Star make context is one exact atomic authority snapshot', () => {
+  const parsed = AresV3MakeContextV1Schema.parse(payload());
 
   assert.deepEqual(Object.keys(parsed).sort(), expectedKeys);
   assert.equal(
@@ -58,8 +54,10 @@ test('Star command scope is one exact atomic make context', () => {
   assert.equal(parsed.subject_id, 'lead');
 });
 
-test('Star command scope rejects make-context and scope drift', () => {
+test('Star make context rejects authority drift', () => {
   for (const field of [
+    'workspace_id',
+    'run_id',
     'brand_id',
     'subject_id',
     'product_id',
@@ -76,28 +74,11 @@ test('Star command scope rejects make-context and scope drift', () => {
       : field.endsWith('digest')
         ? `sha256:${'9'.repeat(64)}`
         : 'changed';
-    assert.equal(AresV3CommandScopeV1Schema.safeParse(value).success, false);
+    assert.equal(AresV3MakeContextV1Schema.safeParse(value).success, false);
   }
-
-  const scopeDrift = payload();
-  scopeDrift.scope.workspace_id = 'other-workspace';
-  assert.equal(
-    AresV3CommandScopeV1Schema.safeParse(scopeDrift).success,
-    false,
-  );
 });
 
-test('make-context digest excludes command execution identity', () => {
-  const value = payload();
-  value.scope.operation_id = 'other-operation';
-  value.scope.idempotency_key = 'other-idempotency-key';
-
-  const parsed = AresV3CommandScopeV1Schema.parse(value);
-
-  assert.equal(parsed.make_context_digest, payload().make_context_digest);
-});
-
-test('Star command scope excludes legacy receipt and provider authority', () => {
+test('Star make context excludes command, receipt, and provider authority', () => {
   for (const field of [
     'run_revision',
     'command_id',
@@ -106,17 +87,20 @@ test('Star command scope excludes legacy receipt and provider authority', () => 
     'provider_call',
     'dispatch',
     'make_ready_receipt',
+    'scope',
+    'operation_id',
+    'idempotency_key',
   ]) {
     const value = payload();
     value[field] = 'client-owned';
-    assert.equal(AresV3CommandScopeV1Schema.safeParse(value).success, false);
+    assert.equal(AresV3MakeContextV1Schema.safeParse(value).success, false);
   }
 });
 
-test('Star command scope is deeply immutable and helper rejects omissions', () => {
-  const parsed = AresV3CommandScopeV1Schema.parse(payload());
+test('Star make context is immutable and helper rejects omissions', () => {
+  const parsed = AresV3MakeContextV1Schema.parse(payload());
   assert.throws(() => {
-    (parsed.scope as any).operation_id = 'mutated';
+    (parsed as any).subject_id = 'mutated';
   });
 
   const incomplete = payload();
