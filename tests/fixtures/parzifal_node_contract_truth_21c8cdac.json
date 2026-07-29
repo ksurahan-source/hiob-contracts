@@ -17,16 +17,30 @@
         "line_spec": "92,128p;155,170p",
         "excerpt_path": "parzifal_registry_output_excerpt_21c8cdac.txt",
         "excerpt_sha256": "sha256:0c1fe0a411b944ca0385776fe103227f11f575d57d2fdb34d8fc5651340eb4ca"
+      },
+      {
+        "source_path": "hiob_parzifal/node_server/registry.py",
+        "source_file_sha256": "sha256:62eb6e1cdaac12c5df3f91d357c419ce7a6a4ee1b278f51b537fb8b30c7b1d1e",
+        "line_spec": "195,218p",
+        "excerpt_path": "parzifal_identity_handler_excerpt_21c8cdac.txt",
+        "excerpt_sha256": "sha256:b27fa30b0315c5e43250891f44f5d0489c95903f724e3b204a57c1f9010ee3da"
+      },
+      {
+        "source_path": "hiob_parzifal/ares_identity_authority.py",
+        "source_file_sha256": "sha256:c1a4c71687499232c296c289ecdbcd94349c11223b5a2d957ae8f9af5fb486b8",
+        "line_spec": "198,258p",
+        "excerpt_path": "parzifal_identity_wrapper_excerpt_21c8cdac.txt",
+        "excerpt_sha256": "sha256:13daa8c0b38b819c8f4b87078bc3b782cc8a3879905445c0380fd30e3c55bc84"
       }
     ]
   },
   "nodes": {
     "parzifal.identity.seal": {
       "output": "IdentityLock@v3",
-      "output_schema_digest": "sha256:4755990df4fa36f9d4b057432e0d3a520509781bf1ae6cc8ccc4a20acb4f407f",
+      "output_schema_digest": null,
       "observed_runtime_contract_digest": "sha256:4755990df4fa36f9d4b057432e0d3a520509781bf1ae6cc8ccc4a20acb4f407f",
-      "status": "active",
-      "blocker": null
+      "status": "blocked",
+      "blocker": "OUTPUT_WRAPS_DECLARED_CONTRACT"
     },
     "parzifal.references.snapshot": {
       "output": "hiob.reference_snapshot_bundle.v1@1.0.0",

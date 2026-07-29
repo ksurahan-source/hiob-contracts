@@ -153,8 +153,8 @@ def test_every_node_pins_required_contract_and_source_fields() -> None:
 
 def test_outputs_without_real_schema_digests_fail_closed() -> None:
     nodes = _load_manifest()["nodes"]
-    assert sum(node["status"] == "active" for node in nodes) == 2
-    assert sum(node["status"] == "blocked" for node in nodes) == 43
+    assert sum(node["status"] == "active" for node in nodes) == 1
+    assert sum(node["status"] == "blocked" for node in nodes) == 44
 
     blockers = {
         blocker: sum(node["blocker"] == blocker for node in nodes)
@@ -164,6 +164,7 @@ def test_outputs_without_real_schema_digests_fail_closed() -> None:
             "PARTIAL_OUTPUT_SCHEMA_DIGEST",
             "OUTPUT_EXTENDS_DECLARED_CONTRACT",
             "MISSING_CANONICAL_OUTPUT_VALIDATOR",
+            "OUTPUT_WRAPS_DECLARED_CONTRACT",
         }
     }
 
@@ -173,6 +174,7 @@ def test_outputs_without_real_schema_digests_fail_closed() -> None:
         "PARTIAL_OUTPUT_SCHEMA_DIGEST": 1,
         "OUTPUT_EXTENDS_DECLARED_CONTRACT": 1,
         "MISSING_CANONICAL_OUTPUT_VALIDATOR": 1,
+        "OUTPUT_WRAPS_DECLARED_CONTRACT": 1,
     }
     for node in nodes:
         if node["status"] == "active":
@@ -197,6 +199,7 @@ def test_outputs_without_real_schema_digests_fail_closed() -> None:
                     "PARTIAL_OUTPUT_SCHEMA_DIGEST",
                     "OUTPUT_EXTENDS_DECLARED_CONTRACT",
                     "MISSING_CANONICAL_OUTPUT_VALIDATOR",
+                    "OUTPUT_WRAPS_DECLARED_CONTRACT",
                 }
                 assert node["output"]
                 assert DIGEST_RE.fullmatch(

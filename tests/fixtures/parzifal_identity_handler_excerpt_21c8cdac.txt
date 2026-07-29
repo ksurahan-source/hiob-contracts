@@ -1,0 +1,24 @@
+def _h_ares_identity_seal(
+    inp: AresIdentitySealInput,
+    *,
+    workspace_id: str,
+    run_id: str,
+    record_resolver: IdentityRecordResolver | None,
+) -> tuple[dict[str, Any], str]:
+    record = resolve_identity_record(
+        record_ref=inp.record_ref,
+        workspace_id=workspace_id,
+        run_id=run_id,
+        resolver=record_resolver,
+    )
+    authority = seal_ares_identity_authority(
+        workspace_id=workspace_id,
+        run_id=run_id,
+        record_id=record.id,
+        record_version=record.version,
+        record_digest=record.digest,
+        identity_lock=record.identity_lock,
+        master_sheet=record.master_sheet,
+        cast_sheets=record.cast_sheets,
+    )
+    return authority, record.emitted_at.astimezone(timezone.utc).isoformat()
