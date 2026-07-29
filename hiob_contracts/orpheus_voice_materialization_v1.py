@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Mapping
+import re
+from typing import Annotated, Any, Literal, Mapping
 
-from pydantic import BaseModel, model_validator
+from pydantic import AfterValidator, BaseModel, model_validator
 
 from .ares_script_revision_v1 import (
     DigestStr,
@@ -27,12 +28,50 @@ _INPUT_DIGEST_FIELDS = (
     "voice_receipt",
     "voice_receipt_digest",
 )
+_VOICE_PERSONA_SLOTS = frozenset(
+    {
+        "male1",
+        "male2",
+        "male3",
+        "female1",
+        "female2",
+        "female3",
+        "child_male",
+        "child_female",
+        "male",
+        "female",
+        "narrator",
+        "hero",
+        "heroine",
+    }
+)
+_OPAQUE_PROVIDER_VOICE_ID = re.compile(r"^[A-Za-z0-9_-]{12,256}$")
 
 
 def _as_json_dict(value: Mapping[str, Any] | BaseModel) -> dict[str, Any]:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     return dict(value)
+
+
+def _sealed_provider_voice_id(value: str) -> str:
+    normalized = value.strip()
+    slot_key = normalized.lower().replace("-", "_")
+    if normalized.startswith("tc_"):
+        return value
+    if (
+        slot_key in _VOICE_PERSONA_SLOTS
+        or normalized.startswith("slot:")
+        or _OPAQUE_PROVIDER_VOICE_ID.fullmatch(normalized) is None
+    ):
+        raise ValueError("voice_id must be a sealed provider identity")
+    return value
+
+
+SealedProviderVoiceId = Annotated[
+    NonBlankStr,
+    AfterValidator(_sealed_provider_voice_id),
+]
 
 
 class _OrpheusVoiceReceiptV1(BaseModel):
@@ -44,7 +83,7 @@ class _OrpheusVoiceReceiptV1(BaseModel):
     workspace_id: NonBlankStr
     run_id: NonBlankStr
     subject_id: NonBlankStr
-    voice_id: NonBlankStr
+    voice_id: SealedProviderVoiceId
     beat_index: NonNegativeInt
     source: Literal["sealed"]
     beat_plan_revision_digest: DigestStr
@@ -93,7 +132,7 @@ class OrpheusVoiceMaterializationInputV1(BaseModel):
     beat_index: NonNegativeInt
     source_text: NonBlankStr
     source_text_digest: DigestStr
-    voice_id: NonBlankStr
+    voice_id: SealedProviderVoiceId
     voice_receipt: _OrpheusVoiceReceiptV1
     voice_receipt_digest: DigestStr
     input_digest: DigestStr
