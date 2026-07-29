@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from importlib.util import find_spec
 
 import pytest
 from pydantic import ValidationError
 
+import hiob_contracts
 from hiob_contracts import (
     AresV3MakeContextV1,
     derive_ares_v3_make_context_digest_v1,
@@ -33,8 +35,8 @@ EXPECTED_KEYS = {
 def _payload() -> dict:
     make_context = {
         "contract_version": "AresV3MakeContext.v1",
-        "workspace_id": "ws-v3-1",
-        "run_id": "run-v3-1",
+        "workspace_id": "4d2b4b89-77de-4f6a-8b3c-8abdafc1e2f1",
+        "run_id": "7bdf3494-b232-4f15-93ea-b4a99625ba9c",
         "brand_id": "2a86daca-f5f2-4a3d-a868-f283a0a57d84",
         "subject_id": "lead",
         "product_id": "c4404dda-a191-4bd3-942d-21a45f202554",
@@ -58,9 +60,37 @@ def test_make_context_is_one_exact_atomic_authority_snapshot() -> None:
 
     assert set(parsed.model_dump(mode="json")) == EXPECTED_KEYS
     assert parsed.make_context_digest == (
-        "sha256:e99651e95596a97ce408a82e53bbe041a8e7e981bf8503d43ab4a090abd87b3e"
+        "sha256:9c04fa8a7f7152b3ab51bf3fa45d394426a432e1bb003ef171ffb4fe7038ca07"
     )
     assert parsed.subject_id == "lead"
+
+
+def test_make_context_is_the_only_public_make_ready_contract() -> None:
+    legacy_names = (
+        "StarMakeReadyRequestV1",
+        "StarMakeReadyReceiptV1",
+        "StarMakeReadyResolverV1",
+        "derive_star_make_ready_request_digest_v1",
+        "derive_star_make_ready_command_id_v1",
+        "derive_star_make_ready_receipt_digest_v1",
+    )
+
+    for name in legacy_names:
+        assert not hasattr(hiob_contracts, name)
+        assert name not in hiob_contracts.__all__
+    assert find_spec("hiob_contracts.star_make_ready_v1") is None
+
+
+@pytest.mark.parametrize("field", ["workspace_id", "run_id", "brand_id"])
+def test_make_context_rejects_non_uuid_db_scope_after_rehash(
+    field: str,
+) -> None:
+    value = _payload()
+    value[field] = "not-a-db-uuid"
+    value["make_context_digest"] = derive_ares_v3_make_context_digest_v1(value)
+
+    with pytest.raises(ValidationError, match=field):
+        AresV3MakeContextV1.model_validate(value)
 
 
 @pytest.mark.parametrize(

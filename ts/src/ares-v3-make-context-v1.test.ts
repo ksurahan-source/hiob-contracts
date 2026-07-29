@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import test from 'node:test';
 
+import * as PublicContracts from './index.js';
 import {
   AresV3MakeContextV1Schema,
   deriveAresV3MakeContextDigestV1,
@@ -25,8 +27,8 @@ const expectedKeys = [
 function payload(): Record<string, any> {
   const makeContext = {
     contract_version: 'AresV3MakeContext.v1' as const,
-    workspace_id: 'ws-v3-1',
-    run_id: 'run-v3-1',
+    workspace_id: '4d2b4b89-77de-4f6a-8b3c-8abdafc1e2f1',
+    run_id: '7bdf3494-b232-4f15-93ea-b4a99625ba9c',
     brand_id: '2a86daca-f5f2-4a3d-a868-f283a0a57d84',
     subject_id: 'lead',
     product_id: 'c4404dda-a191-4bd3-942d-21a45f202554',
@@ -49,9 +51,35 @@ test('Star make context is one exact atomic authority snapshot', () => {
   assert.deepEqual(Object.keys(parsed).sort(), [...expectedKeys].sort());
   assert.equal(
     parsed.make_context_digest,
-    'sha256:e99651e95596a97ce408a82e53bbe041a8e7e981bf8503d43ab4a090abd87b3e',
+    'sha256:9c04fa8a7f7152b3ab51bf3fa45d394426a432e1bb003ef171ffb4fe7038ca07',
   );
   assert.equal(parsed.subject_id, 'lead');
+});
+
+test('Star make context is the only public make-ready contract', () => {
+  for (const name of [
+    'StarMakeReadyRequestV1Schema',
+    'StarMakeReadyReceiptV1Schema',
+    'deriveStarMakeReadyRequestDigestV1',
+    'deriveStarMakeReadyCommandIdV1',
+    'deriveStarMakeReadyReceiptDigestV1',
+    'starMakeReadyReceiptAuthorizesV1',
+  ]) {
+    assert.equal(name in PublicContracts, false);
+  }
+  assert.equal(
+    existsSync(new URL('./star-make-ready-v1.js', import.meta.url)),
+    false,
+  );
+});
+
+test('Star make context rejects non-UUID DB scope after rehash', () => {
+  for (const field of ['workspace_id', 'run_id', 'brand_id']) {
+    const value = payload();
+    value[field] = 'not-a-db-uuid';
+    value.make_context_digest = deriveAresV3MakeContextDigestV1(value);
+    assert.equal(AresV3MakeContextV1Schema.safeParse(value).success, false);
+  }
 });
 
 test('Star make context rejects authority drift', () => {
