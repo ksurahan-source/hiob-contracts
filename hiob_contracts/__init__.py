@@ -172,6 +172,7 @@ from .planets.ares import (
     AresCharacterIdentityProjectionV1,
     AresProvenanceMemoryV1,
     AresScriptGenerationInputV1,
+    AresVoiceSpecProjectionV1,
     derive_ares_script_generation_input_digest_v1,
 )
 from .ares_script_revision_v1 import (
@@ -282,6 +283,7 @@ __all__ = [
     "AresRequestScopeV3", "authority_ref_receipt_digest_v3",
     "AresV3MakeContextV1", "derive_ares_v3_make_context_digest_v1",
     "AresCharacterIdentityProjectionV1", "AresProvenanceMemoryV1",
+    "AresVoiceSpecProjectionV1",
     "AresScriptGenerationInputV1",
     "derive_ares_script_generation_input_digest_v1",
     "AresAuthorityArtifactRefV3", "AresP2ATargetProjectionV3",

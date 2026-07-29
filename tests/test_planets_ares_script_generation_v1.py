@@ -168,6 +168,19 @@ def test_ares_generation_json_schema_describes_runtime_rejections() -> None:
     voice = schema["$defs"]["AresVoiceSpecProjectionV1"]
 
     assert {"adjacent_beat_summaries", "memories"} <= required
+    for field in (
+        "workspace_id",
+        "run_id",
+        "script_revision_id",
+        "plan_revision_id",
+        "current_character",
+        "conflict",
+    ):
+        assert schema["properties"][field]["minLength"] == 1
+        assert schema["properties"][field]["pattern"]
+    assert schema["properties"]["generation_input_digest"]["pattern"] == (
+        "^sha256:[0-9a-f]{64}$"
+    )
     for field in ("persona_id", "face_id", "voice_id"):
         assert character["properties"][field]["minLength"] == 1
         assert character["properties"][field]["pattern"]
@@ -200,6 +213,10 @@ def test_ares_generation_rejects_unpaired_unicode_before_hashing() -> None:
     value["current_character"] = "\ud800"
     value["generation_input_digest"] = "sha256:" + "0" * 64
 
+    unsigned = dict(value)
+    unsigned.pop("generation_input_digest")
+    with pytest.raises(ValueError, match="Unicode scalar"):
+        derive_ares_script_generation_input_digest_v1(unsigned)
     with pytest.raises(ValidationError):
         AresScriptGenerationInputV1.model_validate(value, strict=True)
 

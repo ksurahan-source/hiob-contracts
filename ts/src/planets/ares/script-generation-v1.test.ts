@@ -137,7 +137,13 @@ test('Ares generation rejects unpaired Unicode before hashing', () => {
   const value = payload();
   value.current_character = '\ud800';
   value.generation_input_digest = `sha256:${'0'.repeat(64)}`;
+  const unsigned = { ...value };
+  delete unsigned.generation_input_digest;
 
+  assert.throws(
+    () => deriveAresScriptGenerationInputDigestV1(unsigned),
+    /Unicode scalar/,
+  );
   assert.equal(
     AresScriptGenerationInputV1Schema.safeParse(value).success,
     false,

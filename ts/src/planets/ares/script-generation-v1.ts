@@ -5,23 +5,64 @@ import {
   characterIdentityBindingErrorV1,
 } from '../../character-identity-v1.js';
 import { sha256Digest } from '../../factory/digest.js';
-import { VoiceSpecV1Schema } from '../../voice-spec-v1.js';
+import { deriveVoiceSpecDigestV1 } from '../../voice-spec-v1.js';
 
 const DigestSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, 'digest must be sha256:<64 lowercase hex>');
+function hasUnpairedSurrogate(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const low = value.charCodeAt(index + 1);
+      if (!(low >= 0xdc00 && low <= 0xdfff)) return true;
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function assertJsonUnicodeScalars(value: unknown): void {
+  if (typeof value === 'string') {
+    if (hasUnpairedSurrogate(value)) {
+      throw new TypeError('text must contain valid Unicode scalar values');
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertJsonUnicodeScalars(item);
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(
+      value as Record<string, unknown>,
+    )) {
+      if (hasUnpairedSurrogate(key)) {
+        throw new TypeError('text must contain valid Unicode scalar values');
+      }
+      assertJsonUnicodeScalars(item);
+    }
+  }
+}
+
 const boundedNonBlankString = (maxLength: number) =>
   z
     .string()
-    .max(maxLength)
     .refine(
       (value) => value.trim().length > 0,
       'string must not be blank',
+    )
+    .refine(
+      (value) => !hasUnpairedSurrogate(value),
+      'text must contain valid Unicode scalar values',
+    )
+    .refine(
+      (value) => [...value].length <= maxLength,
+      `string must contain at most ${maxLength} Unicode scalars`,
     );
-const NonBlankString = z.string().refine(
-  (value) => value.trim().length > 0,
-  'string must not be blank',
-);
+const NonBlankString = boundedNonBlankString(512);
 
 const DIGEST_FIELDS = [
   'contract_version',
@@ -59,6 +100,7 @@ export function deriveAresScriptGenerationInputDigestV1(
       return [field, value[field]];
     }),
   );
+  assertJsonUnicodeScalars(body);
   return sha256Digest(body);
 }
 
@@ -93,22 +135,29 @@ export const AresProvenanceMemoryV1Schema = z
   })
   .strict();
 
-const RequiredVoiceSpecV1Schema = z
-  .unknown()
+export const AresVoiceSpecProjectionV1Schema = z
+  .object({
+    contract_version: z.literal('VoiceSpec.v1'),
+    subject_id: boundedNonBlankString(128),
+    rhythm: boundedNonBlankString(300),
+    vocabulary: z.array(boundedNonBlankString(80)).max(12),
+    forbidden_phrases: z.array(boundedNonBlankString(120)).max(12),
+    approved_examples: z
+      .array(boundedNonBlankString(500))
+      .min(3)
+      .max(5),
+    voice_spec_digest: DigestSchema,
+  })
+  .strict()
   .superRefine((value, ctx) => {
-    if (
-      typeof value !== 'object'
-      || value === null
-      || !Object.prototype.hasOwnProperty.call(value, 'contract_version')
-    ) {
+    if (value.voice_spec_digest !== deriveVoiceSpecDigestV1(value)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'contract_version is required',
-        path: ['contract_version'],
+        message: 'voice_spec_digest does not match VoiceSpec content',
+        path: ['voice_spec_digest'],
       });
     }
-  })
-  .pipe(VoiceSpecV1Schema);
+  });
 
 export const AresScriptGenerationInputV1Schema = z
   .object({
@@ -119,17 +168,15 @@ export const AresScriptGenerationInputV1Schema = z
     plan_revision_id: NonBlankString,
     factory_revision: z.number().int().min(0).max(2_147_483_647),
     character_lock: AresCharacterIdentityProjectionV1Schema,
-    voice_spec: RequiredVoiceSpecV1Schema,
+    voice_spec: AresVoiceSpecProjectionV1Schema,
     current_character: boundedNonBlankString(500),
     conflict: boundedNonBlankString(500),
     adjacent_beat_summaries: z
       .array(boundedNonBlankString(300))
-      .max(2)
-      .default([]),
+      .max(2),
     memories: z
       .array(AresProvenanceMemoryV1Schema)
-      .max(3)
-      .default([]),
+      .max(3),
     generation_input_digest: DigestSchema,
   })
   .strict()
@@ -142,14 +189,21 @@ export const AresScriptGenerationInputV1Schema = z
         path: ['voice_spec', 'subject_id'],
       });
     }
-    if (
-      value.generation_input_digest
-      !== deriveAresScriptGenerationInputDigestV1(value)
-    ) {
+    let expectedDigest: string | null = null;
+    try {
+      expectedDigest = deriveAresScriptGenerationInputDigestV1(value);
+    } catch {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message:
-          'generation_input_digest does not match generation input',
+        message: 'generation input must contain valid Unicode scalar values',
+        path: ['generation_input_digest'],
+      });
+      return;
+    }
+    if (value.generation_input_digest !== expectedDigest) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'generation_input_digest does not match generation input',
         path: ['generation_input_digest'],
       });
     }
@@ -162,7 +216,9 @@ export type AresCharacterIdentityProjectionV1 = z.infer<
 export type AresProvenanceMemoryV1 = z.infer<
   typeof AresProvenanceMemoryV1Schema
 >;
+export type AresVoiceSpecProjectionV1 = z.infer<
+  typeof AresVoiceSpecProjectionV1Schema
+>;
 export type AresScriptGenerationInputV1 = z.infer<
   typeof AresScriptGenerationInputV1Schema
 >;
-
