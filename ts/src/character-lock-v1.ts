@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { CanonicalBrandSlugSchema } from './brand-scope.js';
 import { sha256Digest } from './factory/digest.js';
 
 const NonBlankString = z.string().refine(
@@ -49,7 +50,7 @@ const DIGEST_FIELDS = [
 const CharacterLockDigestSourceShape = {
   contract_version: z.literal('CharacterLock.v1'),
   workspace_id: UuidSchema,
-  brand_slug: CanonicalNonBlankString,
+  brand_slug: CanonicalBrandSlugSchema,
   subject_id: CanonicalNonBlankString,
   version: z.number().int().safe().positive(),
   face_id: CanonicalNonBlankString,

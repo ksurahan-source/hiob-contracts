@@ -1,6 +1,10 @@
 /** Atomic, server-owned make context for one Ares V3 command. */
 import { z } from 'zod';
 
+import {
+  CanonicalBrandSlugSchema,
+  canonicalBrandSlug,
+} from './brand-scope.js';
 import { sha256Digest } from './factory/digest.js';
 
 const NonBlankString = z.string().refine(
@@ -39,7 +43,7 @@ export function deriveAresV3MakeContextDigestV1(
   return sha256Digest({
     workspace_id: field('workspace_id'),
     run_id: field('run_id'),
-    brand_slug: field('brand_slug'),
+    brand_slug: canonicalBrandSlug(field('brand_slug')),
     subject_id: field('subject_id'),
     product_id: field('product_id'),
     character_lock_digest: field('character_lock_digest'),
@@ -58,7 +62,7 @@ export const AresV3MakeContextV1Schema = z
     contract_version: z.literal('AresV3MakeContext.v1'),
     workspace_id: UuidSchema,
     run_id: UuidSchema,
-    brand_slug: NonBlankString,
+    brand_slug: CanonicalBrandSlugSchema,
     subject_id: NonBlankString,
     product_id: NonBlankString,
     character_lock_digest: DigestSchema,
@@ -71,6 +75,9 @@ export const AresV3MakeContextV1Schema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (!CanonicalBrandSlugSchema.safeParse(value.brand_slug).success) {
+      return;
+    }
     if (
       value.make_context_digest
       !== deriveAresV3MakeContextDigestV1(value)
