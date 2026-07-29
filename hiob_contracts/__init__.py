@@ -45,6 +45,10 @@ from .character_identity_v1 import (
     character_identity_binding_payload_v1,
     derive_character_identity_binding_digest_v1,
 )
+from .character_lock_v1 import (
+    CharacterLockV1,
+    derive_character_lock_digest_v1,
+)
 from .voice_spec_v1 import VoiceSpecV1, derive_voice_spec_digest_v1
 from .parzifal_voice_envelope_v1 import (
     ParzifalVoiceEnvelopeV1,
@@ -160,6 +164,10 @@ from .ares_create_script_v3 import (
     ares_create_script_result_v3_schema_digest,
     request_content_digest_v3,
 )
+from .ares_v3_make_context_v1 import (
+    AresV3MakeContextV1,
+    derive_ares_v3_make_context_digest_v1,
+)
 from .ares_script_revision_v1 import (
     AresApprovalBeginCommandV1,
     AresApprovalCommandV1,
@@ -266,6 +274,7 @@ __all__ = [
     "ares_create_script_request_schema_descriptor_v2",
     "ares_create_script_result_schema_digest", "request_content_digest",
     "AresRequestScopeV3", "authority_ref_receipt_digest_v3",
+    "AresV3MakeContextV1", "derive_ares_v3_make_context_digest_v1",
     "AresAuthorityArtifactRefV3", "AresP2ATargetProjectionV3",
     "ares_p2a_target_projection_v3",
     "ares_p2a_target_projection_v3_schema_descriptor",
@@ -297,6 +306,7 @@ __all__ = [
     "VisualContext","VisualRequest","AudioRequest","SFXRequest","RenderJobRequest","RenderJobResponse","ProcessInsightsRequest",
     "BeatPersona", "BeatPersonas",
     "ElementLocks", "ElementRef", "CharacterLock", "ProductLock", "BackgroundLock",
+    "CharacterLockV1", "derive_character_lock_digest_v1",
     "character_identity_binding_payload_v1",
     "derive_character_identity_binding_digest_v1",
     "VoiceSpecV1", "derive_voice_spec_digest_v1",

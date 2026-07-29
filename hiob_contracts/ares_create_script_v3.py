@@ -46,6 +46,10 @@ from .ares_script_revision_v1 import (
     _validate_json,
     canonical_contract_digest_v1,
 )
+from .ares_v3_make_context_v1 import (
+    AresV3MakeContextV1,
+    derive_ares_v3_make_context_digest_v1,
+)
 from .factory import KarmaEdgeReceipt, sha256_digest
 
 
@@ -832,6 +836,8 @@ def request_content_digest_v3(request: AresCreateScriptRequestV3) -> str:
 
 __all__ = [
     "AresRequestScopeV3",
+    "AresV3MakeContextV1",
+    "derive_ares_v3_make_context_digest_v1",
     "authority_ref_receipt_digest_v3",
     "AresAuthorityArtifactRefV3",
     "AresP2ATargetProjectionV3",

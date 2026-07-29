@@ -9,6 +9,13 @@ import { z } from 'zod';
 import { aresIdentitySchemaDescriptorV2 } from './ares-create-script-v2.js';
 import { characterIdentityBindingErrorV1 } from './character-identity-v1.js';
 import { VoiceSpecV1Schema } from './voice-spec-v1.js';
+export {
+  AresV3MakeContextV1Schema,
+  deriveAresV3MakeContextDigestV1,
+} from './ares-v3-make-context-v1.js';
+export type {
+  AresV3MakeContextV1,
+} from './ares-v3-make-context-v1.js';
 
 import { sha256Digest } from './factory/digest.js';
 import { KarmaEdgeReceiptSchema } from './factory/karma-edge.js';
@@ -20,6 +27,12 @@ const NonBlankString = z.string().refine(
 const DigestSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, 'digest must be sha256:<64 lowercase hex>');
+const UuidSchema = z
+  .string()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    'UUID must use canonical lowercase form',
+  );
 const NonNegativeInt = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const UTC_TIMESTAMP_RE =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?Z$/;

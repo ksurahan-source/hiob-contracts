@@ -1,0 +1,29 @@
+{
+  "name": "@hiob/contracts",
+  "version": "0.1.0",
+  "description": "HIOB cross-planet contracts with Python and TypeScript runtimes",
+  "type": "module",
+  "main": "./ts/dist/index.js",
+  "types": "./ts/dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./ts/dist/index.js",
+      "types": "./ts/dist/index.d.ts"
+    }
+  },
+  "files": [
+    "ts/dist"
+  ],
+  "scripts": {
+    "build": "npm --prefix ts run build",
+    "prepare": "npm --prefix ts ci && npm --prefix ts run build",
+    "test": "npm --prefix ts test && node --test tests/npm-package.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "zod": "^3.22.0"
+  },
+  "license": "UNLICENSED"
+}

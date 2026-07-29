@@ -9,33 +9,33 @@
  */
 
 // JanusBrief
-export { JanusBriefSchema, Intake13QSchema, answeredCount } from './janus-brief';
-export type { JanusBrief, Intake13Q } from './janus-brief';
+export { JanusBriefSchema, Intake13QSchema, answeredCount } from './janus-brief.js';
+export type { JanusBrief, Intake13Q } from './janus-brief.js';
 
 // BeatPlan
-export { BeatPlanSchema, BeatSchema, validateBeatPlan } from './beat-plan';
-export type { BeatPlan, Beat } from './beat-plan';
+export { BeatPlanSchema, BeatSchema, validateBeatPlan } from './beat-plan.js';
+export type { BeatPlan, Beat } from './beat-plan.js';
 
 // AudioClip
-export { AudioClipSchema, validateAudioClip } from './audio-clip';
-export type { AudioClip } from './audio-clip';
-export { AudioTrackType } from './audio-clip';
+export { AudioClipSchema, validateAudioClip } from './audio-clip.js';
+export type { AudioClip } from './audio-clip.js';
+export { AudioTrackType } from './audio-clip.js';
 
 // MediaArtifact
-export { MediaArtifactSchema, validateMediaArtifact } from './media-artifact';
-export type { MediaArtifact } from './media-artifact';
-export { MediaKindType } from './media-artifact';
+export { MediaArtifactSchema, validateMediaArtifact } from './media-artifact.js';
+export type { MediaArtifact } from './media-artifact.js';
+export { MediaKindType } from './media-artifact.js';
 
 // EditDecisionList — SUNSET (D-66): Python deleted; do not re-export TS.
 // Live editorial state = run.attributes.editing_decisions dict (not this type).
 
 // ParzifalTargetInput
-export { ParzifalTargetInputSchema, validateParzifalTargetInput } from './parzifal-target-input';
-export type { ParzifalTargetInput } from './parzifal-target-input';
+export { ParzifalTargetInputSchema, validateParzifalTargetInput } from './parzifal-target-input.js';
+export type { ParzifalTargetInput } from './parzifal-target-input.js';
 
 // AresScriptInput
-export { AresScriptInputSchema, validateAresScriptInput } from './ares-script-input';
-export type { AresScriptInput } from './ares-script-input';
+export { AresScriptInputSchema, validateAresScriptInput } from './ares-script-input.js';
+export type { AresScriptInput } from './ares-script-input.js';
 
 // Ares pure generate V2
 export {
@@ -46,13 +46,13 @@ export {
   aresCreateScriptRequestSchemaDescriptorV2,
   aresCreateScriptRequestSchemaDigest,
   aresCreateScriptResultSchemaDigest,
-} from './ares-create-script-v2';
+} from './ares-create-script-v2.js';
 export type {
   AresCreateScriptRequestV2,
   AresCreateScriptResultV2,
   ScriptPackageV2,
   BeatPlanV2,
-} from './ares-create-script-v2';
+} from './ares-create-script-v2.js';
 
 // Ares pure generate V3 — explicit authority refs and semantic-only beat plan
 export {
@@ -74,22 +74,27 @@ export {
   authorityRefReceiptDigestV3,
   aresP2ATargetProjectionV3SchemaDescriptor,
   aresP2ATargetProjectionV3SchemaDigest,
-} from './ares-create-script-v3';
+} from './ares-create-script-v3.js';
 
 export {
   characterIdentityBindingPayloadV1,
   deriveCharacterIdentityBindingDigestV1,
-} from './character-identity-v1';
+} from './character-identity-v1.js';
+export {
+  CharacterLockV1Schema,
+  deriveCharacterLockDigestV1,
+} from './character-lock-v1.js';
+export type { CharacterLockV1 } from './character-lock-v1.js';
 export {
   VoiceSpecV1Schema,
   deriveVoiceSpecDigestV1,
-} from './voice-spec-v1';
-export type { VoiceSpecV1 } from './voice-spec-v1';
+} from './voice-spec-v1.js';
+export type { VoiceSpecV1 } from './voice-spec-v1.js';
 export {
   ParzifalVoiceEnvelopeV1Schema,
   deriveParzifalVoiceEnvelopeDigestV1,
-} from './parzifal-voice-envelope-v1';
-export type { ParzifalVoiceEnvelopeV1 } from './parzifal-voice-envelope-v1';
+} from './parzifal-voice-envelope-v1.js';
+export type { ParzifalVoiceEnvelopeV1 } from './parzifal-voice-envelope-v1.js';
 export type {
   AresRequestScopeV3,
   AresAuthorityArtifactRefV3,
@@ -103,21 +108,28 @@ export type {
   AresGenerateProvenanceV3,
   AresGenerateUsageV3,
   AresCreateScriptResultV3,
-} from './ares-create-script-v3';
+} from './ares-create-script-v3.js';
+export {
+  AresV3MakeContextV1Schema,
+  deriveAresV3MakeContextDigestV1,
+} from './ares-v3-make-context-v1.js';
+export type {
+  AresV3MakeContextV1,
+} from './ares-v3-make-context-v1.js';
 
 
 // CompositionSnapshot
-export { CompositionSnapshotSchema, validateCompositionSnapshot } from './composition-snapshot';
-export type { CompositionSnapshot } from './composition-snapshot';
-export { RenderStatusType } from './composition-snapshot';
+export { CompositionSnapshotSchema, validateCompositionSnapshot } from './composition-snapshot.js';
+export type { CompositionSnapshot } from './composition-snapshot.js';
+export { RenderStatusType } from './composition-snapshot.js';
 
 // ReelMetric
-export { ReelMetricSchema, calculateRoas, calculateCtr, validateReelMetric } from './reel-metric';
-export type { ReelMetric } from './reel-metric';
+export { ReelMetricSchema, calculateRoas, calculateCtr, validateReelMetric } from './reel-metric.js';
+export type { ReelMetric } from './reel-metric.js';
 
 // Gate
-export { assertRenderReady } from './gate';
-export type { RenderReadiness } from './gate';
+export { assertRenderReady } from './gate.js';
+export type { RenderReadiness } from './gate.js';
 
 // Creative Factory Harmony kernel (PRD 2026-07-14 §6–§7)
 export * from './factory/index.js';
