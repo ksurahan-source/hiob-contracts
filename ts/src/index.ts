@@ -90,6 +90,18 @@ export {
   deriveParzifalVoiceEnvelopeDigestV1,
 } from './parzifal-voice-envelope-v1';
 export type { ParzifalVoiceEnvelopeV1 } from './parzifal-voice-envelope-v1';
+export {
+  ParzifalRecordRefV1Schema,
+  ParzifalIdentityReceiptV1Schema,
+  StarMakeReadyReceiptV1Schema,
+  deriveParzifalIdentityReceiptPayloadDigestV1,
+  deriveStarMakeReadyReceiptDigestV1,
+} from './star-make-ready-v1';
+export type {
+  ParzifalRecordRefV1,
+  ParzifalIdentityReceiptV1,
+  StarMakeReadyReceiptV1,
+} from './star-make-ready-v1';
 export type {
   AresRequestScopeV3,
   AresAuthorityArtifactRefV3,

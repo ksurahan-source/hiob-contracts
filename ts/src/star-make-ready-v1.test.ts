@@ -3,10 +3,12 @@ import test from 'node:test';
 
 import {
   StarMakeReadyReceiptV1Schema,
-  deriveCharacterIdentityBindingDigestV1,
   deriveParzifalIdentityReceiptPayloadDigestV1,
   deriveStarMakeReadyReceiptDigestV1,
-} from './index.js';
+} from './star-make-ready-v1.js';
+import {
+  deriveCharacterIdentityBindingDigestV1,
+} from './character-identity-v1.js';
 
 function payload(): Record<string, unknown> {
   const identityBindingDigest = deriveCharacterIdentityBindingDigestV1({
