@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .ares_script_revision_v1 import DigestStr, NonBlankStr
+from .brand_scope import CanonicalBrandSlug, canonical_brand_slug
 from .factory.digest import sha256_digest
 
 _STRICT_FROZEN = ConfigDict(
@@ -33,7 +34,7 @@ PositiveVersion = Annotated[
 _DIGEST_FIELDS = (
     "contract_version",
     "workspace_id",
-    "brand_id",
+    "brand_slug",
     "subject_id",
     "version",
     "face_id",
@@ -80,7 +81,11 @@ def derive_character_lock_digest_v1(
     payload = {field: data[field] for field in _DIGEST_FIELDS}
     for field, item in payload.items():
         if isinstance(item, str):
-            payload[field] = _normalize_unicode_scalars(item)
+            payload[field] = (
+                canonical_brand_slug(item)
+                if field == "brand_slug"
+                else _normalize_unicode_scalars(item)
+            )
     return sha256_digest(payload)
 
 
@@ -91,7 +96,7 @@ class CharacterLockV1(BaseModel):
 
     contract_version: Literal["CharacterLock.v1"]
     workspace_id: UuidStr
-    brand_id: UuidStr
+    brand_slug: CanonicalBrandSlug
     subject_id: NonBlankStr
     version: PositiveVersion
     face_id: NonBlankStr

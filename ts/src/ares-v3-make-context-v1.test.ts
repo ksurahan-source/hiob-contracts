@@ -12,7 +12,7 @@ const expectedKeys = [
   'artemis_approval_receipt_digest',
   'artemis_approval_receipt_id',
   'artemis_approval_state_revision',
-  'brand_id',
+  'brand_slug',
   'character_lock_digest',
   'character_lock_version',
   'contract_version',
@@ -29,7 +29,7 @@ function payload(): Record<string, any> {
     contract_version: 'AresV3MakeContext.v1' as const,
     workspace_id: '4d2b4b89-77de-4f6a-8b3c-8abdafc1e2f1',
     run_id: '7bdf3494-b232-4f15-93ea-b4a99625ba9c',
-    brand_id: '2a86daca-f5f2-4a3d-a868-f283a0a57d84',
+    brand_slug: 'viewok',
     subject_id: 'lead',
     product_id: 'c4404dda-a191-4bd3-942d-21a45f202554',
     character_lock_digest: `sha256:${'1'.repeat(64)}`,
@@ -51,7 +51,7 @@ test('Star make context is one exact atomic authority snapshot', () => {
   assert.deepEqual(Object.keys(parsed).sort(), [...expectedKeys].sort());
   assert.equal(
     parsed.make_context_digest,
-    'sha256:9c04fa8a7f7152b3ab51bf3fa45d394426a432e1bb003ef171ffb4fe7038ca07',
+    'sha256:f369af8b4c5612c927528d1bb53f083692b03f8a38f63091bcefab3d42864a9f',
   );
   assert.equal(parsed.subject_id, 'lead');
 });
@@ -74,7 +74,7 @@ test('Star make context is the only public make-ready contract', () => {
 });
 
 test('Star make context rejects non-UUID DB scope after rehash', () => {
-  for (const field of ['workspace_id', 'run_id', 'brand_id']) {
+  for (const field of ['workspace_id', 'run_id']) {
     const value = payload();
     value[field] = 'not-a-db-uuid';
     value.make_context_digest = deriveAresV3MakeContextDigestV1(value);
@@ -86,12 +86,11 @@ test('Star make context rejects authority drift', () => {
   const validUuidDrift: Record<string, string> = {
     workspace_id: '11111111-1111-4111-8111-111111111111',
     run_id: '22222222-2222-4222-8222-222222222222',
-    brand_id: '33333333-3333-4333-8333-333333333333',
   };
   for (const field of [
     'workspace_id',
     'run_id',
-    'brand_id',
+    'brand_slug',
     'subject_id',
     'product_id',
     'character_lock_digest',
@@ -109,6 +108,65 @@ test('Star make context rejects authority drift', () => {
         : validUuidDrift[field] ?? 'changed';
     assert.equal(AresV3MakeContextV1Schema.safeParse(value).success, false);
   }
+});
+
+test('Star make context accepts text brand scope and binds it exactly', () => {
+  const value = payload();
+  value.brand_slug = '히옵-마케팅';
+  value.make_context_digest = deriveAresV3MakeContextDigestV1(value);
+
+  const parsed = AresV3MakeContextV1Schema.parse(value);
+  assert.equal(parsed.brand_slug, '히옵-마케팅');
+
+  value.brand_slug = 'viewok';
+  assert.equal(AresV3MakeContextV1Schema.safeParse(value).success, false);
+});
+
+test('Star make context fixes the Unicode brand digest across languages', () => {
+  const value = payload();
+  value.brand_slug = '히옵 마케팅';
+  delete value.make_context_digest;
+
+  assert.equal(
+    deriveAresV3MakeContextDigestV1(value),
+    'sha256:14138818726833b7bcb4efb177accb21b340b0ea9ef6895495536b2ae4c4c760',
+  );
+});
+
+test('Star make context rejects noncanonical brand slug text', () => {
+  for (const brandSlug of [
+    ' viewok',
+    'viewok ',
+    'viewok\uFEFF',
+    'viewok\u0000control',
+    '\ud800',
+  ]) {
+    const value = payload();
+    value.brand_slug = brandSlug;
+    value.make_context_digest = `sha256:${'0'.repeat(64)}`;
+
+    assert.throws(
+      () => deriveAresV3MakeContextDigestV1(value),
+      /brand_slug|Unicode|canonical/,
+    );
+    const parsed = AresV3MakeContextV1Schema.safeParse(value);
+    assert.equal(parsed.success, false);
+    if (!parsed.success) {
+      assert.equal(
+        parsed.error.issues.some(
+          (issue) => issue.path.join('.') === 'brand_slug',
+        ),
+        true,
+      );
+    }
+  }
+});
+
+test('Star make context forbids the brand_id alias', () => {
+  const value = payload();
+  value.brand_id = '2a86daca-f5f2-4a3d-a868-f283a0a57d84';
+
+  assert.equal(AresV3MakeContextV1Schema.safeParse(value).success, false);
 });
 
 test('Star make context excludes command, receipt, and provider authority', () => {

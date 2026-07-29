@@ -10,7 +10,7 @@ def _payload() -> dict:
     lock_payload = {
         "contract_version": "CharacterLock.v1",
         "workspace_id": "3c8102c6-ec84-4530-9606-1c977b090edc",
-        "brand_id": "2a86daca-f5f2-4a3d-a868-f283a0a57d84",
+        "brand_slug": "viewok",
         "subject_id": "lead",
         "version": 1,
         "face_id": "face-1",
@@ -33,7 +33,7 @@ def test_character_lock_v1_accepts_one_atomic_identity_version() -> None:
     assert lock.version == 1
     assert lock.source_record_version == 1
     assert lock.digest == (
-        "sha256:53a04a9841d86d8cb3c84570da8ea75372f5047731370011a6d371c9aedfd8b9"
+        "sha256:56ce7a58420f437d3e3a61c53a4fb2137d19c4528981f35f23e97a29d28f77ed"
     )
 
 
@@ -46,14 +46,17 @@ def test_character_lock_v1_rejects_partial_identity(missing: str) -> None:
         CharacterLockV1.model_validate(value)
 
 
-@pytest.mark.parametrize("field", ["workspace_id", "brand_id", "face_id", "voice_id"])
+@pytest.mark.parametrize(
+    "field",
+    ["workspace_id", "brand_slug", "face_id", "voice_id"],
+)
 def test_character_lock_v1_rejects_scope_or_identity_digest_drift(
     field: str,
 ) -> None:
     value = _payload()
     value[field] = (
         "1cc18cfb-147d-4ad7-a4a1-f28e36ac2704"
-        if field.endswith("_id") and field in {"workspace_id", "brand_id"}
+        if field == "workspace_id"
         else "changed"
     )
 
@@ -69,9 +72,9 @@ def test_character_lock_v1_rejects_source_record_version_digest_drift() -> None:
         CharacterLockV1.model_validate(value)
 
 
-def test_character_lock_v1_rejects_noncanonical_scope_unsafe_version_and_extras() -> None:
+def test_character_lock_v1_rejects_blank_scope_unsafe_version_and_extras() -> None:
     value = _payload()
-    value["brand_id"] = "2A86DACA-F5F2-4A3D-A868-F283A0A57D84"
+    value["brand_slug"] = " "
     value["version"] = 9_007_199_254_740_992
     value["provider"] = "seedream"
 
@@ -79,9 +82,29 @@ def test_character_lock_v1_rejects_noncanonical_scope_unsafe_version_and_extras(
         CharacterLockV1.model_validate(value)
 
     errors = exc_info.value.errors()
-    assert any(error["loc"] == ("brand_id",) for error in errors)
+    assert any(error["loc"] == ("brand_slug",) for error in errors)
     assert any(error["loc"] == ("version",) for error in errors)
     assert any(error["loc"] == ("provider",) for error in errors)
+
+
+def test_character_lock_v1_accepts_canonical_text_brand_scope() -> None:
+    value = _payload()
+    value["brand_slug"] = "히옵-마케팅"
+    value["digest"] = derive_character_lock_digest_v1(value)
+
+    parsed = CharacterLockV1.model_validate(value)
+
+    assert parsed.brand_slug == "히옵-마케팅"
+
+
+def test_character_lock_v1_forbids_brand_id_alias() -> None:
+    value = _payload()
+    value["brand_id"] = "2a86daca-f5f2-4a3d-a868-f283a0a57d84"
+
+    with pytest.raises(ValidationError) as exc_info:
+        CharacterLockV1.model_validate(value)
+
+    assert any(error["loc"] == ("brand_id",) for error in exc_info.value.errors())
 
 
 def test_character_lock_v1_rejects_non_positive_version() -> None:
@@ -106,5 +129,5 @@ def test_character_lock_v1_normalizes_valid_surrogate_pair_for_digest_parity() -
     value["subject_id"] = "lead-\ud83d\ude00"
 
     assert derive_character_lock_digest_v1(value) == (
-        "sha256:5c56cf6d2818bc139ce983088a2b72ab5bf26749f83a018ca11254f95cd3c2b3"
+        "sha256:c4254b3b72b36051dc1a18d7ddbd6b9dab25e178a265e9a252e638437f83c351"
     )

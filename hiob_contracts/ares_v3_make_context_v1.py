@@ -12,13 +12,14 @@ from .ares_script_revision_v1 import (
     UuidStr,
     _FROZEN_STRICT,
 )
+from .brand_scope import CanonicalBrandSlug, canonical_brand_slug
 from .factory import sha256_digest
 
 
 _DIGEST_FIELDS = (
     "workspace_id",
     "run_id",
-    "brand_id",
+    "brand_slug",
     "subject_id",
     "product_id",
     "character_lock_digest",
@@ -40,7 +41,9 @@ def derive_ares_v3_make_context_digest_v1(
         if isinstance(value, BaseModel)
         else dict(value)
     )
-    return sha256_digest({field: data[field] for field in _DIGEST_FIELDS})
+    payload = {field: data[field] for field in _DIGEST_FIELDS}
+    payload["brand_slug"] = canonical_brand_slug(payload["brand_slug"])
+    return sha256_digest(payload)
 
 
 class AresV3MakeContextV1(BaseModel):
@@ -51,7 +54,7 @@ class AresV3MakeContextV1(BaseModel):
     contract_version: Literal["AresV3MakeContext.v1"]
     workspace_id: UuidStr
     run_id: UuidStr
-    brand_id: UuidStr
+    brand_slug: CanonicalBrandSlug
     subject_id: NonBlankStr
     product_id: NonBlankStr
     character_lock_digest: DigestStr
