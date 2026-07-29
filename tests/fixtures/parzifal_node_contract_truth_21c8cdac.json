@@ -1,0 +1,26 @@
+{
+  "source_revision": "21c8cdac5fb5627d189c97ddf806532742868293",
+  "registry_source": "hiob_parzifal/node_server/core.py",
+  "nodes": {
+    "parzifal.identity.seal": {
+      "output": "IdentityLock@v3",
+      "output_schema_digest": "sha256:4755990df4fa36f9d4b057432e0d3a520509781bf1ae6cc8ccc4a20acb4f407f"
+    },
+    "parzifal.references.snapshot": {
+      "output": "hiob.reference_snapshot_bundle.v1@1.0.0",
+      "output_schema_digest": "sha256:08366ab34b7e713cb7dfe42a12717879456ebb05fb5c626f317cda34056633bc"
+    },
+    "parzifal.target.consolidate": {
+      "output": "hiob.parzifal.target-profile@1.0.0",
+      "output_schema_digest": "sha256:f7c71ea1b5778476e1c36279f5f60d59429c36da00fe9310326a6c209ca582c8"
+    },
+    "parzifal.target.generate": {
+      "output": "hiob.parzifal.target-profile@1.0.0",
+      "output_schema_digest": "sha256:f7c71ea1b5778476e1c36279f5f60d59429c36da00fe9310326a6c209ca582c8"
+    },
+    "parzifal.voice.seal": {
+      "output": "ParzifalVoiceEnvelope@v1",
+      "output_schema_digest": "sha256:7809b135709e6d262aaa88103ba4f9e9302f0cb331b678e012b078dbbdc0048f"
+    }
+  }
+}

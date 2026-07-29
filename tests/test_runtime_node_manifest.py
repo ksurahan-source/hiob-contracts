@@ -4,12 +4,20 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
+import subprocess
+import zipfile
 
 
 MANIFEST_PATH = (
     Path(__file__).parents[1]
     / "hiob_contracts"
     / "runtime_node_manifest.json"
+)
+PARZIFAL_TRUTH_PATH = (
+    Path(__file__).parent
+    / "fixtures"
+    / "parzifal_node_contract_truth_21c8cdac.json"
 )
 EXPECTED_REVISIONS = {
     "janus": "73d16f79f9dd24972fcbe350f8dbba013826d96b",
@@ -148,7 +156,7 @@ def test_outputs_without_real_schema_digests_fail_closed() -> None:
     }
 
     assert blockers == {
-        "MISSING_TYPED_OUTPUT_CONTRACT": 37,
+        "MISSING_TYPED_OUTPUT_CONTRACT": 32,
         "MISSING_OUTPUT_SCHEMA_DIGEST": 8,
     }
     for node in nodes:
@@ -169,6 +177,26 @@ def test_outputs_without_real_schema_digests_fail_closed() -> None:
                 assert node["output"] != "UnspecifiedInternalOutput"
 
 
+def test_parzifal_manifest_matches_pinned_core_contract_truth() -> None:
+    truth = json.loads(PARZIFAL_TRUTH_PATH.read_text())
+    manifest_nodes = {
+        node["node_id"]: node
+        for node in _load_manifest()["nodes"]
+    }
+
+    for node_id, expected in truth["nodes"].items():
+        actual = manifest_nodes[node_id]
+        assert actual["source_revision"] == truth["source_revision"]
+        assert actual["registry_source"] == truth["registry_source"]
+        assert actual["output"] == expected["output"]
+        assert actual["output_schema_digest"] == (
+            expected["output_schema_digest"]
+        )
+        assert DIGEST_RE.fullmatch(actual["output_schema_digest"])
+        assert actual["status"] == "active"
+        assert actual["blocker"] is None
+
+
 def test_entry_digests_are_nonzero_and_bind_each_full_entry() -> None:
     nodes = _load_manifest()["nodes"]
 
@@ -176,3 +204,25 @@ def test_entry_digests_are_nonzero_and_bind_each_full_entry() -> None:
         assert DIGEST_RE.fullmatch(node["entry_digest"])
         assert node["entry_digest"] != "sha256:" + ("0" * 64)
         assert node["entry_digest"] == _digest(node)
+
+
+def test_built_wheel_contains_runtime_node_manifest(tmp_path: Path) -> None:
+    uv = shutil.which("uv")
+    assert uv is not None, "uv is required to verify the distributable wheel"
+    subprocess.run(
+        [
+            uv,
+            "build",
+            "--wheel",
+            "--out-dir",
+            str(tmp_path),
+        ],
+        cwd=MANIFEST_PATH.parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    wheel = next(tmp_path.glob("*.whl"))
+
+    with zipfile.ZipFile(wheel) as archive:
+        assert "hiob_contracts/runtime_node_manifest.json" in archive.namelist()
