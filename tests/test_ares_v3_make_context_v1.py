@@ -81,6 +81,14 @@ def test_make_context_is_the_only_public_make_ready_contract() -> None:
     assert find_spec("hiob_contracts.star_make_ready_v1") is None
 
 
+def test_make_context_has_one_dedicated_debug_module() -> None:
+    module_name = "hiob_contracts.ares_v3_make_context_v1"
+
+    assert find_spec(module_name) is not None
+    assert AresV3MakeContextV1.__module__ == module_name
+    assert derive_ares_v3_make_context_digest_v1.__module__ == module_name
+
+
 @pytest.mark.parametrize("field", ["workspace_id", "run_id", "brand_id"])
 def test_make_context_rejects_non_uuid_db_scope_after_rehash(
     field: str,
