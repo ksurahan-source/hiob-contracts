@@ -138,13 +138,36 @@ def test_review_view_is_one_non_authoritative_projection() -> None:
                 "script_approval": None,
                 "plan_approval": None,
             },
-            "provider_call": "none",
+            "provider_call": "confirmed",
             "error": None,
         }
     )
 
     assert value.section == "ScriptReview"
     assert value.budget.model_dump() == _budget()
+
+
+def test_review_can_report_the_confirmed_script_attempt() -> None:
+    value = StarReelsViewV1.model_validate(
+        {
+            "contract_version": "StarReelsView.v1",
+            "section": "PlanReview",
+            "status": "awaiting_plan_approval",
+            "revision": 3,
+            "stage_output": {"plan_revision": {"revision_digest": DIGEST}},
+            "budget": _budget(),
+            "review_digest": DIGEST,
+            "receipts": {
+                "factory": None,
+                "script_approval": None,
+                "plan_approval": None,
+            },
+            "provider_call": "confirmed",
+            "error": None,
+        }
+    )
+
+    assert value.provider_call == "confirmed"
 
 
 @pytest.mark.parametrize(
@@ -197,6 +220,7 @@ def test_view_supports_every_refreshable_factory_state(
                 if is_failed
                 else "confirmed"
                 if status in {"pending", "rendering"}
+                or is_review
                 or (section == "RunStatus" and status == "ready")
                 else "none"
             ),
