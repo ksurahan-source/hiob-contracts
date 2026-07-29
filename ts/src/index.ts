@@ -116,6 +116,19 @@ export {
 export type {
   AresV3MakeContextV1,
 } from './ares-v3-make-context-v1.js';
+export {
+  AresCharacterIdentityProjectionV1Schema,
+  AresProvenanceMemoryV1Schema,
+  AresScriptGenerationInputV1Schema,
+  AresVoiceSpecProjectionV1Schema,
+  deriveAresScriptGenerationInputDigestV1,
+} from './planets/ares/script-generation-v1.js';
+export type {
+  AresCharacterIdentityProjectionV1,
+  AresProvenanceMemoryV1,
+  AresScriptGenerationInputV1,
+  AresVoiceSpecProjectionV1,
+} from './planets/ares/script-generation-v1.js';
 
 
 // CompositionSnapshot
