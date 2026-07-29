@@ -20,7 +20,7 @@ EXPECTED_KEYS = {
     "contract_version",
     "workspace_id",
     "run_id",
-    "brand_id",
+    "brand_slug",
     "subject_id",
     "product_id",
     "character_lock_digest",
@@ -38,7 +38,7 @@ def _payload() -> dict:
         "contract_version": "AresV3MakeContext.v1",
         "workspace_id": "4d2b4b89-77de-4f6a-8b3c-8abdafc1e2f1",
         "run_id": "7bdf3494-b232-4f15-93ea-b4a99625ba9c",
-        "brand_id": "2a86daca-f5f2-4a3d-a868-f283a0a57d84",
+        "brand_slug": "viewok",
         "subject_id": "lead",
         "product_id": "c4404dda-a191-4bd3-942d-21a45f202554",
         "character_lock_digest": "sha256:" + "1" * 64,
@@ -61,7 +61,7 @@ def test_make_context_is_one_exact_atomic_authority_snapshot() -> None:
 
     assert set(parsed.model_dump(mode="json")) == EXPECTED_KEYS
     assert parsed.make_context_digest == (
-        "sha256:9c04fa8a7f7152b3ab51bf3fa45d394426a432e1bb003ef171ffb4fe7038ca07"
+        "sha256:e55d3b75f8412a291d4ca81a1487eae49d14cbba4e9737e0d5522434c103779d"
     )
     assert parsed.subject_id == "lead"
 
@@ -100,7 +100,7 @@ def test_make_context_has_one_dedicated_debug_module() -> None:
     )
 
 
-@pytest.mark.parametrize("field", ["workspace_id", "run_id", "brand_id"])
+@pytest.mark.parametrize("field", ["workspace_id", "run_id"])
 def test_make_context_rejects_non_uuid_db_scope_after_rehash(
     field: str,
 ) -> None:
@@ -117,7 +117,7 @@ def test_make_context_rejects_non_uuid_db_scope_after_rehash(
     [
         "workspace_id",
         "run_id",
-        "brand_id",
+        "brand_slug",
         "subject_id",
         "product_id",
         "character_lock_digest",
@@ -133,7 +133,6 @@ def test_make_context_rejects_authority_drift(field: str) -> None:
     valid_uuid_drift = {
         "workspace_id": "11111111-1111-4111-8111-111111111111",
         "run_id": "22222222-2222-4222-8222-222222222222",
-        "brand_id": "33333333-3333-4333-8333-333333333333",
     }
     value[field] = (
         value[field] + 1
@@ -145,6 +144,29 @@ def test_make_context_rejects_authority_drift(field: str) -> None:
 
     with pytest.raises(ValidationError, match="make_context_digest"):
         AresV3MakeContextV1.model_validate(value)
+
+
+def test_make_context_accepts_text_brand_scope_and_binds_it_exactly() -> None:
+    value = _payload()
+    value["brand_slug"] = "히옵-마케팅"
+    value["make_context_digest"] = derive_ares_v3_make_context_digest_v1(value)
+
+    parsed = AresV3MakeContextV1.model_validate(value)
+    assert parsed.brand_slug == "히옵-마케팅"
+
+    value["brand_slug"] = "viewok"
+    with pytest.raises(ValidationError, match="make_context_digest"):
+        AresV3MakeContextV1.model_validate(value)
+
+
+def test_make_context_forbids_brand_id_alias() -> None:
+    value = _payload()
+    value["brand_id"] = "2a86daca-f5f2-4a3d-a868-f283a0a57d84"
+
+    with pytest.raises(ValidationError) as exc_info:
+        AresV3MakeContextV1.model_validate(value)
+
+    assert any(error["loc"] == ("brand_id",) for error in exc_info.value.errors())
 
 
 @pytest.mark.parametrize(
