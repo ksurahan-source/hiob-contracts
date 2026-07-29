@@ -201,8 +201,10 @@ class StarReelsViewV1(BaseModel):
                 raise ValueError(
                     "review state requires stage_output and review_digest"
                 )
-            if self.provider_call != "none" or self.error is not None:
-                raise ValueError("review state cannot carry a terminal error")
+            if self.provider_call != "confirmed" or self.error is not None:
+                raise ValueError(
+                    "review state requires one confirmed script call"
+                )
         elif self.stage_output is not None or self.review_digest is not None:
             raise ValueError(
                 "non-review state cannot carry review-only fields"
