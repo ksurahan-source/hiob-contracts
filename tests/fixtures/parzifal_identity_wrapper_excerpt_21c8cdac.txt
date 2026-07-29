@@ -1,0 +1,61 @@
+def _authority_material(
+    sealed: dict[str, Any],
+    *,
+    workspace_id: str,
+    run_id: str,
+) -> dict[str, Any]:
+    artifact_digest = sealed["identity_lock_digest"]
+    payload_digest = sha256_digest(sealed)
+    subject = {
+        "contract_version": "AresAuthorityMaterial.v3",
+        "producer": "parzifal",
+        "artifact_type": "identity_lock",
+        "artifact_digest": artifact_digest,
+        "payload_digest": payload_digest,
+        "workspace_id": _text(workspace_id),
+        "run_id": _text(run_id),
+    }
+    receipt = sha256_digest(subject).split(":", 1)[1][:32]
+    authority = {
+        "artifact_type": "identity_lock",
+        "artifact_digest": artifact_digest,
+        "payload_digest": payload_digest,
+        "receipt_id": f"parzifal:identity_lock:{receipt}",
+        "sealed_payload": sealed,
+    }
+    if set(authority) != _AUTHORITY_KEYS:
+        raise AssertionError("Parzifal Ares authority shape drifted")
+    return authority
+
+
+def seal_ares_identity_authority(
+    *,
+    workspace_id: str,
+    run_id: str,
+    record_id: str,
+    record_version: int,
+    record_digest: str,
+    identity_lock: Mapping[str, Any],
+    master_sheet: Mapping[str, Any],
+    cast_sheets: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate Parzifal identity and emit Ares authority material."""
+
+    lock, master, cast = _validate_documents(
+        workspace_id, run_id, identity_lock, master_sheet, cast_sheets
+    )
+    sealed = _sealed_identity(
+        workspace_id=workspace_id,
+        run_id=run_id,
+        record_id=record_id,
+        record_version=record_version,
+        record_digest=record_digest,
+        lock=lock,
+        master=master,
+        cast=cast,
+    )
+    return _authority_material(
+        sealed,
+        workspace_id=workspace_id,
+        run_id=run_id,
+    )
