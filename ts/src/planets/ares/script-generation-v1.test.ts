@@ -93,6 +93,57 @@ test('Ares generation output rejects drift and extra authority', () => {
   );
 });
 
+test('Ares generation output never synthesizes missing wire fields', () => {
+  for (const missing of [
+    'adjacent_beat_summaries',
+    'memories',
+    'voice_spec.contract_version',
+  ]) {
+    const value = payload();
+    if (missing !== 'voice_spec.contract_version') {
+      value[missing] = [];
+    }
+    const unsigned = { ...value };
+    delete unsigned.generation_input_digest;
+    value.generation_input_digest =
+      deriveAresScriptGenerationInputDigestV1(unsigned);
+    if (missing === 'voice_spec.contract_version') {
+      delete value.voice_spec.contract_version;
+    } else {
+      delete value[missing];
+    }
+    assert.equal(
+      AresScriptGenerationInputV1Schema.safeParse(value).success,
+      false,
+    );
+  }
+});
+
+test('Ares generation Unicode bounds count code points like Python', () => {
+  const value = payload();
+  value.current_character = '😀'.repeat(500);
+  const unsigned = { ...value };
+  delete unsigned.generation_input_digest;
+  value.generation_input_digest =
+    deriveAresScriptGenerationInputDigestV1(unsigned);
+
+  assert.equal(
+    AresScriptGenerationInputV1Schema.safeParse(value).success,
+    true,
+  );
+});
+
+test('Ares generation rejects unpaired Unicode before hashing', () => {
+  const value = payload();
+  value.current_character = '\ud800';
+  value.generation_input_digest = `sha256:${'0'.repeat(64)}`;
+
+  assert.equal(
+    AresScriptGenerationInputV1Schema.safeParse(value).success,
+    false,
+  );
+});
+
 test('Ares generation digest matches the fixed Python vector', () => {
   const value = payload();
   assert.equal(

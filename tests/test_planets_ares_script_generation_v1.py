@@ -132,6 +132,78 @@ def test_ares_generation_output_rejects_extra_or_unbounded_context() -> None:
         AresScriptGenerationInputV1.model_validate(too_many, strict=True)
 
 
+@pytest.mark.parametrize(
+    "missing",
+    [
+        ("adjacent_beat_summaries",),
+        ("memories",),
+        ("voice_spec", "contract_version"),
+    ],
+)
+def test_ares_generation_output_never_synthesizes_missing_wire_fields(
+    missing: tuple[str, ...],
+) -> None:
+    value = _payload()
+    if len(missing) == 1:
+        value[missing[0]] = []
+        unsigned = dict(value)
+        unsigned.pop("generation_input_digest")
+        value["generation_input_digest"] = (
+            derive_ares_script_generation_input_digest_v1(unsigned)
+        )
+    target = value
+    for field in missing[:-1]:
+        target = target[field]
+    del target[missing[-1]]
+
+    with pytest.raises(ValidationError):
+        AresScriptGenerationInputV1.model_validate(value, strict=True)
+
+
+def test_ares_generation_json_schema_describes_runtime_rejections() -> None:
+    schema = AresScriptGenerationInputV1.model_json_schema()
+    required = set(schema["required"])
+    character = schema["$defs"]["AresCharacterIdentityProjectionV1"]
+    memory = schema["$defs"]["AresProvenanceMemoryV1"]
+    voice = schema["$defs"]["AresVoiceSpecProjectionV1"]
+
+    assert {"adjacent_beat_summaries", "memories"} <= required
+    for field in ("persona_id", "face_id", "voice_id"):
+        assert character["properties"][field]["minLength"] == 1
+        assert character["properties"][field]["pattern"]
+    assert character["properties"]["identity_binding_digest"]["pattern"] == (
+        "^sha256:[0-9a-f]{64}$"
+    )
+    for field in ("text", "provenance"):
+        assert memory["properties"][field]["minLength"] == 1
+        assert memory["properties"][field]["pattern"]
+    assert voice["properties"]["voice_spec_digest"]["pattern"] == (
+        "^sha256:[0-9a-f]{64}$"
+    )
+
+
+def test_ares_generation_unicode_length_matches_typescript_code_points() -> None:
+    value = _payload()
+    value["current_character"] = "😀" * 500
+    unsigned = dict(value)
+    unsigned.pop("generation_input_digest")
+    value["generation_input_digest"] = (
+        derive_ares_script_generation_input_digest_v1(unsigned)
+    )
+
+    parsed = AresScriptGenerationInputV1.model_validate(value, strict=True)
+    assert len(parsed.current_character) == 500
+
+
+def test_ares_generation_rejects_unpaired_unicode_before_hashing() -> None:
+    value = _payload()
+    value["current_character"] = "\ud800"
+    value["generation_input_digest"] = "sha256:" + "0" * 64
+
+    with pytest.raises(ValidationError):
+        AresScriptGenerationInputV1.model_validate(value, strict=True)
+
+
 def test_ares_generation_digest_has_fixed_python_typescript_vector() -> None:
     value = _payload()
     unsigned = dict(value)
