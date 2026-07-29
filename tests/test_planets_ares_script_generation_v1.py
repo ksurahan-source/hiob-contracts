@@ -204,6 +204,20 @@ def test_ares_generation_json_schema_describes_runtime_rejections() -> None:
         "generation_input_digest",
         "valid_unicode_scalars",
     }
+    assert character["x-hiob-validation"] == "pydantic-runtime-required"
+    assert set(character["x-hiob-semantic-invariants"]) == {
+        "character_identity_binding_digest",
+        "valid_unicode_scalars",
+    }
+    assert memory["x-hiob-validation"] == "pydantic-runtime-required"
+    assert memory["x-hiob-semantic-invariants"] == [
+        "valid_unicode_scalars"
+    ]
+    assert voice["x-hiob-validation"] == "pydantic-runtime-required"
+    assert set(voice["x-hiob-semantic-invariants"]) == {
+        "voice_spec_digest",
+        "valid_unicode_scalars",
+    }
 
 
 def test_ares_generation_unicode_length_matches_typescript_code_points() -> None:
