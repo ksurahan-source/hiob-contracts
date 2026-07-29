@@ -137,6 +137,7 @@ test('Star make context rejects noncanonical brand slug text', () => {
   for (const brandSlug of [
     ' viewok',
     'viewok ',
+    'viewok\uFEFF',
     'viewok\u0000control',
     '\ud800',
   ]) {

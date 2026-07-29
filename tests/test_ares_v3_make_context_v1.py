@@ -175,6 +175,7 @@ def test_make_context_unicode_brand_slug_has_fixed_cross_language_digest() -> No
     [
         " viewok",
         "viewok ",
+        "viewok\ufeff",
         "view\u0000ok",
         "\ud800",
     ],
