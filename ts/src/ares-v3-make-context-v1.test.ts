@@ -46,7 +46,7 @@ function payload(): Record<string, any> {
 test('Star make context is one exact atomic authority snapshot', () => {
   const parsed = AresV3MakeContextV1Schema.parse(payload());
 
-  assert.deepEqual(Object.keys(parsed).sort(), expectedKeys);
+  assert.deepEqual(Object.keys(parsed).sort(), [...expectedKeys].sort());
   assert.equal(
     parsed.make_context_digest,
     'sha256:e99651e95596a97ce408a82e53bbe041a8e7e981bf8503d43ab4a090abd87b3e',

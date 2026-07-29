@@ -57,6 +57,8 @@ export type {
 // Ares pure generate V3 — explicit authority refs and semantic-only beat plan
 export {
   AresRequestScopeV3Schema,
+  AresV3MakeContextV1Schema,
+  deriveAresV3MakeContextDigestV1,
   AresAuthorityArtifactRefV3Schema,
   AresP2ATargetProjectionV3Schema,
   AresAuthorityBundleV3Schema,
@@ -111,6 +113,7 @@ export type {
 } from './star-make-ready-v1.js';
 export type {
   AresRequestScopeV3,
+  AresV3MakeContextV1,
   AresAuthorityArtifactRefV3,
   AresP2ATargetProjectionV3,
   AresAuthorityBundleV3,

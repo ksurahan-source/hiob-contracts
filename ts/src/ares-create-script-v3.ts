@@ -385,6 +385,67 @@ export const AresRequestScopeV3Schema = z
   .strict()
   .transform(deepFreeze);
 
+const AresV3MakeContextShape = {
+  brand_id: NonBlankString,
+  subject_id: NonBlankString,
+  product_id: NonBlankString,
+  character_lock_digest: DigestSchema,
+  character_lock_version: z.number().int().safe().positive(),
+  product_lock_digest: DigestSchema,
+  artemis_approval_receipt_id: NonBlankString,
+  artemis_approval_receipt_digest: DigestSchema,
+  artemis_approval_state_revision: z.number().int().safe().positive(),
+};
+
+export function deriveAresV3MakeContextDigestV1(
+  value: Record<string, unknown>,
+): string {
+  const field = (name: string): unknown => {
+    if (!(name in value) || value[name] === undefined) {
+      throw new TypeError(`${name} is required for make context digest`);
+    }
+    return value[name];
+  };
+  return sha256Digest({
+    workspace_id: field('workspace_id'),
+    run_id: field('run_id'),
+    brand_id: field('brand_id'),
+    subject_id: field('subject_id'),
+    product_id: field('product_id'),
+    character_lock_digest: field('character_lock_digest'),
+    character_lock_version: field('character_lock_version'),
+    product_lock_digest: field('product_lock_digest'),
+    artemis_approval_receipt_id: field('artemis_approval_receipt_id'),
+    artemis_approval_receipt_digest:
+      field('artemis_approval_receipt_digest'),
+    artemis_approval_state_revision:
+      field('artemis_approval_state_revision'),
+  });
+}
+
+export const AresV3MakeContextV1Schema = z
+  .object({
+    contract_version: z.literal('AresV3MakeContext.v1'),
+    workspace_id: NonBlankString,
+    run_id: NonBlankString,
+    ...AresV3MakeContextShape,
+    make_context_digest: DigestSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (
+      value.make_context_digest
+      !== deriveAresV3MakeContextDigestV1(value)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'make_context_digest does not match server make context',
+        path: ['make_context_digest'],
+      });
+    }
+  })
+  .transform(deepFreeze);
+
 export const AresAuthorityArtifactRefV3Schema = z
   .object({
     producer: z.enum(['parzifal', 'janus', 'artemis', 'metis', 'karma']),
@@ -1191,6 +1252,9 @@ export type AresAuthorityArtifactRefV3 = z.infer<
 >;
 export type AresP2ATargetProjectionV3 = z.infer<
   typeof AresP2ATargetProjectionV3Schema
+>;
+export type AresV3MakeContextV1 = z.infer<
+  typeof AresV3MakeContextV1Schema
 >;
 export type AresAuthorityBundleV3 = z.infer<typeof AresAuthorityBundleV3Schema>;
 export type AresCreateScriptRequestV3 = z.infer<

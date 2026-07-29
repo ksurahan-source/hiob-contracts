@@ -151,6 +151,8 @@ from .ares_create_script_v2 import (
 )
 from .ares_create_script_v3 import (
     AresRequestScopeV3,
+    AresV3MakeContextV1,
+    derive_ares_v3_make_context_digest_v1,
     authority_ref_receipt_digest_v3,
     AresAuthorityArtifactRefV3,
     AresP2ATargetProjectionV3,
@@ -278,6 +280,7 @@ __all__ = [
     "ares_create_script_request_schema_descriptor_v2",
     "ares_create_script_result_schema_digest", "request_content_digest",
     "AresRequestScopeV3", "authority_ref_receipt_digest_v3",
+    "AresV3MakeContextV1", "derive_ares_v3_make_context_digest_v1",
     "AresAuthorityArtifactRefV3", "AresP2ATargetProjectionV3",
     "ares_p2a_target_projection_v3",
     "ares_p2a_target_projection_v3_schema_descriptor",
