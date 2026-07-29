@@ -229,7 +229,7 @@ def test_parzifal_manifest_matches_pinned_core_contract_truth() -> None:
         assert actual["blocker"] == expected["blocker"]
 
 
-def test_parzifal_truth_fixture_has_offline_verifiable_provenance() -> None:
+def test_parzifal_truth_fixture_pins_source_metadata_and_excerpt_hashes() -> None:
     truth = json.loads(PARZIFAL_TRUTH_PATH.read_text())
     provenance = truth["provenance"]
 
