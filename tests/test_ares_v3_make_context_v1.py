@@ -61,7 +61,7 @@ def test_make_context_is_one_exact_atomic_authority_snapshot() -> None:
 
     assert set(parsed.model_dump(mode="json")) == EXPECTED_KEYS
     assert parsed.make_context_digest == (
-        "sha256:e55d3b75f8412a291d4ca81a1487eae49d14cbba4e9737e0d5522434c103779d"
+        "sha256:f369af8b4c5612c927528d1bb53f083692b03f8a38f63091bcefab3d42864a9f"
     )
     assert parsed.subject_id == "lead"
 

@@ -39,7 +39,7 @@ export function deriveAresV3MakeContextDigestV1(
   return sha256Digest({
     workspace_id: field('workspace_id'),
     run_id: field('run_id'),
-    brand_id: field('brand_id'),
+    brand_slug: field('brand_slug'),
     subject_id: field('subject_id'),
     product_id: field('product_id'),
     character_lock_digest: field('character_lock_digest'),
@@ -58,7 +58,7 @@ export const AresV3MakeContextV1Schema = z
     contract_version: z.literal('AresV3MakeContext.v1'),
     workspace_id: UuidSchema,
     run_id: UuidSchema,
-    brand_id: UuidSchema,
+    brand_slug: NonBlankString,
     subject_id: NonBlankString,
     product_id: NonBlankString,
     character_lock_digest: DigestSchema,

@@ -51,7 +51,7 @@ test('Star make context is one exact atomic authority snapshot', () => {
   assert.deepEqual(Object.keys(parsed).sort(), [...expectedKeys].sort());
   assert.equal(
     parsed.make_context_digest,
-    'sha256:e55d3b75f8412a291d4ca81a1487eae49d14cbba4e9737e0d5522434c103779d',
+    'sha256:f369af8b4c5612c927528d1bb53f083692b03f8a38f63091bcefab3d42864a9f',
   );
   assert.equal(parsed.subject_id, 'lead');
 });

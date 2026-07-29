@@ -18,7 +18,7 @@ from .factory import sha256_digest
 _DIGEST_FIELDS = (
     "workspace_id",
     "run_id",
-    "brand_id",
+    "brand_slug",
     "subject_id",
     "product_id",
     "character_lock_digest",
@@ -51,7 +51,7 @@ class AresV3MakeContextV1(BaseModel):
     contract_version: Literal["AresV3MakeContext.v1"]
     workspace_id: UuidStr
     run_id: UuidStr
-    brand_id: UuidStr
+    brand_slug: NonBlankStr
     subject_id: NonBlankStr
     product_id: NonBlankStr
     character_lock_digest: DigestStr

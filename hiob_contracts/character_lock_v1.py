@@ -33,7 +33,7 @@ PositiveVersion = Annotated[
 _DIGEST_FIELDS = (
     "contract_version",
     "workspace_id",
-    "brand_id",
+    "brand_slug",
     "subject_id",
     "version",
     "face_id",
@@ -91,7 +91,7 @@ class CharacterLockV1(BaseModel):
 
     contract_version: Literal["CharacterLock.v1"]
     workspace_id: UuidStr
-    brand_id: UuidStr
+    brand_slug: NonBlankStr
     subject_id: NonBlankStr
     version: PositiveVersion
     face_id: NonBlankStr
@@ -103,6 +103,7 @@ class CharacterLockV1(BaseModel):
 
     @field_validator(
         "subject_id",
+        "brand_slug",
         "face_id",
         "voice_id",
         "source_receipt_ref",

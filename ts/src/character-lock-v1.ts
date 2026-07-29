@@ -36,7 +36,7 @@ const UuidSchema = z
 const DIGEST_FIELDS = [
   'contract_version',
   'workspace_id',
-  'brand_id',
+  'brand_slug',
   'subject_id',
   'version',
   'face_id',
@@ -49,7 +49,7 @@ const DIGEST_FIELDS = [
 const CharacterLockDigestSourceShape = {
   contract_version: z.literal('CharacterLock.v1'),
   workspace_id: UuidSchema,
-  brand_id: UuidSchema,
+  brand_slug: CanonicalNonBlankString,
   subject_id: CanonicalNonBlankString,
   version: z.number().int().safe().positive(),
   face_id: CanonicalNonBlankString,

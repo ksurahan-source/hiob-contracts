@@ -33,7 +33,7 @@ def test_character_lock_v1_accepts_one_atomic_identity_version() -> None:
     assert lock.version == 1
     assert lock.source_record_version == 1
     assert lock.digest == (
-        "sha256:6c12c8a75d6321a70a628303958484454841c4cb5a1fbe3ec83d7b66ce46bfbb"
+        "sha256:56ce7a58420f437d3e3a61c53a4fb2137d19c4528981f35f23e97a29d28f77ed"
     )
 
 
@@ -129,5 +129,5 @@ def test_character_lock_v1_normalizes_valid_surrogate_pair_for_digest_parity() -
     value["subject_id"] = "lead-\ud83d\ude00"
 
     assert derive_character_lock_digest_v1(value) == (
-        "sha256:2c0083809021f8297fde1b58010d0830bd71b0e5d4ac195e73f6334a25a097be"
+        "sha256:c4254b3b72b36051dc1a18d7ddbd6b9dab25e178a265e9a252e638437f83c351"
     )
