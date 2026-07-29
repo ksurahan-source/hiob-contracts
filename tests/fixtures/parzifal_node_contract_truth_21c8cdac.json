@@ -1,26 +1,60 @@
 {
   "source_revision": "21c8cdac5fb5627d189c97ddf806532742868293",
   "contract_source": "hiob_parzifal/node_server/core.py",
+  "provenance": {
+    "extraction_method": "git show <source_revision>:<source_path> | sed -n '<line_spec>'",
+    "sources": [
+      {
+        "source_path": "hiob_parzifal/node_server/core.py",
+        "source_file_sha256": "sha256:1260705db4ade5c93744d1da078fafb582b74d32e07dbafbd7dd40049df84cc5",
+        "line_spec": "72,138p",
+        "excerpt_path": "parzifal_core_contract_excerpt_21c8cdac.txt",
+        "excerpt_sha256": "sha256:36a22ded8f577c64ac6adca828d3620a765edf23bbdd2d11ea9f3628ec40a66d"
+      },
+      {
+        "source_path": "hiob_parzifal/node_server/registry.py",
+        "source_file_sha256": "sha256:62eb6e1cdaac12c5df3f91d357c419ce7a6a4ee1b278f51b537fb8b30c7b1d1e",
+        "line_spec": "92,128p;155,170p",
+        "excerpt_path": "parzifal_registry_output_excerpt_21c8cdac.txt",
+        "excerpt_sha256": "sha256:0c1fe0a411b944ca0385776fe103227f11f575d57d2fdb34d8fc5651340eb4ca"
+      }
+    ]
+  },
   "nodes": {
     "parzifal.identity.seal": {
       "output": "IdentityLock@v3",
-      "output_schema_digest": "sha256:4755990df4fa36f9d4b057432e0d3a520509781bf1ae6cc8ccc4a20acb4f407f"
+      "output_schema_digest": "sha256:4755990df4fa36f9d4b057432e0d3a520509781bf1ae6cc8ccc4a20acb4f407f",
+      "observed_runtime_contract_digest": "sha256:4755990df4fa36f9d4b057432e0d3a520509781bf1ae6cc8ccc4a20acb4f407f",
+      "status": "active",
+      "blocker": null
     },
     "parzifal.references.snapshot": {
       "output": "hiob.reference_snapshot_bundle.v1@1.0.0",
-      "output_schema_digest": "sha256:08366ab34b7e713cb7dfe42a12717879456ebb05fb5c626f317cda34056633bc"
+      "output_schema_digest": null,
+      "observed_runtime_contract_digest": "sha256:08366ab34b7e713cb7dfe42a12717879456ebb05fb5c626f317cda34056633bc",
+      "status": "blocked",
+      "blocker": "PARTIAL_OUTPUT_SCHEMA_DIGEST"
     },
     "parzifal.target.consolidate": {
       "output": "hiob.parzifal.target-profile@1.0.0",
-      "output_schema_digest": "sha256:f7c71ea1b5778476e1c36279f5f60d59429c36da00fe9310326a6c209ca582c8"
+      "output_schema_digest": null,
+      "observed_runtime_contract_digest": "sha256:f7c71ea1b5778476e1c36279f5f60d59429c36da00fe9310326a6c209ca582c8",
+      "status": "blocked",
+      "blocker": "OUTPUT_EXTENDS_DECLARED_CONTRACT"
     },
     "parzifal.target.generate": {
       "output": "hiob.parzifal.target-profile@1.0.0",
-      "output_schema_digest": "sha256:f7c71ea1b5778476e1c36279f5f60d59429c36da00fe9310326a6c209ca582c8"
+      "output_schema_digest": null,
+      "observed_runtime_contract_digest": "sha256:f7c71ea1b5778476e1c36279f5f60d59429c36da00fe9310326a6c209ca582c8",
+      "status": "blocked",
+      "blocker": "MISSING_CANONICAL_OUTPUT_VALIDATOR"
     },
     "parzifal.voice.seal": {
       "output": "ParzifalVoiceEnvelope@v1",
-      "output_schema_digest": "sha256:7809b135709e6d262aaa88103ba4f9e9302f0cb331b678e012b078dbbdc0048f"
+      "output_schema_digest": "sha256:7809b135709e6d262aaa88103ba4f9e9302f0cb331b678e012b078dbbdc0048f",
+      "observed_runtime_contract_digest": "sha256:7809b135709e6d262aaa88103ba4f9e9302f0cb331b678e012b078dbbdc0048f",
+      "status": "active",
+      "blocker": null
     }
   }
 }

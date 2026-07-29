@@ -1,0 +1,67 @@
+def _compute_schema_digest(contract_cls: type) -> str:
+    """Deterministic digest of a (dataclass) contract's field structure — mirrors the
+    janus planet_output_builder pattern. NOT a placeholder: derives a stable schema
+    fingerprint from field names + declared types via canonical JSON, so a schema
+    change moves the digest."""
+    if dataclasses.is_dataclass(contract_cls):
+        schema = {f.name: str(f.type) for f in dataclasses.fields(contract_cls)}
+    else:  # pydantic or other
+        schema = getattr(contract_cls, "model_json_schema", lambda: {"name": contract_cls.__name__})()
+    return sha256_digest(canonical_json(schema))
+
+
+# Both target nodes produce the TargetProfile contract; computed once at import.
+_TARGET_PROFILE_SCHEMA_DIGEST = _compute_schema_digest(TargetProfile)
+
+
+def _get_contract_for_node(node_id: str) -> dict[str, str]:
+    """Return contract metadata for a given node_id.
+
+    각 노드가 생산하는 계약을 정의. PRD_BIG_FOOTSTEP에서 각 행성은 자신의
+    계약을 정의하고 PlanetOutput에 binding한다.
+
+    Schema digests are COMPUTED from the real TargetProfile contract class
+    (canonical JSON of field structure), byte-for-byte reproducible.
+    """
+    # parzifal.target.consolidate → TargetProfile 계약
+    if node_id == "parzifal.target.consolidate":
+        return {
+            "name": "hiob.parzifal.target-profile",
+            "version": "1.0.0",
+            "schema_digest": _TARGET_PROFILE_SCHEMA_DIGEST,
+        }
+    # parzifal.target.generate → TargetProfile 계약
+    elif node_id == "parzifal.target.generate":
+        return {
+            "name": "hiob.parzifal.target-profile",
+            "version": "1.0.0",
+            "schema_digest": _TARGET_PROFILE_SCHEMA_DIGEST,
+        }
+    elif node_id == "parzifal.references.snapshot":
+        return {
+            "name": "hiob.reference_snapshot_bundle.v1",
+            "version": "1.0.0",
+            "schema_digest": sha256_digest({
+                "schema": "hiob.reference_snapshot_bundle.v1",
+                "owner": "parzifal",
+            }),
+        }
+    elif node_id == "parzifal.identity.seal":
+        return {
+            "name": "IdentityLock",
+            "version": "v3",
+            # Star verifies this producer contract from the Pydantic schema
+            # object. Hash the same object once; hashing its pre-serialized
+            # JSON string produces a different digest and breaks live replay.
+            "schema_digest": sha256_digest(
+                AresIdentitySealedV2.model_json_schema()
+            ),
+        }
+    elif node_id == "parzifal.voice.seal":
+        return {
+            "name": "ParzifalVoiceEnvelope",
+            "version": "v1",
+            "schema_digest": sha256_digest(
+                ParzifalVoiceEnvelopeV1.model_json_schema()
+            ),
+        }

@@ -83,6 +83,7 @@ REQUIRED_FIELDS = {
     "input",
     "output",
     "output_schema_digest",
+    "observed_runtime_contract_digest",
     "error",
     "version",
     "entry_digest",
@@ -152,17 +153,26 @@ def test_every_node_pins_required_contract_and_source_fields() -> None:
 
 def test_outputs_without_real_schema_digests_fail_closed() -> None:
     nodes = _load_manifest()["nodes"]
+    assert sum(node["status"] == "active" for node in nodes) == 2
+    assert sum(node["status"] == "blocked" for node in nodes) == 43
+
     blockers = {
         blocker: sum(node["blocker"] == blocker for node in nodes)
         for blocker in {
             "MISSING_TYPED_OUTPUT_CONTRACT",
             "MISSING_OUTPUT_SCHEMA_DIGEST",
+            "PARTIAL_OUTPUT_SCHEMA_DIGEST",
+            "OUTPUT_EXTENDS_DECLARED_CONTRACT",
+            "MISSING_CANONICAL_OUTPUT_VALIDATOR",
         }
     }
 
     assert blockers == {
         "MISSING_TYPED_OUTPUT_CONTRACT": 32,
         "MISSING_OUTPUT_SCHEMA_DIGEST": 8,
+        "PARTIAL_OUTPUT_SCHEMA_DIGEST": 1,
+        "OUTPUT_EXTENDS_DECLARED_CONTRACT": 1,
+        "MISSING_CANONICAL_OUTPUT_VALIDATOR": 1,
     }
     for node in nodes:
         if node["status"] == "active":
@@ -170,16 +180,28 @@ def test_outputs_without_real_schema_digests_fail_closed() -> None:
             assert node["output"] != "UnspecifiedInternalOutput"
             assert DIGEST_RE.fullmatch(node["output_schema_digest"])
             assert node["output_schema_digest"] != "sha256:" + ("0" * 64)
+            assert node["observed_runtime_contract_digest"] == (
+                node["output_schema_digest"]
+            )
             assert node["blocker"] is None
         else:
             assert node["status"] == "blocked"
             assert node["output_schema_digest"] is None
             if node["blocker"] == "MISSING_TYPED_OUTPUT_CONTRACT":
                 assert node["output"] is None
-            else:
-                assert node["blocker"] == "MISSING_OUTPUT_SCHEMA_DIGEST"
+            elif node["blocker"] == "MISSING_OUTPUT_SCHEMA_DIGEST":
                 assert node["output"]
                 assert node["output"] != "UnspecifiedInternalOutput"
+            else:
+                assert node["blocker"] in {
+                    "PARTIAL_OUTPUT_SCHEMA_DIGEST",
+                    "OUTPUT_EXTENDS_DECLARED_CONTRACT",
+                    "MISSING_CANONICAL_OUTPUT_VALIDATOR",
+                }
+                assert node["output"]
+                assert DIGEST_RE.fullmatch(
+                    node["observed_runtime_contract_digest"]
+                )
 
 
 def test_parzifal_manifest_matches_pinned_core_contract_truth() -> None:
@@ -200,9 +222,25 @@ def test_parzifal_manifest_matches_pinned_core_contract_truth() -> None:
         assert actual["output_schema_digest"] == (
             expected["output_schema_digest"]
         )
-        assert DIGEST_RE.fullmatch(actual["output_schema_digest"])
-        assert actual["status"] == "active"
-        assert actual["blocker"] is None
+        assert actual["observed_runtime_contract_digest"] == (
+            expected["observed_runtime_contract_digest"]
+        )
+        assert actual["status"] == expected["status"]
+        assert actual["blocker"] == expected["blocker"]
+
+
+def test_parzifal_truth_fixture_has_offline_verifiable_provenance() -> None:
+    truth = json.loads(PARZIFAL_TRUTH_PATH.read_text())
+    provenance = truth["provenance"]
+
+    assert provenance["extraction_method"] == (
+        "git show <source_revision>:<source_path> | sed -n '<line_spec>'"
+    )
+    for source in provenance["sources"]:
+        assert DIGEST_RE.fullmatch(source["source_file_sha256"])
+        excerpt = PARZIFAL_TRUTH_PATH.parent / source["excerpt_path"]
+        observed = "sha256:" + hashlib.sha256(excerpt.read_bytes()).hexdigest()
+        assert observed == source["excerpt_sha256"]
 
 
 def test_entry_digests_are_nonzero_and_bind_each_full_entry() -> None:

@@ -1,0 +1,53 @@
+def _h_consolidate_target(inp: ConsolidateTargetInput) -> dict[str, Any]:
+    """Parzifal consolidate_target → TargetProfile.to_dict().
+
+    Karma edge receipt 검증 포함 (PRD_BIG_FOOTSTEP Phase 7).
+    """
+    target_sheet = consolidate_target(
+        persona_id=inp.persona_id,
+        janus_narrow=inp.janus_narrow,
+        ares_persona=inp.ares_persona,
+        ares_protagonist_axis=inp.ares_protagonist_axis,
+        parzifal_angles=inp.parzifal_angles,
+        parzifal_expressions=inp.parzifal_expressions,
+        parzifal_wardrobe=inp.parzifal_wardrobe,
+        karma_edge_receipt=inp.karma_edge_receipt,
+    )
+    # TargetSheet → TargetProfile (JSON-serializable)
+    target_profile = target_sheet.as_target_profile()
+    out = target_profile.to_dict()
+    # ELEMENT LOCK 시트 동봉 (2026-07-08 founder "이게 내가 말한 element lock"):
+    # 4층 전체를 additive 키로 — studio가 브랜드 이해에서 마스터시트 문서를 그린다.
+    # 기존 소비자(target_profile 키만 읽음)는 byte-동일.
+    out["master_sheet"] = {
+        "persona_id": target_sheet.persona_id,
+        "identity": target_sheet.identity.to_dict(),
+        "grounding": target_sheet.grounding.to_dict(),
+        "persona": target_sheet.persona.to_dict(),
+        "visual": __import__("dataclasses").asdict(target_sheet.visual),
+        "status": "draft",
+    }
+    # Draft cast document (lead link + narrator voice). Additive; no face/approve.
+    out["cast_sheets"] = build_cast_sheets(
+        persona_id=str(inp.persona_id or target_sheet.persona_id or "target"),
+        target_profile=out,
+        janus_narrow=inp.janus_narrow if isinstance(inp.janus_narrow, dict) else None,
+        master_sheet=out["master_sheet"],
+    )
+    return out
+def _h_generate_target(inp: GenerateTargetInput) -> dict[str, Any]:
+    """Parzifal generate_target → TargetProfile.to_dict().
+
+    BFA-1: env PARZIFAL_LLM_ENRICH=on injects llm_callable via hiob_core.llm_runtime;
+    default off keeps deterministic assemble (byte-identical to prior llm_callable=None).
+    """
+    target_profile = generate_target(
+        janus_facts=inp.janus_facts,
+        persona_id=inp.persona_id,
+        llm_callable=_resolve_llm_callable_for_enrich(),
+        ares_persona=inp.ares_persona,
+        ares_protagonist_axis=inp.ares_protagonist_axis,
+        parzifal_wardrobe=inp.parzifal_wardrobe,
+        karma_edge_receipt=inp.karma_edge_receipt,
+    )
+    return target_profile.to_dict()
