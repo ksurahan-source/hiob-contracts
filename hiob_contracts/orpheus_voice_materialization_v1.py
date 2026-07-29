@@ -28,24 +28,11 @@ _INPUT_DIGEST_FIELDS = (
     "voice_receipt",
     "voice_receipt_digest",
 )
-_VOICE_PERSONA_SLOTS = frozenset(
-    {
-        "male1",
-        "male2",
-        "male3",
-        "female1",
-        "female2",
-        "female3",
-        "child_male",
-        "child_female",
-        "male",
-        "female",
-        "narrator",
-        "hero",
-        "heroine",
-    }
+ORPHEUS_VOICE_SOURCE_TEXT_MAX_CHARS_V1 = 48
+ORPHEUS_VOICE_SOURCE_TEXT_MAX_UTF8_BYTES_V1 = 144
+_TYPECAST_PROVIDER_VOICE_ID = re.compile(
+    r"^(?:tc|uc)_[0-9a-f]{24}$"
 )
-_OPAQUE_PROVIDER_VOICE_ID = re.compile(r"^[A-Za-z0-9_-]{12,256}$")
 
 
 def _as_json_dict(value: Mapping[str, Any] | BaseModel) -> dict[str, Any]:
@@ -55,22 +42,31 @@ def _as_json_dict(value: Mapping[str, Any] | BaseModel) -> dict[str, Any]:
 
 
 def _sealed_provider_voice_id(value: str) -> str:
-    normalized = value.strip()
-    slot_key = normalized.lower().replace("-", "_")
-    if normalized.startswith("tc_"):
-        return value
-    if (
-        slot_key in _VOICE_PERSONA_SLOTS
-        or normalized.startswith("slot:")
-        or _OPAQUE_PROVIDER_VOICE_ID.fullmatch(normalized) is None
-    ):
+    if _TYPECAST_PROVIDER_VOICE_ID.fullmatch(value) is None:
         raise ValueError("voice_id must be a sealed provider identity")
+    return value
+
+
+def _bounded_source_text(value: str) -> str:
+    if len(value) > ORPHEUS_VOICE_SOURCE_TEXT_MAX_CHARS_V1:
+        raise ValueError(
+            "source_text must be at most 48 Unicode characters"
+        )
+    if (
+        len(value.encode("utf-8"))
+        > ORPHEUS_VOICE_SOURCE_TEXT_MAX_UTF8_BYTES_V1
+    ):
+        raise ValueError("source_text must be at most 144 UTF-8 bytes")
     return value
 
 
 SealedProviderVoiceId = Annotated[
     NonBlankStr,
     AfterValidator(_sealed_provider_voice_id),
+]
+BoundedVoiceSourceText = Annotated[
+    NonBlankStr,
+    AfterValidator(_bounded_source_text),
 ]
 
 
@@ -130,7 +126,7 @@ class OrpheusVoiceMaterializationInputV1(BaseModel):
     workspace_id: NonBlankStr
     run_id: NonBlankStr
     beat_index: NonNegativeInt
-    source_text: NonBlankStr
+    source_text: BoundedVoiceSourceText
     source_text_digest: DigestStr
     voice_id: SealedProviderVoiceId
     voice_receipt: _OrpheusVoiceReceiptV1
@@ -178,6 +174,8 @@ class OrpheusVoiceMaterializationInputV1(BaseModel):
 
 
 __all__ = [
+    "ORPHEUS_VOICE_SOURCE_TEXT_MAX_CHARS_V1",
+    "ORPHEUS_VOICE_SOURCE_TEXT_MAX_UTF8_BYTES_V1",
     "OrpheusVoiceMaterializationInputV1",
     "derive_orpheus_voice_materialization_input_digest_v1",
 ]
