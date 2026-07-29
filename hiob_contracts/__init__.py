@@ -55,10 +55,11 @@ from .parzifal_voice_envelope_v1 import (
     derive_parzifal_voice_envelope_digest_v1,
 )
 from .star_make_ready_v1 import (
-    ParzifalIdentityReceiptV1,
-    ParzifalRecordRefV1,
+    StarMakeReadyRequestV1,
     StarMakeReadyReceiptV1,
-    derive_parzifal_identity_receipt_payload_digest_v1,
+    StarMakeReadyResolverV1,
+    derive_star_make_ready_request_digest_v1,
+    derive_star_make_ready_command_id_v1,
     derive_star_make_ready_receipt_digest_v1,
 )
 from .planet_envelopes import VisualContext, VisualRequest, AudioRequest, SFXRequest, RenderJobRequest, RenderJobResponse, ProcessInsightsRequest
@@ -314,9 +315,10 @@ __all__ = [
     "VoiceSpecV1", "derive_voice_spec_digest_v1",
     "ParzifalVoiceEnvelopeV1",
     "derive_parzifal_voice_envelope_digest_v1",
-    "ParzifalIdentityReceiptV1", "ParzifalRecordRefV1",
-    "StarMakeReadyReceiptV1",
-    "derive_parzifal_identity_receipt_payload_digest_v1",
+    "StarMakeReadyRequestV1", "StarMakeReadyReceiptV1",
+    "StarMakeReadyResolverV1",
+    "derive_star_make_ready_request_digest_v1",
+    "derive_star_make_ready_command_id_v1",
     "derive_star_make_ready_receipt_digest_v1",
     "LOCK_STATUSES", "ELEMENT_KINDS", "standing_lookup",
     "PlanetIO", "PLANET_IO", "Conformance", "io_for", "needs_new_contract", "dsl_ready",

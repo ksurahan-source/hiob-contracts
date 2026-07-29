@@ -1,34 +1,53 @@
 import { z } from 'zod';
 
-import { characterIdentityBindingErrorV1 } from './character-identity-v1.js';
 import { sha256Digest } from './factory/digest.js';
 
-const NonBlankString = z.string().refine(
-  (value) => value.trim().length > 0,
-  'string must not be blank',
-);
 const DigestSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/, 'digest must be sha256:<64 lowercase hex>');
+const UuidSchema = z
+  .string()
+  .regex(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    'UUID must be canonical lowercase RFC 4122',
+  );
+const PositiveRevision = z.number().int().safe().positive();
+const OpaqueIdSchema = z
+  .string()
+  .transform((value) => value.trim())
+  .refine(
+    (value) => (
+      /^[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$/.test(value)
+      && value.split('/').every((segment) => (
+        segment !== '' && segment !== '.' && segment !== '..'
+      ))
+    ),
+    'technical id must use the opaque id grammar',
+  );
 
-const PARZIFAL_PAYLOAD_FIELDS = [
+const REQUEST_FIELDS = [
   'contract_version',
-  'receipt_id',
   'workspace_id',
   'run_id',
-  'subject_id',
-  'face_id',
-  'voice_id',
-  'identity_binding_digest',
-  'element_lock_digest',
+  'run_revision',
 ] as const;
-const MAKE_READY_PAYLOAD_FIELDS = [
-  'contract_version',
+const COMMAND_ID_FIELDS = [
   'workspace_id',
   'run_id',
-  'parzifal_record_ref',
-  'parzifal_receipt',
-  'current_element_lock_digest',
+  'run_revision',
+  'request_digest',
+  'character_lock_digest',
+  'character_lock_version',
+  'product_lock_digest',
+  'artemis_approval_receipt_id',
+  'artemis_approval_receipt_digest',
+  'artemis_approval_state_revision',
+] as const;
+const RECEIPT_FIELDS = [
+  'contract_version',
+  'command_id',
+  ...COMMAND_ID_FIELDS,
+  'state',
   'provider_call',
 ] as const;
 
@@ -37,131 +56,173 @@ function digestFields(
   fields: readonly string[],
 ): string {
   return sha256Digest(
-    Object.fromEntries(fields.map((field) => [field, value[field]])),
+    Object.fromEntries(fields.map((field) => {
+      if (!(field in value) || value[field] === undefined) {
+        throw new Error(`${field} is required for digest`);
+      }
+      return [field, value[field]];
+    })),
   );
 }
 
-export function deriveParzifalIdentityReceiptPayloadDigestV1(
+function requireOpaqueReceiptId(value: Record<string, unknown>): void {
+  const raw = value.artemis_approval_receipt_id;
+  const parsed = OpaqueIdSchema.parse(raw);
+  if (parsed !== raw) {
+    throw new Error('artemis_approval_receipt_id must be canonical');
+  }
+}
+
+export function deriveStarMakeReadyRequestDigestV1(
   value: Record<string, unknown>,
 ): string {
-  return digestFields(value, PARZIFAL_PAYLOAD_FIELDS);
+  return digestFields(value, REQUEST_FIELDS);
+}
+
+export function deriveStarMakeReadyCommandIdV1(
+  value: Record<string, unknown>,
+): string {
+  requireOpaqueReceiptId(value);
+  return sha256Digest({
+    command_kind: 'star.make_ready',
+    ...Object.fromEntries(COMMAND_ID_FIELDS.map((field) => {
+      if (!(field in value) || value[field] === undefined) {
+        throw new Error(`${field} is required for command id`);
+      }
+      return [field, value[field]];
+    })),
+  });
 }
 
 export function deriveStarMakeReadyReceiptDigestV1(
   value: Record<string, unknown>,
 ): string {
-  return digestFields(value, MAKE_READY_PAYLOAD_FIELDS);
+  requireOpaqueReceiptId(value);
+  return digestFields(value, RECEIPT_FIELDS);
 }
 
-export const ParzifalRecordRefV1Schema = z
-  .object({
-    id: NonBlankString,
-    version: z.number().int().positive(),
-    digest: DigestSchema,
-  })
-  .strict();
+const RequestShape = {
+  contract_version: z.literal('StarMakeReadyRequest.v1'),
+  workspace_id: UuidSchema,
+  run_id: UuidSchema,
+  run_revision: PositiveRevision,
+};
 
-export const ParzifalIdentityReceiptV1Schema = z
+export const StarMakeReadyRequestV1Schema = z
   .object({
-    contract_version: z.literal('ParzifalIdentityReceipt.v1'),
-    receipt_id: NonBlankString,
-    workspace_id: NonBlankString,
-    run_id: NonBlankString,
-    subject_id: NonBlankString,
-    face_id: NonBlankString,
-    voice_id: NonBlankString,
-    identity_binding_digest: DigestSchema,
-    element_lock_digest: DigestSchema,
-    payload_digest: DigestSchema,
+    ...RequestShape,
+    request_digest: DigestSchema,
   })
   .strict()
   .superRefine((value, ctx) => {
-    const bindingError = characterIdentityBindingErrorV1(value);
-    if (bindingError) {
+    let expected;
+    try {
+      expected = deriveStarMakeReadyRequestDigestV1(value);
+    } catch {
+      return;
+    }
+    if (value.request_digest !== expected) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: bindingError,
-        path: ['identity_binding_digest'],
+        message: 'request_digest does not match make-ready request',
+        path: ['request_digest'],
       });
     }
-    if (
-      value.payload_digest
-      !== deriveParzifalIdentityReceiptPayloadDigestV1(value)
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message:
-          'payload_digest does not match Parzifal identity receipt payload',
-        path: ['payload_digest'],
-      });
-    }
-  });
+  })
+  .transform((value) => Object.freeze(value));
+
+const ReceiptShape = {
+  contract_version: z.literal('StarMakeReadyReceipt.v1'),
+  command_id: DigestSchema,
+  workspace_id: UuidSchema,
+  run_id: UuidSchema,
+  run_revision: PositiveRevision,
+  request_digest: DigestSchema,
+  character_lock_digest: DigestSchema,
+  character_lock_version: PositiveRevision,
+  product_lock_digest: DigestSchema,
+  artemis_approval_receipt_id: OpaqueIdSchema,
+  artemis_approval_receipt_digest: DigestSchema,
+  artemis_approval_state_revision: PositiveRevision,
+  state: z.literal('succeeded'),
+  provider_call: z.literal('none'),
+  receipt_digest: DigestSchema,
+};
 
 export const StarMakeReadyReceiptV1Schema = z
-  .object({
-    contract_version: z.literal('StarMakeReadyReceipt.v1'),
-    workspace_id: NonBlankString,
-    run_id: NonBlankString,
-    parzifal_record_ref: ParzifalRecordRefV1Schema,
-    parzifal_receipt: ParzifalIdentityReceiptV1Schema,
-    current_element_lock_digest: DigestSchema,
-    provider_call: z.literal('none'),
-    receipt_digest: DigestSchema,
-  })
+  .object(ReceiptShape)
   .strict()
   .superRefine((value, ctx) => {
-    const receipt = value.parzifal_receipt;
-    const recordRef = value.parzifal_record_ref;
-    const issue = (message: string, path: (string | number)[]) => {
+    const issue = (message: string, path: string[]) => {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message, path });
     };
-    if (receipt.workspace_id !== value.workspace_id) {
-      issue(
-        'parzifal_receipt.workspace_id must match workspace_id',
-        ['parzifal_receipt', 'workspace_id'],
-      );
+    let expectedRequest;
+    let expectedCommand;
+    let expectedReceipt;
+    try {
+      expectedRequest = deriveStarMakeReadyRequestDigestV1({
+        contract_version: 'StarMakeReadyRequest.v1',
+        workspace_id: value.workspace_id,
+        run_id: value.run_id,
+        run_revision: value.run_revision,
+      });
+      expectedCommand = deriveStarMakeReadyCommandIdV1(value);
+      expectedReceipt = deriveStarMakeReadyReceiptDigestV1(value);
+    } catch {
+      return;
     }
-    if (receipt.run_id !== value.run_id) {
-      issue(
-        'parzifal_receipt.run_id must match run_id',
-        ['parzifal_receipt', 'run_id'],
-      );
+    if (value.request_digest !== expectedRequest) {
+      issue('request_digest does not match make-ready scope', ['request_digest']);
     }
-    if (recordRef.id !== receipt.receipt_id) {
-      issue(
-        'parzifal_record_ref.id must match parzifal_receipt.receipt_id',
-        ['parzifal_record_ref', 'id'],
-      );
+    if (value.command_id !== expectedCommand) {
+      issue('command_id does not match make-ready authority', ['command_id']);
     }
-    if (recordRef.digest !== receipt.payload_digest) {
-      issue(
-        'parzifal_record_ref.digest must match parzifal_receipt.payload_digest',
-        ['parzifal_record_ref', 'digest'],
-      );
+    if (value.receipt_digest !== expectedReceipt) {
+      issue('receipt_digest does not match make-ready receipt', ['receipt_digest']);
     }
-    if (value.current_element_lock_digest !== receipt.element_lock_digest) {
-      issue(
-        'current_element_lock_digest must match parzifal_receipt.element_lock_digest',
-        ['current_element_lock_digest'],
-      );
-    }
-    if (
-      value.receipt_digest
-      !== deriveStarMakeReadyReceiptDigestV1(value)
-    ) {
-      issue(
-        'receipt_digest does not match Star make-ready receipt payload',
-        ['receipt_digest'],
-      );
-    }
-  });
+  })
+  .transform((value) => Object.freeze(value));
 
-export type ParzifalRecordRefV1 = z.infer<
-  typeof ParzifalRecordRefV1Schema
->;
-export type ParzifalIdentityReceiptV1 = z.infer<
-  typeof ParzifalIdentityReceiptV1Schema
+export type StarMakeReadyRequestV1 = z.infer<
+  typeof StarMakeReadyRequestV1Schema
 >;
 export type StarMakeReadyReceiptV1 = z.infer<
   typeof StarMakeReadyReceiptV1Schema
 >;
+
+export type StarMakeReadyAuthorityV1 = Readonly<{
+  command_id: string;
+  workspace_id: string;
+  run_id: string;
+  run_revision: number;
+  character_lock_digest: string;
+  character_lock_version: number;
+  product_lock_digest: string;
+  artemis_approval_receipt_id: string;
+  artemis_approval_receipt_digest: string;
+  artemis_approval_state_revision: number;
+}>;
+
+export interface StarMakeReadyResolverV1 {
+  isCurrentMakeReady(authority: StarMakeReadyAuthorityV1): boolean;
+}
+
+export function starMakeReadyReceiptAuthorizesV1(
+  receipt: StarMakeReadyReceiptV1,
+  resolver: StarMakeReadyResolverV1,
+): boolean {
+  return resolver.isCurrentMakeReady({
+    command_id: receipt.command_id,
+    workspace_id: receipt.workspace_id,
+    run_id: receipt.run_id,
+    run_revision: receipt.run_revision,
+    character_lock_digest: receipt.character_lock_digest,
+    character_lock_version: receipt.character_lock_version,
+    product_lock_digest: receipt.product_lock_digest,
+    artemis_approval_receipt_id: receipt.artemis_approval_receipt_id,
+    artemis_approval_receipt_digest:
+      receipt.artemis_approval_receipt_digest,
+    artemis_approval_state_revision:
+      receipt.artemis_approval_state_revision,
+  }) === true;
+}

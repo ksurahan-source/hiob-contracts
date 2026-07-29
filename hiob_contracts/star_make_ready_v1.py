@@ -1,13 +1,13 @@
-"""Strict receipt proving one run is ready without a provider call."""
+"""Deterministic Star receipt proving one run is ready without a provider call."""
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Mapping
+from typing import Annotated, Any, Literal, Mapping, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .ares_script_revision_v1 import DigestStr, NonBlankStr
-from .character_identity_v1 import character_identity_binding_errors_v1
+from .ares_script_revision_v1 import DigestStr
+from .artemis_product_lock_v1 import OpaqueId
 from .factory.digest import sha256_digest
 
 _STRICT_FROZEN = ConfigDict(
@@ -16,26 +16,44 @@ _STRICT_FROZEN = ConfigDict(
     strict=True,
     revalidate_instances="always",
 )
-PositiveVersion = Annotated[int, Field(gt=0, strict=True)]
+UuidStr = Annotated[
+    str,
+    Field(
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        ),
+        strict=True,
+    ),
+]
+PositiveRevision = Annotated[
+    int,
+    Field(gt=0, le=9_007_199_254_740_991, strict=True),
+]
 
-_PARZIFAL_PAYLOAD_FIELDS = (
+_REQUEST_FIELDS = (
     "contract_version",
-    "receipt_id",
     "workspace_id",
     "run_id",
-    "subject_id",
-    "face_id",
-    "voice_id",
-    "identity_binding_digest",
-    "element_lock_digest",
+    "run_revision",
 )
-_MAKE_READY_PAYLOAD_FIELDS = (
-    "contract_version",
+_COMMAND_ID_FIELDS = (
     "workspace_id",
     "run_id",
-    "parzifal_record_ref",
-    "parzifal_receipt",
-    "current_element_lock_digest",
+    "run_revision",
+    "request_digest",
+    "character_lock_digest",
+    "character_lock_version",
+    "product_lock_digest",
+    "artemis_approval_receipt_id",
+    "artemis_approval_receipt_digest",
+    "artemis_approval_state_revision",
+)
+_RECEIPT_FIELDS = (
+    "contract_version",
+    "command_id",
+    *_COMMAND_ID_FIELDS,
+    "state",
     "provider_call",
 )
 
@@ -56,114 +74,148 @@ def _digest_fields(
     return sha256_digest({field: data[field] for field in fields})
 
 
-def derive_parzifal_identity_receipt_payload_digest_v1(
+def derive_star_make_ready_request_digest_v1(
     value: Mapping[str, Any] | BaseModel,
 ) -> str:
-    """Bind the exact Parzifal identity receipt payload, excluding its digest."""
+    return _digest_fields(value, _REQUEST_FIELDS)
 
-    return _digest_fields(value, _PARZIFAL_PAYLOAD_FIELDS)
+
+def derive_star_make_ready_command_id_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    data = _json_mapping(value)
+    receipt_id = data["artemis_approval_receipt_id"]
+    if (
+        not isinstance(receipt_id, str)
+        or not receipt_id
+        or len(receipt_id) > 255
+        or any(
+            not (
+                character.isascii()
+                and (character.isalnum() or character in "._/-")
+            )
+            for character in receipt_id
+        )
+        or any(segment in {"", ".", ".."} for segment in receipt_id.split("/"))
+    ):
+        raise ValueError("artemis_approval_receipt_id is not an opaque id")
+    return sha256_digest(
+        {
+            "command_kind": "star.make_ready",
+            **{field: data[field] for field in _COMMAND_ID_FIELDS},
+        }
+    )
 
 
 def derive_star_make_ready_receipt_digest_v1(
     value: Mapping[str, Any] | BaseModel,
 ) -> str:
-    """Bind the exact make-ready receipt, excluding its receipt digest."""
+    derive_star_make_ready_command_id_v1(value)
+    return _digest_fields(value, _RECEIPT_FIELDS)
 
-    return _digest_fields(value, _MAKE_READY_PAYLOAD_FIELDS)
+
+class StarMakeReadyResolverV1(Protocol):
+    """Durable authority required to use a structurally valid receipt."""
+
+    def is_current_make_ready(
+        self,
+        *,
+        command_id: str,
+        workspace_id: str,
+        run_id: str,
+        run_revision: int,
+        character_lock_digest: str,
+        character_lock_version: int,
+        product_lock_digest: str,
+        artemis_approval_receipt_id: str,
+        artemis_approval_receipt_digest: str,
+        artemis_approval_state_revision: int,
+    ) -> bool: ...
 
 
-class ParzifalRecordRefV1(BaseModel):
+class StarMakeReadyRequestV1(BaseModel):
+    """Server-scoped read request; it accepts no authority or provider payload."""
+
     model_config = _STRICT_FROZEN
 
-    id: NonBlankStr
-    version: PositiveVersion
-    digest: DigestStr
-
-
-class ParzifalIdentityReceiptV1(BaseModel):
-    """Server-owned Parzifal authority consumed by Star without reinterpretation."""
-
-    model_config = _STRICT_FROZEN
-
-    contract_version: Literal["ParzifalIdentityReceipt.v1"]
-    receipt_id: NonBlankStr
-    workspace_id: NonBlankStr
-    run_id: NonBlankStr
-    subject_id: NonBlankStr
-    face_id: NonBlankStr
-    voice_id: NonBlankStr
-    identity_binding_digest: DigestStr
-    element_lock_digest: DigestStr
-    payload_digest: DigestStr
+    contract_version: Literal["StarMakeReadyRequest.v1"]
+    workspace_id: UuidStr
+    run_id: UuidStr
+    run_revision: PositiveRevision
+    request_digest: DigestStr
 
     @model_validator(mode="after")
-    def _validate_bindings(self) -> "ParzifalIdentityReceiptV1":
-        errors = character_identity_binding_errors_v1(
-            subject_id=self.subject_id,
-            face_id=self.face_id,
-            voice_id=self.voice_id,
-            identity_binding_digest=self.identity_binding_digest,
-        )
-        if errors:
-            raise ValueError(errors[0])
-        expected = derive_parzifal_identity_receipt_payload_digest_v1(self)
-        if self.payload_digest != expected:
-            raise ValueError(
-                "payload_digest does not match Parzifal identity receipt payload"
-            )
+    def _validate_digest(self) -> "StarMakeReadyRequestV1":
+        if self.request_digest != derive_star_make_ready_request_digest_v1(self):
+            raise ValueError("request_digest does not match make-ready request")
         return self
 
 
 class StarMakeReadyReceiptV1(BaseModel):
-    """Fail-closed evidence that current server-owned character locks are ready."""
+    """Read receipt binding current CharacterLock and Artemis product authority."""
 
     model_config = _STRICT_FROZEN
 
     contract_version: Literal["StarMakeReadyReceipt.v1"]
-    workspace_id: NonBlankStr
-    run_id: NonBlankStr
-    parzifal_record_ref: ParzifalRecordRefV1
-    parzifal_receipt: ParzifalIdentityReceiptV1
-    current_element_lock_digest: DigestStr
+    command_id: DigestStr
+    workspace_id: UuidStr
+    run_id: UuidStr
+    run_revision: PositiveRevision
+    request_digest: DigestStr
+    character_lock_digest: DigestStr
+    character_lock_version: PositiveRevision
+    product_lock_digest: DigestStr
+    artemis_approval_receipt_id: OpaqueId
+    artemis_approval_receipt_digest: DigestStr
+    artemis_approval_state_revision: PositiveRevision
+    state: Literal["succeeded"]
     provider_call: Literal["none"]
     receipt_digest: DigestStr
 
     @model_validator(mode="after")
     def _validate_bindings(self) -> "StarMakeReadyReceiptV1":
-        receipt = self.parzifal_receipt
-        record_ref = self.parzifal_record_ref
-        if receipt.workspace_id != self.workspace_id:
-            raise ValueError(
-                "parzifal_receipt.workspace_id must match workspace_id"
-            )
-        if receipt.run_id != self.run_id:
-            raise ValueError("parzifal_receipt.run_id must match run_id")
-        if record_ref.id != receipt.receipt_id:
-            raise ValueError(
-                "parzifal_record_ref.id must match parzifal_receipt.receipt_id"
-            )
-        if record_ref.digest != receipt.payload_digest:
-            raise ValueError(
-                "parzifal_record_ref.digest must match "
-                "parzifal_receipt.payload_digest"
-            )
-        if self.current_element_lock_digest != receipt.element_lock_digest:
-            raise ValueError(
-                "current_element_lock_digest must match "
-                "parzifal_receipt.element_lock_digest"
-            )
-        expected = derive_star_make_ready_receipt_digest_v1(self)
-        if self.receipt_digest != expected:
-            raise ValueError(
-                "receipt_digest does not match Star make-ready receipt payload"
-            )
+        request_payload = {
+            "contract_version": "StarMakeReadyRequest.v1",
+            "workspace_id": self.workspace_id,
+            "run_id": self.run_id,
+            "run_revision": self.run_revision,
+        }
+        if self.request_digest != derive_star_make_ready_request_digest_v1(
+            request_payload
+        ):
+            raise ValueError("request_digest does not match make-ready scope")
+        if self.command_id != derive_star_make_ready_command_id_v1(self):
+            raise ValueError("command_id does not match make-ready authority")
+        if self.receipt_digest != derive_star_make_ready_receipt_digest_v1(self):
+            raise ValueError("receipt_digest does not match make-ready receipt")
         return self
+
+    def authorizes(self, *, resolver: StarMakeReadyResolverV1) -> bool:
+        """Require current server state; the receipt itself is not authority."""
+
+        return resolver.is_current_make_ready(
+            command_id=self.command_id,
+            workspace_id=self.workspace_id,
+            run_id=self.run_id,
+            run_revision=self.run_revision,
+            character_lock_digest=self.character_lock_digest,
+            character_lock_version=self.character_lock_version,
+            product_lock_digest=self.product_lock_digest,
+            artemis_approval_receipt_id=self.artemis_approval_receipt_id,
+            artemis_approval_receipt_digest=(
+                self.artemis_approval_receipt_digest
+            ),
+            artemis_approval_state_revision=(
+                self.artemis_approval_state_revision
+            ),
+        ) is True
 
 
 __all__ = [
-    "ParzifalIdentityReceiptV1",
-    "ParzifalRecordRefV1",
+    "StarMakeReadyRequestV1",
     "StarMakeReadyReceiptV1",
-    "derive_parzifal_identity_receipt_payload_digest_v1",
+    "StarMakeReadyResolverV1",
+    "derive_star_make_ready_request_digest_v1",
+    "derive_star_make_ready_command_id_v1",
     "derive_star_make_ready_receipt_digest_v1",
 ]
