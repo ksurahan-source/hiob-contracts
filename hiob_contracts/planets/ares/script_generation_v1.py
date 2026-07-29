@@ -7,6 +7,7 @@ from typing import Annotated, Any, Literal, Mapping
 from pydantic import (
     AfterValidator,
     BaseModel,
+    ConfigDict,
     Field,
     StringConstraints,
     field_validator,
@@ -165,6 +166,11 @@ def derive_ares_script_generation_input_digest_v1(
         if isinstance(value, BaseModel)
         else dict(value)
     )
+    for field in _DIGEST_FIELDS:
+        if field not in data:
+            raise ValueError(
+                f"{field} is required for generation input digest"
+            )
     body = {field: data[field] for field in _DIGEST_FIELDS}
     _assert_json_unicode_scalars(body)
     return sha256_digest(body)
@@ -240,7 +246,19 @@ class AresVoiceSpecProjectionV1(BaseModel):
 class AresScriptGenerationInputV1(BaseModel):
     """The only payload Ares permits the script provider to receive."""
 
-    model_config = _FROZEN_STRICT
+    model_config = ConfigDict(
+        **_FROZEN_STRICT,
+        json_schema_extra={
+            "x-hiob-validation": "pydantic-runtime-required",
+            "x-hiob-semantic-invariants": [
+                "character_identity_binding_digest",
+                "voice_spec_subject_matches_character",
+                "voice_spec_digest",
+                "generation_input_digest",
+                "valid_unicode_scalars",
+            ],
+        },
+    )
 
     contract_version: Literal["AresScriptGenerationInput.v1"]
     workspace_id: Text512
@@ -262,6 +280,19 @@ class AresScriptGenerationInputV1(BaseModel):
     )
     generation_input_digest: DigestText
 
+    @field_validator("factory_revision", mode="before")
+    @classmethod
+    def _json_integer_parity(cls, value: Any) -> Any:
+        if isinstance(value, bool):
+            raise ValueError("factory_revision must be an integer")
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            if not value.is_integer():
+                raise ValueError("factory_revision must be an integer")
+            return int(value)
+        return value
+
     @field_validator(
         "adjacent_beat_summaries",
         "memories",
@@ -270,6 +301,18 @@ class AresScriptGenerationInputV1(BaseModel):
     @classmethod
     def _tuples(cls, value: Any) -> Any:
         return tuple(value) if isinstance(value, list) else value
+
+    def model_copy(
+        self,
+        *,
+        update: Mapping[str, Any] | None = None,
+        deep: bool = False,
+    ) -> "AresScriptGenerationInputV1":
+        if not update:
+            return super().model_copy(deep=deep)
+        body = self.model_dump(mode="json")
+        body.update(update)
+        return type(self).model_validate(body, strict=True)
 
     @model_validator(mode="after")
     def _bind_scope_and_digest(self) -> "AresScriptGenerationInputV1":
