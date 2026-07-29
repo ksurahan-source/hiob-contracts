@@ -104,6 +104,26 @@ def test_voice_materialization_input_rejects_voice_drift() -> None:
         OrpheusVoiceMaterializationInputV1.model_validate(payload)
 
 
+def test_voice_materialization_input_rejects_persona_slot_as_voice_id() -> None:
+    payload = _payload()
+    receipt = payload["voice_receipt"]
+    receipt["voice_id"] = "female1"
+    unsigned_receipt = {
+        key: value
+        for key, value in receipt.items()
+        if key != "receipt_digest"
+    }
+    receipt["receipt_digest"] = sha256_digest(unsigned_receipt)
+    payload["voice_id"] = "female1"
+    payload["voice_receipt_digest"] = receipt["receipt_digest"]
+    payload["input_digest"] = derive_orpheus_voice_materialization_input_digest_v1(
+        payload
+    )
+
+    with pytest.raises(ValidationError, match="provider identity"):
+        OrpheusVoiceMaterializationInputV1.model_validate(payload)
+
+
 def test_voice_materialization_input_rejects_tampered_receipt() -> None:
     payload = _payload()
     payload["voice_receipt"]["beat_index"] = 1
