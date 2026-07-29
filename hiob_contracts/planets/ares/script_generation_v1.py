@@ -191,10 +191,23 @@ def derive_ares_script_generation_input_digest_v1(
     return sha256_digest(body)
 
 
+def _semantic_model_config(*invariants: str) -> ConfigDict:
+    return ConfigDict(
+        **_FROZEN_STRICT,
+        json_schema_extra={
+            "x-hiob-validation": "pydantic-runtime-required",
+            "x-hiob-semantic-invariants": list(invariants),
+        },
+    )
+
+
 class AresCharacterIdentityProjectionV1(BaseModel):
     """The face and voice identity projection Ares is allowed to consume."""
 
-    model_config = _FROZEN_STRICT
+    model_config = _semantic_model_config(
+        "character_identity_binding_digest",
+        "valid_unicode_scalars",
+    )
 
     persona_id: Text128
     face_id: Text256
@@ -217,7 +230,7 @@ class AresCharacterIdentityProjectionV1(BaseModel):
 class AresProvenanceMemoryV1(BaseModel):
     """One bounded memory whose source remains visible."""
 
-    model_config = _FROZEN_STRICT
+    model_config = _semantic_model_config("valid_unicode_scalars")
 
     text: Text500
     provenance: Text200
@@ -226,7 +239,10 @@ class AresProvenanceMemoryV1(BaseModel):
 class AresVoiceSpecProjectionV1(BaseModel):
     """The exact VoiceSpec fields Ares passes to its provider."""
 
-    model_config = _FROZEN_STRICT
+    model_config = _semantic_model_config(
+        "voice_spec_digest",
+        "valid_unicode_scalars",
+    )
 
     contract_version: Literal["VoiceSpec.v1"]
     subject_id: Text128
@@ -261,18 +277,12 @@ class AresVoiceSpecProjectionV1(BaseModel):
 class AresScriptGenerationInputV1(BaseModel):
     """The only payload Ares permits the script provider to receive."""
 
-    model_config = ConfigDict(
-        **_FROZEN_STRICT,
-        json_schema_extra={
-            "x-hiob-validation": "pydantic-runtime-required",
-            "x-hiob-semantic-invariants": [
-                "character_identity_binding_digest",
-                "voice_spec_subject_matches_character",
-                "voice_spec_digest",
-                "generation_input_digest",
-                "valid_unicode_scalars",
-            ],
-        },
+    model_config = _semantic_model_config(
+        "character_identity_binding_digest",
+        "voice_spec_subject_matches_character",
+        "voice_spec_digest",
+        "generation_input_digest",
+        "valid_unicode_scalars",
     )
 
     contract_version: Literal["AresScriptGenerationInput.v1"]
