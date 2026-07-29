@@ -709,11 +709,11 @@
       "side_effects": [],
       "source_revision": "21c8cdac5fb5627d189c97ddf806532742868293",
       "registry_source": "hiob_parzifal/node_server/registry.py",
-      "status": "active",
-      "blocker": null,
-      "output_schema_digest": "sha256:4755990df4fa36f9d4b057432e0d3a520509781bf1ae6cc8ccc4a20acb4f407f",
+      "status": "blocked",
+      "blocker": "OUTPUT_WRAPS_DECLARED_CONTRACT",
+      "output_schema_digest": null,
       "contract_source": "hiob_parzifal/node_server/core.py",
-      "entry_digest": "sha256:3ab4d6b4a2d0076ae38979ce78a0c45ae825f997d40f2d9578a9c22621e79c55",
+      "entry_digest": "sha256:b564b178ffa3651d2bd047bd1bbb9e91cad50af39f29aa99f0e82231db923161",
       "observed_runtime_contract_digest": "sha256:4755990df4fa36f9d4b057432e0d3a520509781bf1ae6cc8ccc4a20acb4f407f"
     },
     {
