@@ -56,7 +56,7 @@ def _failure() -> dict:
         "revision": 1,
         "stage": "authority",
         "code": "CHARACTER_LOCK_REQUIRED",
-        "provider_call": "none",
+        "provider_call": "unknown",
         "provider_attempts": {
             "script": 0,
             "image": 0,
@@ -192,7 +192,14 @@ def test_view_supports_every_refreshable_factory_state(
                 "script_approval": None,
                 "plan_approval": None,
             },
-            "provider_call": "unknown" if is_failed else "none",
+            "provider_call": (
+                "unknown"
+                if is_failed
+                else "confirmed"
+                if status in {"pending", "rendering"}
+                or (section == "RunStatus" and status == "ready")
+                else "none"
+            ),
             "error": (
                 "FACTORY_FAILED"
                 if is_failed
@@ -296,5 +303,39 @@ def test_pending_rejects_terminal_receipt_and_ready_requires_mp4_url() -> None:
                     "script_approval": None,
                     "plan_approval": None,
                 },
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("status", "receipt", "provider_call"),
+    [
+        ("pending", _progress(), "none"),
+        ("ready", _ready(), "none"),
+        ("failed", _failure(), "confirmed"),
+    ],
+)
+def test_provider_call_must_match_typed_receipt_ledger(
+    status: str,
+    receipt: dict,
+    provider_call: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        StarReelsViewV1.model_validate(
+            {
+                "contract_version": "StarReelsView.v1",
+                "section": "RunStatus",
+                "status": status,
+                "revision": 1,
+                "stage_output": None,
+                "budget": _budget(),
+                "review_digest": None,
+                "receipts": {
+                    "factory": receipt,
+                    "script_approval": None,
+                    "plan_approval": None,
+                },
+                "provider_call": provider_call,
+                "error": "FACTORY_FAILED" if status == "failed" else None,
             }
         )
