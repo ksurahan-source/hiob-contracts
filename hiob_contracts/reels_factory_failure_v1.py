@@ -35,7 +35,17 @@ class ReelsFactoryFailureReceiptV1(BaseModel):
     run_id: UuidStr
     idempotency_key: NonBlankStr
     revision: int
-    stage: Literal["script", "image", "voice", "render"]
+    stage: Literal[
+        "authority",
+        "script",
+        "project_script",
+        "plan",
+        "project_plan",
+        "scheduler",
+        "image",
+        "voice",
+        "render",
+    ]
     code: NonBlankStr
     provider_call: Literal["none", "confirmed", "unknown"]
     provider_attempts: ReelsFactoryProviderAttemptsV1
