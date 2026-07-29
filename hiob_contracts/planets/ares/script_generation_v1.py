@@ -159,12 +159,14 @@ DigestText = Annotated[
 def _normalize_factory_revision(value: Any) -> Any:
     if isinstance(value, bool):
         raise ValueError("factory_revision must be an integer")
-    if isinstance(value, int):
-        return value
     if isinstance(value, float):
         if not value.is_integer():
             raise ValueError("factory_revision must be an integer")
-        return int(value)
+        value = int(value)
+    if not isinstance(value, int):
+        raise ValueError("factory_revision must be an integer")
+    if not 0 <= value <= 2_147_483_647:
+        raise ValueError("factory_revision must be an int4 value")
     return value
 
 

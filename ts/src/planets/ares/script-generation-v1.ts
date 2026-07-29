@@ -80,6 +80,18 @@ const DIGEST_FIELDS = [
   'memories',
 ] as const;
 
+function normalizeFactoryRevision(value: unknown): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > 2_147_483_647
+  ) {
+    throw new TypeError('factory_revision must be an int4 integer');
+  }
+  return value;
+}
+
 function deepFreeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') {
     for (const child of Object.values(value as Record<string, unknown>)) {
@@ -98,7 +110,12 @@ export function deriveAresScriptGenerationInputDigestV1(
       if (!(field in value) || value[field] === undefined) {
         throw new TypeError(`${field} is required for generation input digest`);
       }
-      return [field, value[field]];
+      return [
+        field,
+        field === 'factory_revision'
+          ? normalizeFactoryRevision(value[field])
+          : value[field],
+      ];
     }),
   );
   assertJsonUnicodeScalars(body);
