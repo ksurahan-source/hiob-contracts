@@ -50,6 +50,12 @@ def has_surrounding_contract_whitespace(value: str) -> bool:
     )
 
 
+def is_contract_blank(value: str) -> bool:
+    """Return true when text is empty or only the frozen contract whitespace."""
+
+    return not value or all(char in _CONTRACT_WHITESPACE for char in value)
+
+
 def normalize_unicode_scalars(value: str) -> str:
     """Reject unpaired surrogates and normalize valid UTF-16 pairs."""
 
@@ -104,5 +110,6 @@ __all__ = [
     "CanonicalBrandSlug",
     "canonical_brand_slug",
     "has_surrounding_contract_whitespace",
+    "is_contract_blank",
     "normalize_unicode_scalars",
 ]

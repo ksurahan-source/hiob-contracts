@@ -19,6 +19,7 @@ from ...ares_script_revision_v1 import (
 from ...character_identity_v1 import (
     character_identity_binding_errors_v1,
 )
+from ...brand_scope import is_contract_blank
 from ...factory import sha256_digest
 from ...voice_spec_v1 import derive_voice_spec_digest_v1
 
@@ -45,6 +46,12 @@ def _valid_unicode_scalars(value: str) -> str:
     return value
 
 
+def _contract_nonblank(value: str) -> str:
+    if is_contract_blank(value):
+        raise ValueError("string must not be blank")
+    return value
+
+
 def _assert_json_unicode_scalars(value: Any) -> None:
     if isinstance(value, str):
         _valid_unicode_scalars(value)
@@ -57,44 +64,89 @@ def _assert_json_unicode_scalars(value: Any) -> None:
             _assert_json_unicode_scalars(item)
 
 
+_CONTRACT_NONBLANK_PATTERN = (
+    "[^\u0009-\u000D\u0020\u00A0\u1680"
+    "\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]"
+)
+
 Text80 = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=80, pattern=r"\S"),
+    StringConstraints(
+        min_length=1,
+        max_length=80,
+        pattern=_CONTRACT_NONBLANK_PATTERN,
+    ),
+    AfterValidator(_contract_nonblank),
     AfterValidator(_valid_unicode_scalars),
 ]
 Text120 = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=120, pattern=r"\S"),
+    StringConstraints(
+        min_length=1,
+        max_length=120,
+        pattern=_CONTRACT_NONBLANK_PATTERN,
+    ),
+    AfterValidator(_contract_nonblank),
     AfterValidator(_valid_unicode_scalars),
 ]
 Text128 = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=128, pattern=r"\S"),
+    StringConstraints(
+        min_length=1,
+        max_length=128,
+        pattern=_CONTRACT_NONBLANK_PATTERN,
+    ),
+    AfterValidator(_contract_nonblank),
     AfterValidator(_valid_unicode_scalars),
 ]
 Text200 = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=200, pattern=r"\S"),
+    StringConstraints(
+        min_length=1,
+        max_length=200,
+        pattern=_CONTRACT_NONBLANK_PATTERN,
+    ),
+    AfterValidator(_contract_nonblank),
     AfterValidator(_valid_unicode_scalars),
 ]
 Text256 = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=256, pattern=r"\S"),
+    StringConstraints(
+        min_length=1,
+        max_length=256,
+        pattern=_CONTRACT_NONBLANK_PATTERN,
+    ),
+    AfterValidator(_contract_nonblank),
     AfterValidator(_valid_unicode_scalars),
 ]
 Text300 = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=300, pattern=r"\S"),
+    StringConstraints(
+        min_length=1,
+        max_length=300,
+        pattern=_CONTRACT_NONBLANK_PATTERN,
+    ),
+    AfterValidator(_contract_nonblank),
     AfterValidator(_valid_unicode_scalars),
 ]
 Text500 = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=500, pattern=r"\S"),
+    StringConstraints(
+        min_length=1,
+        max_length=500,
+        pattern=_CONTRACT_NONBLANK_PATTERN,
+    ),
+    AfterValidator(_contract_nonblank),
     AfterValidator(_valid_unicode_scalars),
 ]
 Text512 = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=512, pattern=r"\S"),
+    StringConstraints(
+        min_length=1,
+        max_length=512,
+        pattern=_CONTRACT_NONBLANK_PATTERN,
+    ),
+    AfterValidator(_contract_nonblank),
     AfterValidator(_valid_unicode_scalars),
 ]
 DigestText = Annotated[

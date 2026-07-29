@@ -4,6 +4,7 @@ import { z } from 'zod';
 import {
   characterIdentityBindingErrorV1,
 } from '../../character-identity-v1.js';
+import { isContractBlank } from '../../brand-scope.js';
 import { sha256Digest } from '../../factory/digest.js';
 import { deriveVoiceSpecDigestV1 } from '../../voice-spec-v1.js';
 
@@ -51,7 +52,7 @@ const boundedNonBlankString = (maxLength: number) =>
   z
     .string()
     .refine(
-      (value) => value.trim().length > 0,
+      (value) => !isContractBlank(value),
       'string must not be blank',
     )
     .refine(
