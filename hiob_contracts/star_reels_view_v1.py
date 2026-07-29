@@ -243,6 +243,26 @@ class StarReelsViewV1(BaseModel):
             raise ValueError("ready state requires final factory receipt")
         if reviewing and self.receipts.factory is not None:
             raise ValueError("review state cannot carry factory receipt")
+        factory = self.receipts.factory
+        if isinstance(factory, ReelsFactoryFailureReceiptV1):
+            expected_provider_call = factory.provider_call
+        elif isinstance(factory, ReelsFactoryProgressReceiptV1):
+            expected_provider_call = (
+                "confirmed"
+                if sum(factory.provider_attempts.model_dump().values()) > 0
+                else "none"
+            )
+        elif isinstance(factory, _ReelsFactoryReadyReceiptV1):
+            expected_provider_call = "confirmed"
+        else:
+            expected_provider_call = None
+        if (
+            expected_provider_call is not None
+            and self.provider_call != expected_provider_call
+        ):
+            raise ValueError(
+                "provider_call does not match typed factory receipt"
+            )
         return self
 
 
