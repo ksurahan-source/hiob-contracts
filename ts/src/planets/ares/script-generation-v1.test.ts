@@ -169,6 +169,18 @@ test('Ares generation uses the frozen nonblank Unicode parity set', () => {
   }
 });
 
+test('Ares generation accepts JSON integer lexical parity', () => {
+  for (const token of ['7.0', '7e0']) {
+    const value = payload();
+    const raw = JSON.stringify(value).replace(
+      '"factory_revision":7',
+      `"factory_revision":${token}`,
+    );
+    const parsed = AresScriptGenerationInputV1Schema.parse(JSON.parse(raw));
+    assert.equal(parsed.factory_revision, 7);
+  }
+});
+
 test('Ares generation digest matches the fixed Python vector', () => {
   const value = payload();
   assert.equal(

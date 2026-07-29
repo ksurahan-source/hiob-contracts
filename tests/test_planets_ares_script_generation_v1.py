@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 
 import pytest
 from pydantic import ValidationError
@@ -89,6 +90,8 @@ def test_ares_generation_output_is_exact_immutable_provider_input() -> None:
     assert parsed.memories[0].provenance == "approved_edit:rev-1"
     with pytest.raises(ValidationError):
         parsed.conflict = "mutated"
+    with pytest.raises(ValidationError):
+        parsed.model_copy(update={"current_character": "mutated"})
 
 
 @pytest.mark.parametrize(
@@ -193,6 +196,14 @@ def test_ares_generation_json_schema_describes_runtime_rejections() -> None:
     assert voice["properties"]["voice_spec_digest"]["pattern"] == (
         "^sha256:[0-9a-f]{64}$"
     )
+    assert schema["x-hiob-validation"] == "pydantic-runtime-required"
+    assert set(schema["x-hiob-semantic-invariants"]) == {
+        "character_identity_binding_digest",
+        "voice_spec_subject_matches_character",
+        "voice_spec_digest",
+        "generation_input_digest",
+        "valid_unicode_scalars",
+    }
 
 
 def test_ares_generation_unicode_length_matches_typescript_code_points() -> None:
@@ -247,6 +258,46 @@ def test_ares_generation_uses_frozen_nonblank_unicode_parity(
         ).current_character == value
     else:
         _assert_generation_invalid(payload)
+
+
+@pytest.mark.parametrize("number_token", ["7.0", "7e0"])
+def test_ares_generation_accepts_json_integer_lexical_parity(
+    number_token: str,
+) -> None:
+    payload = _payload()
+    unsigned = dict(payload)
+    unsigned["factory_revision"] = 7
+    unsigned.pop("generation_input_digest")
+    payload["generation_input_digest"] = (
+        derive_ares_script_generation_input_digest_v1(unsigned)
+    )
+    raw = json.dumps(payload, ensure_ascii=False).replace(
+        '"factory_revision": 7',
+        f'"factory_revision": {number_token}',
+    )
+
+    parsed = AresScriptGenerationInputV1.model_validate_json(raw, strict=True)
+    assert parsed.factory_revision == 7
+    assert isinstance(parsed.factory_revision, int)
+
+
+def test_ares_generation_digest_helper_has_stable_missing_field_error() -> None:
+    unsigned = _payload()
+    unsigned.pop("generation_input_digest")
+    unsigned.pop("run_id")
+
+    with pytest.raises(ValueError, match="run_id is required"):
+        derive_ares_script_generation_input_digest_v1(unsigned)
+
+
+def test_ares_generation_digest_fields_equal_the_exact_wire_body() -> None:
+    import hiob_contracts.planets.ares.script_generation_v1 as contract_module
+
+    assert contract_module._DIGEST_FIELDS == tuple(
+        field
+        for field in AresScriptGenerationInputV1.model_fields
+        if field != "generation_input_digest"
+    )
 
 
 def _assert_generation_invalid(value: dict) -> None:
