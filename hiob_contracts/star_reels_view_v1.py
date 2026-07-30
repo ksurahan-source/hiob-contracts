@@ -23,6 +23,7 @@ from .reels_factory_progress_v1 import (
     ReelsFactoryProgressReceiptV1,
     ReelsFactoryProviderAttemptsV1,
 )
+from .artemis_product_lock_v1 import ProductElementLockDraftV1
 
 
 _STRICT_FROZEN = ConfigDict(
@@ -147,6 +148,20 @@ class _StarReelsViewReceiptsV1(BaseModel):
     plan_approval: AresApprovalReceiptV1 | None
 
 
+def derive_star_product_lock_review_digest_v1(
+    draft: ProductElementLockDraftV1,
+) -> str:
+    return canonical_contract_digest_v1(
+        {
+            "contract_version": "StarProductLockReviewDigest.v1",
+            "workspace_id": draft.workspace_id,
+            "run_id": draft.run_id,
+            "compile_request_digest": draft.compile_request_digest,
+            "draft_digest": draft.draft_digest,
+        }
+    )
+
+
 class StarReelsViewV1(BaseModel):
     """Refresh-safe projection of every durable factory state."""
 
@@ -156,6 +171,7 @@ class StarReelsViewV1(BaseModel):
     section: Literal["LockGate", "ScriptReview", "PlanReview", "RunStatus"]
     status: Literal[
         "missing",
+        "awaiting_product_approval",
         "revoked",
         "digest_drift",
         "awaiting_script_approval",
@@ -166,18 +182,39 @@ class StarReelsViewV1(BaseModel):
         "failed",
     ]
     revision: int = Field(ge=0)
-    stage_output: dict[str, Any] | None
+    stage_output: ProductElementLockDraftV1 | dict[str, Any] | None
     budget: _StarReelsBudgetV1
     review_digest: DigestStr | None
     receipts: _StarReelsViewReceiptsV1
     provider_call: Literal["none", "confirmed", "unknown"]
     error: NonBlankStr | None
 
+    @field_validator("stage_output", mode="before")
+    @classmethod
+    def _freeze_product_review(
+        cls,
+        value: Any,
+    ) -> Any:
+        if (
+            isinstance(value, dict)
+            and value.get("contract_version")
+            == "ProductElementLockDraft.v1"
+        ):
+            return ProductElementLockDraftV1.model_validate(value)
+        return value
+
     @model_validator(mode="after")
     def _bind_view_shape_to_state(self) -> "StarReelsViewV1":
         valid_pair = (
             self.section == "LockGate"
-            and self.status in {"missing", "revoked", "digest_drift", "ready"}
+            and self.status
+            in {
+                "missing",
+                "awaiting_product_approval",
+                "revoked",
+                "digest_drift",
+                "ready",
+            }
         ) or (
             self.section == "ScriptReview"
             and self.status == "awaiting_script_approval"
@@ -195,13 +232,37 @@ class StarReelsViewV1(BaseModel):
             "ScriptReview",
             "PlanReview",
         }
+        product_review = (
+            self.section == "LockGate"
+            and self.status == "awaiting_product_approval"
+        )
         lock_gate = self.section == "LockGate"
-        if reviewing:
+        if reviewing or product_review:
             if self.stage_output is None or self.review_digest is None:
                 raise ValueError(
                     "review state requires stage_output and review_digest"
                 )
-            if self.provider_call != "confirmed" or self.error is not None:
+            if product_review:
+                if not isinstance(
+                    self.stage_output,
+                    ProductElementLockDraftV1,
+                ):
+                    raise ValueError(
+                        "product review requires typed product draft"
+                    )
+                if self.review_digest != (
+                    derive_star_product_lock_review_digest_v1(
+                        self.stage_output
+                    )
+                ):
+                    raise ValueError(
+                        "product review digest does not bind the draft"
+                    )
+                if self.provider_call != "none" or self.error is not None:
+                    raise ValueError(
+                        "product review cannot carry provider work or error"
+                    )
+            elif self.provider_call != "confirmed" or self.error is not None:
                 raise ValueError(
                     "review state requires one confirmed script call"
                 )
@@ -213,7 +274,11 @@ class StarReelsViewV1(BaseModel):
         if lock_gate:
             if self.provider_call != "none" or self.receipts.factory is not None:
                 raise ValueError("LockGate cannot carry provider work")
-            if (self.status == "ready") != (self.error is None):
+            lock_has_no_error = self.status in {
+                "ready",
+                "awaiting_product_approval",
+            }
+            if lock_has_no_error != (self.error is None):
                 raise ValueError("LockGate error does not match lock state")
         elif self.status == "failed":
             if (
@@ -243,7 +308,7 @@ class StarReelsViewV1(BaseModel):
             )
         ):
             raise ValueError("ready state requires final factory receipt")
-        if reviewing and self.receipts.factory is not None:
+        if (reviewing or product_review) and self.receipts.factory is not None:
             raise ValueError("review state cannot carry factory receipt")
         factory = self.receipts.factory
         if isinstance(factory, ReelsFactoryFailureReceiptV1):
@@ -268,4 +333,7 @@ class StarReelsViewV1(BaseModel):
         return self
 
 
-__all__ = ["StarReelsViewV1"]
+__all__ = [
+    "StarReelsViewV1",
+    "derive_star_product_lock_review_digest_v1",
+]

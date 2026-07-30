@@ -4,11 +4,14 @@ import pytest
 from pydantic import ValidationError
 
 from hiob_contracts import (
+    ProductElementLockDraftV1,
     StarReelsViewV1,
     canonical_contract_digest_v1,
+    derive_star_product_lock_review_digest_v1,
     derive_reels_factory_failure_receipt_digest_v1,
     derive_reels_factory_progress_receipt_digest_v1,
 )
+from hiob_contracts.factory import sha256_digest
 
 
 DIGEST = "sha256:" + "a" * 64
@@ -24,6 +27,43 @@ def _budget() -> dict[str, int]:
         "fallbacks": 0,
         "character_lock": 0,
     }
+
+
+def _product_draft() -> dict:
+    return ProductElementLockDraftV1.build(
+        workspace_id="00000000-0000-4000-8000-000000000001",
+        run_id="00000000-0000-4000-8000-000000000002",
+        brand_slug="viewok",
+        listing_slug="02-vok-original-40-2p",
+        product_id="02-vok-original-40-2p",
+        product_name="뷰오케이 아이세이프 김서림방지 물안경",
+        product_image_artifact_id="asset-product-1",
+        product_image_storage_key="products/viewok/hero.png",
+        product_image_sha256=sha256_digest("product-image"),
+        claims=[
+            {
+                "claim_id": "claim-1",
+                "text": "김서림 방지 물안경",
+                "kind": "product_fact",
+                "source_observation_ids": ["observation-1"],
+                "evidence_artifact_id": "run/catalog-facts/name",
+                "evidence_sha256": sha256_digest("catalog-name"),
+                "provenance": {
+                    "source_record_id": "run/catalog-facts/name",
+                    "quote": "김서림 방지 물안경",
+                },
+            }
+        ],
+        forbidden_claims=["치료 효과"],
+        source_observations_digest=sha256_digest("observations"),
+        compile_request_digest=sha256_digest("compile-request"),
+    ).model_dump(mode="json")
+
+
+def _product_review_digest() -> str:
+    return derive_star_product_lock_review_digest_v1(
+        ProductElementLockDraftV1.model_validate(_product_draft())
+    )
 
 
 def _progress() -> dict:
@@ -170,10 +210,76 @@ def test_review_can_report_the_confirmed_script_attempt() -> None:
     assert value.provider_call == "confirmed"
 
 
+def test_lock_gate_can_carry_one_no_provider_product_review() -> None:
+    value = StarReelsViewV1.model_validate(
+        {
+            "contract_version": "StarReelsView.v1",
+            "section": "LockGate",
+            "status": "awaiting_product_approval",
+            "revision": 0,
+            "stage_output": _product_draft(),
+            "budget": _budget(),
+            "review_digest": _product_review_digest(),
+            "receipts": {
+                "factory": None,
+                "script_approval": None,
+                "plan_approval": None,
+            },
+            "provider_call": "none",
+            "error": None,
+        }
+    )
+
+    assert value.status == "awaiting_product_approval"
+    assert value.stage_output.contract_version == (
+        "ProductElementLockDraft.v1"
+    )
+    with pytest.raises(ValidationError):
+        value.stage_output.claims[0].text = "mutated"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"stage_output": None},
+        {"review_digest": None},
+        {"provider_call": "confirmed"},
+        {"stage_output": {"contract_version": "ProductElementLockDraft.v1"}},
+    ],
+)
+def test_product_review_rejects_incomplete_or_provider_work(
+    change: dict,
+) -> None:
+    value = {
+        "contract_version": "StarReelsView.v1",
+        "section": "LockGate",
+        "status": "awaiting_product_approval",
+        "revision": 0,
+        "stage_output": _product_draft(),
+        "budget": _budget(),
+        "review_digest": _product_review_digest(),
+        "receipts": {
+            "factory": None,
+            "script_approval": None,
+            "plan_approval": None,
+        },
+        "provider_call": "none",
+        "error": None,
+    }
+
+    with pytest.raises(ValidationError):
+        StarReelsViewV1.model_validate({**value, **change})
+    with pytest.raises(ValidationError):
+        StarReelsViewV1.model_validate(
+            {**value, "review_digest": DIGEST}
+        )
+
+
 @pytest.mark.parametrize(
     ("section", "status"),
     [
         ("LockGate", "missing"),
+        ("LockGate", "awaiting_product_approval"),
         ("LockGate", "revoked"),
         ("LockGate", "digest_drift"),
         ("LockGate", "ready"),
@@ -190,8 +296,13 @@ def test_view_supports_every_refreshable_factory_state(
     status: str,
 ) -> None:
     is_review = status.startswith("awaiting_")
+    is_product_review = status == "awaiting_product_approval"
     is_failed = status == "failed"
-    is_lock_error = section == "LockGate" and status != "ready"
+    is_lock_error = section == "LockGate" and status in {
+        "missing",
+        "revoked",
+        "digest_drift",
+    }
     factory_receipt = (
         _progress()
         if status in {"pending", "rendering"}
@@ -207,9 +318,21 @@ def test_view_supports_every_refreshable_factory_state(
             "section": section,
             "status": status,
             "revision": 1,
-            "stage_output": {"revision": status} if is_review else None,
+            "stage_output": (
+                _product_draft()
+                if is_product_review
+                else {"revision": status}
+                if is_review
+                else None
+            ),
             "budget": _budget(),
-            "review_digest": DIGEST if is_review else None,
+            "review_digest": (
+                _product_review_digest()
+                if is_product_review
+                else DIGEST
+                if is_review
+                else None
+            ),
             "receipts": {
                 "factory": factory_receipt,
                 "script_approval": None,
@@ -220,7 +343,7 @@ def test_view_supports_every_refreshable_factory_state(
                 if is_failed
                 else "confirmed"
                 if status in {"pending", "rendering"}
-                or is_review
+                or (is_review and not is_product_review)
                 or (section == "RunStatus" and status == "ready")
                 else "none"
             ),
