@@ -59,7 +59,10 @@ from .reels_factory_failure_v1 import (
     ReelsFactoryFailureReceiptV1,
     derive_reels_factory_failure_receipt_digest_v1,
 )
-from .star_reels_view_v1 import StarReelsViewV1
+from .star_reels_view_v1 import (
+    StarReelsViewV1,
+    derive_star_product_lock_review_digest_v1,
+)
 from .accepted_identity_receipt_v1 import (
     AcceptedIdentityReceiptV1,
     derive_accepted_identity_receipt_digest_v1,
@@ -340,6 +343,7 @@ __all__ = [
     "ReelsFactoryFailureReceiptV1",
     "derive_reels_factory_failure_receipt_digest_v1",
     "StarReelsViewV1",
+    "derive_star_product_lock_review_digest_v1",
     "AcceptedIdentityReceiptV1",
     "derive_accepted_identity_receipt_digest_v1",
     "character_identity_binding_payload_v1",
