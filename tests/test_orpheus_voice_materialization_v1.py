@@ -140,11 +140,11 @@ def test_voice_materialization_input_accepts_real_typecast_id_form(
 @pytest.mark.parametrize(
     "source_text",
     [
-        "a" * 48,
-        "가" * 48,
+        "a" * 200,
+        "가" * 200,
     ],
 )
-def test_voice_materialization_input_accepts_five_second_text_boundaries(
+def test_voice_materialization_input_accepts_one_beat_text_boundaries(
     source_text: str,
 ) -> None:
     model = OrpheusVoiceMaterializationInputV1.model_validate(
@@ -152,23 +152,24 @@ def test_voice_materialization_input_accepts_five_second_text_boundaries(
     )
 
     assert model.source_text == source_text
-    assert len(model.source_text) <= 48
-    assert len(model.source_text.encode("utf-8")) <= 144
+    assert len(model.source_text) <= 200
+    assert len(model.source_text.encode("utf-8")) <= 600
 
 
 def test_voice_materialization_input_rejects_over_character_limit() -> None:
-    with pytest.raises(ValidationError, match="48 Unicode characters"):
+    with pytest.raises(ValidationError, match="200 Unicode characters"):
         OrpheusVoiceMaterializationInputV1.model_validate(
-            _payload(source_text="a" * 49)
+            _payload(source_text="a" * 201)
         )
 
 
 def test_voice_materialization_input_rejects_over_utf8_byte_limit() -> None:
-    source_text = "😀" * 37
-    assert len(source_text) <= 48
-    assert len(source_text.encode("utf-8")) == 148
+    # 151 emoji = 604 UTF-8 bytes, still under the 200-char ceiling.
+    source_text = "😀" * 151
+    assert len(source_text) <= 200
+    assert len(source_text.encode("utf-8")) > 600
 
-    with pytest.raises(ValidationError, match="144 UTF-8 bytes"):
+    with pytest.raises(ValidationError, match="600 UTF-8 bytes"):
         OrpheusVoiceMaterializationInputV1.model_validate(
             _payload(source_text=source_text)
         )

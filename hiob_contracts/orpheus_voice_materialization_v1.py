@@ -28,8 +28,10 @@ _INPUT_DIGEST_FIELDS = (
     "voice_receipt",
     "voice_receipt_digest",
 )
-ORPHEUS_VOICE_SOURCE_TEXT_MAX_CHARS_V1 = 48
-ORPHEUS_VOICE_SOURCE_TEXT_MAX_UTF8_BYTES_V1 = 144
+# One-beat sales reels often carry ~80–150 Hangul in a single VO beat.
+# Prior 48-char / 5s bound rejected real product scripts at plan stage.
+ORPHEUS_VOICE_SOURCE_TEXT_MAX_CHARS_V1 = 200
+ORPHEUS_VOICE_SOURCE_TEXT_MAX_UTF8_BYTES_V1 = 600
 _TYPECAST_PROVIDER_VOICE_ID = re.compile(
     r"^(?:tc|uc)_[0-9a-f]{24}$"
 )
@@ -50,13 +52,17 @@ def _sealed_provider_voice_id(value: str) -> str:
 def _bounded_source_text(value: str) -> str:
     if len(value) > ORPHEUS_VOICE_SOURCE_TEXT_MAX_CHARS_V1:
         raise ValueError(
-            "source_text must be at most 48 Unicode characters"
+            "source_text must be at most "
+            f"{ORPHEUS_VOICE_SOURCE_TEXT_MAX_CHARS_V1} Unicode characters"
         )
     if (
         len(value.encode("utf-8"))
         > ORPHEUS_VOICE_SOURCE_TEXT_MAX_UTF8_BYTES_V1
     ):
-        raise ValueError("source_text must be at most 144 UTF-8 bytes")
+        raise ValueError(
+            "source_text must be at most "
+            f"{ORPHEUS_VOICE_SOURCE_TEXT_MAX_UTF8_BYTES_V1} UTF-8 bytes"
+        )
     return value
 
 
