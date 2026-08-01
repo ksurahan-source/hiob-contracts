@@ -43,6 +43,8 @@ export const ALL_BEAT_VIDEO_CONTRACT_VERSIONS = Object.freeze({
   BeatVideoReceipt: 'BeatVideoReceipt.v1',
   BeatArtifactSetReceipt: 'BeatArtifactSetReceipt.v1',
   AtroposFanInManifest: 'AtroposFanInManifest.v2',
+  AtroposFanInManifestV2: 'AtroposFanInManifest.v2',
+  AtroposFanInManifestV3: 'AtroposFanInManifest.v3',
   HephaestusFinalRenderReceipt: 'HephaestusFinalRenderReceipt.v2',
   ReelsFactoryReceipt: 'ReelsFactoryReceipt.v2',
 } as const);
@@ -99,6 +101,10 @@ export function deriveBeatArtifactSetReceiptDigestV1(value: unknown): string {
 }
 
 export function deriveAtroposFanInManifestDigestV2(value: unknown): string {
+  return sha256Digest(withoutField(value, 'manifest_digest'));
+}
+
+export function deriveAtroposFanInManifestDigestV3(value: unknown): string {
   return sha256Digest(withoutField(value, 'manifest_digest'));
 }
 
@@ -430,6 +436,44 @@ export const AtroposFanInManifestV2Schema = z
     factory_manifest_digest: DigestSchema,
     beat_artifact_set_receipt: BeatArtifactSetReceiptV1Schema,
     video_artifacts: z.array(StrictAllBeatArtifactRefV1Schema).min(1),
+    timeline_digest: DigestSchema,
+    audio_mix_digest: DigestSchema,
+    render_policy_digest: DigestSchema,
+    manifest_digest: DigestSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const receipt = value.beat_artifact_set_receipt;
+    if (
+      receipt.workspace_id !== value.workspace_id
+      || receipt.run_id !== value.run_id
+      || receipt.factory_revision !== value.factory_revision
+      || receipt.plan_digest !== value.plan_digest
+      || receipt.paid_budget_authority_digest !== value.paid_budget_authority_digest
+      || receipt.factory_manifest_digest !== value.factory_manifest_digest
+    ) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'beat artifact set scope or digest does not match fan-in', path: ['beat_artifact_set_receipt'] });
+    }
+    const expected = receipt.video_receipts.map((item) => item.artifact);
+    if (!safelyCanonicalEqual(value.video_artifacts, expected)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'video_artifacts must exactly match ordered video receipts', path: ['video_artifacts'] });
+    }
+    if (!safelyEqualsDigest(value.manifest_digest, () => deriveAtroposFanInManifestDigestV2(value))) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'manifest_digest does not match Atropos fan-in', path: ['manifest_digest'] });
+    }
+  });
+
+export const AtroposFanInManifestV3Schema = z
+  .object({
+    contract_version: z.literal('AtroposFanInManifest.v3'),
+    workspace_id: UuidString,
+    run_id: UuidString,
+    factory_revision: NonNegativeSafeInteger,
+    plan_digest: DigestSchema,
+    paid_budget_authority_digest: DigestSchema,
+    factory_manifest_digest: DigestSchema,
+    beat_artifact_set_receipt: BeatArtifactSetReceiptV1Schema,
+    video_artifacts: z.array(StrictAllBeatArtifactRefV1Schema).min(1),
     audio_artifacts: z.array(StrictAllBeatArtifactRefV1Schema).min(1),
     timeline_digest: DigestSchema,
     audio_mix_digest: DigestSchema,
@@ -460,11 +504,13 @@ export const AtroposFanInManifestV2Schema = z
     const videoBeats = value.video_artifacts.map((artifact) => artifact.beat_index);
     const artifactIds = value.audio_artifacts.map((artifact) => artifact.artifact_id);
     const artifactDigests = value.audio_artifacts.map((artifact) => artifact.sha256);
+    const artifactUris = value.audio_artifacts.map((artifact) => artifact.uri);
     if (
       !safelyCanonicalEqual(audioBeats, videoBeats)
       || new Set(audioBeats).size !== audioBeats.length
       || new Set(artifactIds).size !== artifactIds.length
       || new Set(artifactDigests).size !== artifactDigests.length
+      || new Set(artifactUris).size !== artifactUris.length
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -479,7 +525,7 @@ export const AtroposFanInManifestV2Schema = z
         path: ['audio_mix_digest'],
       });
     }
-    if (!safelyEqualsDigest(value.manifest_digest, () => deriveAtroposFanInManifestDigestV2(value))) {
+    if (!safelyEqualsDigest(value.manifest_digest, () => deriveAtroposFanInManifestDigestV3(value))) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'manifest_digest does not match Atropos fan-in', path: ['manifest_digest'] });
     }
   });
@@ -618,7 +664,7 @@ export function reelsFactoryReceiptBindsChainV2(
   factory: ReelsFactoryReceiptV2,
   manifest: FactoryBeatManifestV1,
   artifactSet: BeatArtifactSetReceiptV1,
-  fanIn: AtroposFanInManifestV2,
+  fanIn: AtroposFanInManifestV2 | AtroposFanInManifestV3,
 ): boolean {
   const scope = [factory.workspace_id, factory.run_id, factory.factory_revision,
     factory.plan_digest, factory.paid_budget_authority_digest, factory.factory_manifest_digest];
@@ -645,5 +691,6 @@ export type BeatVideoRequestV1 = z.infer<typeof BeatVideoRequestV1Schema>;
 export type BeatVideoReceiptV1 = z.infer<typeof BeatVideoReceiptV1Schema>;
 export type BeatArtifactSetReceiptV1 = z.infer<typeof BeatArtifactSetReceiptV1Schema>;
 export type AtroposFanInManifestV2 = z.infer<typeof AtroposFanInManifestV2Schema>;
+export type AtroposFanInManifestV3 = z.infer<typeof AtroposFanInManifestV3Schema>;
 export type HephaestusFinalRenderReceiptV2 = z.infer<typeof HephaestusFinalRenderReceiptV2Schema>;
 export type ReelsFactoryReceiptV2 = z.infer<typeof ReelsFactoryReceiptV2Schema>;

@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   AtroposFanInManifestV2Schema,
+  AtroposFanInManifestV3Schema,
   BeatArtifactSetReceiptV1Schema,
   BeatVideoReceiptV1Schema,
   BeatVideoRequestV1Schema,
@@ -13,6 +14,7 @@ import {
   reelsFactoryReceiptBindsChainV2,
   deriveFactoryBeatManifestIdempotencyKeyV1,
   deriveAtroposFanInManifestDigestV2,
+  deriveAtroposFanInManifestDigestV3,
   deriveBeatArtifactSetReceiptDigestV1,
   deriveBeatVideoReceiptDigestV1,
   deriveBeatVideoRequestDigestV1,
@@ -26,6 +28,7 @@ const workspaceId = '00000000-0000-4000-8000-000000000001';
 const runId = '00000000-0000-4000-8000-000000000002';
 const planDigest = sha256Digest({ plan: 'approved-v2' });
 const timelineDigest = sha256Digest({ timeline: 'all-beats' });
+const audioMixDigest = sha256Digest({ audio: 'sealed-mix' });
 const renderPolicyDigest = sha256Digest({ render: 'vertical-1080p' });
 const authorityDigest = sha256Digest({ authority: 'paid-all-beats' });
 
@@ -157,13 +160,32 @@ function artifactSet() {
   return { ...body, receipt_digest: deriveBeatArtifactSetReceiptDigestV1(body) };
 }
 
-function fanIn() {
+function fanInV2() {
+  const setReceipt = artifactSet();
+  const body = {
+    contract_version: 'AtroposFanInManifest.v2' as const,
+    workspace_id: workspaceId,
+    run_id: runId,
+    factory_revision: setReceipt.factory_revision,
+    plan_digest: planDigest,
+    paid_budget_authority_digest: authorityDigest,
+    factory_manifest_digest: setReceipt.factory_manifest_digest,
+    beat_artifact_set_receipt: setReceipt,
+    video_artifacts: setReceipt.video_receipts.map((receipt) => receipt.artifact),
+    timeline_digest: timelineDigest,
+    audio_mix_digest: audioMixDigest,
+    render_policy_digest: renderPolicyDigest,
+  };
+  return { ...body, manifest_digest: deriveAtroposFanInManifestDigestV2(body) };
+}
+
+function fanInV3() {
   const setReceipt = artifactSet();
   const audioArtifacts = [0, 1].map((beatIndex) => (
     artifact(beatIndex, 'audio', `voice-${beatIndex}.mp3`, `audio-${beatIndex}`, 5000)
   ));
   const body = {
-    contract_version: 'AtroposFanInManifest.v2' as const,
+    contract_version: 'AtroposFanInManifest.v3' as const,
     workspace_id: workspaceId,
     run_id: runId,
     factory_revision: setReceipt.factory_revision,
@@ -177,11 +199,12 @@ function fanIn() {
     audio_mix_digest: sha256Digest({ audio_artifacts: audioArtifacts }),
     render_policy_digest: renderPolicyDigest,
   };
-  return { ...body, manifest_digest: deriveAtroposFanInManifestDigestV2(body) };
+  return { ...body, manifest_digest: deriveAtroposFanInManifestDigestV3(body) };
 }
 
-function finalRender() {
-  const fanInManifest = fanIn();
+function finalRender(
+  fanInManifest: ReturnType<typeof fanInV2> | ReturnType<typeof fanInV3> = fanInV3(),
+) {
   const body = {
     contract_version: 'HephaestusFinalRenderReceipt.v2' as const,
     workspace_id: workspaceId,
@@ -197,11 +220,12 @@ function finalRender() {
   return { ...body, receipt_digest: deriveHephaestusFinalRenderReceiptDigestV2(body) };
 }
 
-function factoryReceipt() {
+function factoryReceipt(
+  fanInManifest: ReturnType<typeof fanInV2> | ReturnType<typeof fanInV3> = fanInV3(),
+) {
   const factoryManifest = manifest();
   const setReceipt = artifactSet();
-  const fanInManifest = fanIn();
-  const render = finalRender();
+  const render = finalRender(fanInManifest);
   const body = {
     contract_version: 'ReelsFactoryReceipt.v2' as const,
     workspace_id: workspaceId,
@@ -225,14 +249,36 @@ test('TypeScript mirror accepts the complete all-beat chain', () => {
   BeatVideoRequestV1Schema.parse(request(0));
   BeatVideoReceiptV1Schema.parse(videoReceipt(0));
   BeatArtifactSetReceiptV1Schema.parse(artifactSet());
-  AtroposFanInManifestV2Schema.parse(fanIn());
+  AtroposFanInManifestV3Schema.parse(fanInV3());
   HephaestusFinalRenderReceiptV2Schema.parse(finalRender());
   const parsedSet = BeatArtifactSetReceiptV1Schema.parse(artifactSet());
-  const parsedFanIn = AtroposFanInManifestV2Schema.parse(fanIn());
+  const parsedFanIn = AtroposFanInManifestV3Schema.parse(fanInV3());
   const result = ReelsFactoryReceiptV2Schema.parse(factoryReceipt());
   assert.equal(result.status, 'succeeded');
   assert.deepEqual(parsedFanIn.audio_artifacts.map((item) => item.beat_index), [0, 1]);
   assert.equal(reelsFactoryReceiptBindsChainV2(result, parsedManifest, parsedSet, parsedFanIn), true);
+});
+
+test('stored V2 fan-in and factory receipt remain byte-compatible', () => {
+  const fanInManifest = AtroposFanInManifestV2Schema.parse(fanInV2());
+  const result = ReelsFactoryReceiptV2Schema.parse(factoryReceipt(fanInV2()));
+  assert.equal(
+    fanInManifest.manifest_digest,
+    'sha256:5898d7f56f6cf323fc099e3a3bc1181caf4adf203927541a0ec0a2784417b268',
+  );
+  assert.equal(
+    result.receipt_digest,
+    'sha256:8aaa8f391e121cffe978c0c2026ef3b10b0ebd06fefd520da440c437447bbd6f',
+  );
+  assert.equal(reelsFactoryReceiptBindsChainV2(
+    result,
+    FactoryBeatManifestV1Schema.parse(manifest()),
+    BeatArtifactSetReceiptV1Schema.parse(artifactSet()),
+    fanInManifest,
+  ), true);
+  assert.equal(AtroposFanInManifestV2Schema.safeParse({
+    ...fanInV2(), audio_artifacts: fanInV3().audio_artifacts,
+  }).success, false);
 });
 
 test('mirror rejects a rehashed request that drifts from its manifest beat', () => {
@@ -300,35 +346,38 @@ test('TypeScript mirror rejects gaps, partial fan-in, and output substitution', 
   assert.equal(ReelsFactoryReceiptV2Schema.safeParse(substituted).success, false);
 });
 
-test('TypeScript mirror rejects invalid or misbound fan-in audio artifacts', () => {
+test('TypeScript mirror rejects invalid or misbound V3 fan-in audio artifacts', () => {
   for (const mutate of [
-    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].kind = 'video'; },
-    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].mime = 'application/octet-stream'; },
-    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].mime = 'audio/ '; },
-    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].bytes_len = 0; },
-    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].duration_ms = 0; },
-    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].width = 1; },
-    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts.reverse(); },
-    (value: ReturnType<typeof fanIn>) => {
+    (value: ReturnType<typeof fanInV3>) => { value.audio_artifacts[0].kind = 'video'; },
+    (value: ReturnType<typeof fanInV3>) => { value.audio_artifacts[0].mime = 'application/octet-stream'; },
+    (value: ReturnType<typeof fanInV3>) => { value.audio_artifacts[0].mime = 'audio/ '; },
+    (value: ReturnType<typeof fanInV3>) => { value.audio_artifacts[0].bytes_len = 0; },
+    (value: ReturnType<typeof fanInV3>) => { value.audio_artifacts[0].duration_ms = 0; },
+    (value: ReturnType<typeof fanInV3>) => { value.audio_artifacts[0].width = 1; },
+    (value: ReturnType<typeof fanInV3>) => { value.audio_artifacts.reverse(); },
+    (value: ReturnType<typeof fanInV3>) => {
       value.audio_artifacts[1].artifact_id = value.audio_artifacts[0].artifact_id;
     },
-    (value: ReturnType<typeof fanIn>) => {
+    (value: ReturnType<typeof fanInV3>) => {
       value.audio_artifacts[1].sha256 = value.audio_artifacts[0].sha256;
     },
+    (value: ReturnType<typeof fanInV3>) => {
+      value.audio_artifacts[1].uri = value.audio_artifacts[0].uri;
+    },
   ]) {
-    const invalid = fanIn();
+    const invalid = fanInV3();
     mutate(invalid);
     invalid.audio_mix_digest = sha256Digest({ audio_artifacts: invalid.audio_artifacts });
-    invalid.manifest_digest = deriveAtroposFanInManifestDigestV2(invalid);
-    assert.equal(AtroposFanInManifestV2Schema.safeParse(invalid).success, false);
+    invalid.manifest_digest = deriveAtroposFanInManifestDigestV3(invalid);
+    assert.equal(AtroposFanInManifestV3Schema.safeParse(invalid).success, false);
   }
 });
 
 test('TypeScript mirror binds audio_mix_digest to ordered audio artifacts', () => {
-  const invalid = fanIn();
+  const invalid = fanInV3();
   invalid.audio_mix_digest = sha256Digest({ audio_artifacts: [] });
-  invalid.manifest_digest = deriveAtroposFanInManifestDigestV2(invalid);
-  assert.equal(AtroposFanInManifestV2Schema.safeParse(invalid).success, false);
+  invalid.manifest_digest = deriveAtroposFanInManifestDigestV3(invalid);
+  assert.equal(AtroposFanInManifestV3Schema.safeParse(invalid).success, false);
 });
 
 test('Python-authoritative canonical digest vectors remain byte-identical', () => {
@@ -338,6 +387,10 @@ test('Python-authoritative canonical digest vectors remain byte-identical', () =
   );
   assert.equal(
     factoryReceipt().receipt_digest,
-    'sha256:72e9d8b5ffe447eff97bc8a28b65df3ad6d43dcdfe2cf9a0f7eccb7e7c39ad5a',
+    'sha256:02811fe85bebbef85965088d8361527579c8d0eb6b8100c1601be3f6c142db6d',
+  );
+  assert.equal(
+    factoryReceipt(fanInV2()).receipt_digest,
+    'sha256:8aaa8f391e121cffe978c0c2026ef3b10b0ebd06fefd520da440c437447bbd6f',
   );
 });

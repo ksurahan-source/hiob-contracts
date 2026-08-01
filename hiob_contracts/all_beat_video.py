@@ -5,7 +5,7 @@ The chain is intentionally success-only at receipt boundaries:
     FactoryBeatManifest.v1
       -> BeatVideoRequest.v1 / BeatVideoReceipt.v1 (one per beat)
       -> BeatArtifactSetReceipt.v1
-      -> AtroposFanInManifest.v2
+      -> AtroposFanInManifest.v2 / AtroposFanInManifest.v3
       -> HephaestusFinalRenderReceipt.v2
       -> ReelsFactoryReceipt.v2
 
@@ -46,6 +46,8 @@ ALL_BEAT_VIDEO_CONTRACT_VERSIONS = {
     "BeatVideoReceipt": "BeatVideoReceipt.v1",
     "BeatArtifactSetReceipt": "BeatArtifactSetReceipt.v1",
     "AtroposFanInManifest": "AtroposFanInManifest.v2",
+    "AtroposFanInManifestV2": "AtroposFanInManifest.v2",
+    "AtroposFanInManifestV3": "AtroposFanInManifest.v3",
     "HephaestusFinalRenderReceipt": "HephaestusFinalRenderReceipt.v2",
     "ReelsFactoryReceipt": "ReelsFactoryReceipt.v2",
 }
@@ -242,6 +244,12 @@ def derive_beat_artifact_set_receipt_digest_v1(
 
 
 def derive_atropos_fan_in_manifest_digest_v2(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return _derive_digest(value, "manifest_digest")
+
+
+def derive_atropos_fan_in_manifest_digest_v3(
     value: Mapping[str, Any] | BaseModel,
 ) -> str:
     return _derive_digest(value, "manifest_digest")
@@ -483,13 +491,12 @@ class AtroposFanInManifestV2(BaseModel):
     factory_manifest_digest: DigestStr
     beat_artifact_set_receipt: BeatArtifactSetReceiptV1
     video_artifacts: tuple[StrictAllBeatArtifactRefV1, ...] = Field(min_length=1)
-    audio_artifacts: tuple[StrictAllBeatArtifactRefV1, ...] = Field(min_length=1)
     timeline_digest: DigestStr
     audio_mix_digest: DigestStr
     render_policy_digest: DigestStr
     manifest_digest: DigestStr
 
-    @field_validator("video_artifacts", "audio_artifacts", mode="before")
+    @field_validator("video_artifacts", mode="before")
     @classmethod
     def _artifacts_tuple(cls, value: Any) -> Any:
         return _as_tuple(value)
@@ -509,6 +516,27 @@ class AtroposFanInManifestV2(BaseModel):
         expected = tuple(item.artifact for item in receipt.video_receipts)
         if self.video_artifacts != expected:
             raise ValueError("video_artifacts must exactly match ordered video receipts")
+        if self.manifest_digest != derive_atropos_fan_in_manifest_digest_v2(self):
+            raise ValueError("manifest_digest does not match Atropos fan-in")
+        return self
+
+
+class AtroposFanInManifestV3(AtroposFanInManifestV2):
+    """Strict fan-in binding ordered audio artifacts and their mix digest."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["AtroposFanInManifest.v3"]
+    audio_artifacts: tuple[StrictAllBeatArtifactRefV1, ...] = Field(min_length=1)
+
+    @field_validator("audio_artifacts", mode="before")
+    @classmethod
+    def _audio_tuple(cls, value: Any) -> Any:
+        return _as_tuple(value)
+
+    @model_validator(mode="after")
+    def _bind_fan_in(self) -> "AtroposFanInManifestV3":
+        super()._bind_fan_in()
         for artifact in self.audio_artifacts:
             _assert_audio_artifact(artifact)
         audio_beats = tuple(artifact.beat_index for artifact in self.audio_artifacts)
@@ -520,21 +548,22 @@ class AtroposFanInManifestV2(BaseModel):
             != len(self.audio_artifacts)
             or len({artifact.sha256 for artifact in self.audio_artifacts})
             != len(self.audio_artifacts)
+            or len({artifact.uri for artifact in self.audio_artifacts})
+            != len(self.audio_artifacts)
         ):
             raise ValueError(
                 "audio_artifacts must uniquely match ordered video artifact beats"
             )
         expected_audio_mix_digest = canonical_contract_digest_v1({
             "audio_artifacts": [
-                artifact.model_dump(mode="json")
-                for artifact in self.audio_artifacts
+                artifact.model_dump(mode="json") for artifact in self.audio_artifacts
             ]
         })
         if self.audio_mix_digest != expected_audio_mix_digest:
             raise ValueError(
                 "audio_mix_digest must exactly bind ordered audio_artifacts"
             )
-        if self.manifest_digest != derive_atropos_fan_in_manifest_digest_v2(self):
+        if self.manifest_digest != derive_atropos_fan_in_manifest_digest_v3(self):
             raise ValueError("manifest_digest does not match Atropos fan-in")
         return self
 
@@ -692,7 +721,7 @@ def reels_factory_receipt_binds_chain_v2(
     factory: ReelsFactoryReceiptV2,
     manifest: FactoryBeatManifestV1,
     artifact_set: BeatArtifactSetReceiptV1,
-    fan_in: AtroposFanInManifestV2,
+    fan_in: AtroposFanInManifestV2 | AtroposFanInManifestV3,
 ) -> bool:
     scope = (
         factory.workspace_id,
@@ -737,6 +766,7 @@ __all__ = [
     "BeatVideoReceiptV1",
     "BeatArtifactSetReceiptV1",
     "AtroposFanInManifestV2",
+    "AtroposFanInManifestV3",
     "HephaestusFinalRenderReceiptV2",
     "ReelsFactoryReceiptV2",
     "derive_factory_beat_manifest_digest_v1",
@@ -745,6 +775,7 @@ __all__ = [
     "derive_beat_video_receipt_digest_v1",
     "derive_beat_artifact_set_receipt_digest_v1",
     "derive_atropos_fan_in_manifest_digest_v2",
+    "derive_atropos_fan_in_manifest_digest_v3",
     "derive_hephaestus_final_render_receipt_digest_v2",
     "derive_reels_factory_receipt_digest_v2",
     "factory_beat_manifest_binds_paid_authority_v1",
