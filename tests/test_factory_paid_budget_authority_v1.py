@@ -23,6 +23,8 @@ from hiob_contracts import (
     sha256_digest,
     validate_payload,
     factory_beat_manifest_binds_paid_authority_v1,
+    factory_beat_manifest_structurally_binds_paid_authority_v1,
+    require_factory_beat_manifest_paid_authority_v1,
 )
 
 
@@ -167,6 +169,14 @@ def test_verified_authority_is_nonserializable_capability_and_manifest_guard() -
     )
     assert factory_beat_manifest_binds_paid_authority_v1(manifest, verified)
     assert not factory_beat_manifest_binds_paid_authority_v1(manifest, parsed)
+    assert factory_beat_manifest_structurally_binds_paid_authority_v1(
+        manifest, parsed
+    )
+    assert require_factory_beat_manifest_paid_authority_v1(
+        manifest, verified
+    ) is verified
+    with pytest.raises(TypeError, match="VerifiedFactoryPaidBudgetAuthority"):
+        require_factory_beat_manifest_paid_authority_v1(manifest, parsed)
 
 
 def test_cost_profile_and_current_pricing_revision_are_sealed_everywhere() -> None:
@@ -281,6 +291,8 @@ def test_authority_requires_uppercase_iso_currency(currency: str) -> None:
         "all_beat_count",
         "max_total_cost_microunits",
         "currency",
+        "cost_profile_digest",
+        "pricing_policy_revision",
         "approval_receipt_id",
         "approval_receipt_digest",
     ],
@@ -291,6 +303,8 @@ def test_approval_subject_and_authority_fail_closed_on_tamper(field: str) -> Non
         "all_beat_count": 12,
         "max_total_cost_microunits": 13_000_000,
         "currency": "KRW",
+        "cost_profile_digest": sha256_digest({"pricing": "other"}),
+        "pricing_policy_revision": 4,
         "approval_receipt_id": "approval-other",
         "approval_receipt_digest": sha256_digest({"approval": "other"}),
     }[field]
@@ -361,6 +375,10 @@ def test_distinct_budget_or_approval_mints_distinct_idempotency() -> None:
     base = _authority()
     changed_count = _authority(all_beat_count=12)
     changed_cost = _authority(max_total_cost_microunits=13_000_000)
+    changed_profile = _authority(
+        cost_profile_digest=sha256_digest({"pricing": "next"})
+    )
+    changed_pricing_revision = _authority(pricing_policy_revision=4)
     changed_receipt = _authority(
         approval_receipt_id="approval-paid-budget-2",
         approval_receipt_digest=sha256_digest({"approval": "paid-budget-v2"}),
@@ -371,9 +389,11 @@ def test_distinct_budget_or_approval_mints_distinct_idempotency() -> None:
             base["idempotency_key"],
             changed_count["idempotency_key"],
             changed_cost["idempotency_key"],
+            changed_profile["idempotency_key"],
+            changed_pricing_revision["idempotency_key"],
             changed_receipt["idempotency_key"],
         }
-    ) == 4
+    ) == 6
 
 
 @pytest.mark.parametrize(
@@ -406,12 +426,12 @@ def test_registry_exposes_fail_loud_consumer_surface() -> None:
 def test_python_typescript_digest_vectors_are_stable() -> None:
     value = _authority()
     assert value["approval_subject_digest"] == (
-        "sha256:0064203849c310151ff1e8b3ecc478e27d28294e4119b81366c568f8df25b9db"
+        "sha256:860647e42e99dec7d580e5a323207e617f1351bfe5d20b20b99e77edc4cc55a4"
     )
     assert value["idempotency_key"] == (
-        "sha256:83f4b2491567bbea3b86b971f1bd4613a5ebc2ee3d96060dcac9301689e0063a"
+        "sha256:692f716bcad148945500ca48292ab1aee705bf128de1f2515a2d9449e1308ba1"
     )
     assert value["authority_digest"] == (
-        "sha256:57bf474f67bddce6272f5540dd45cdf1cb4cd7cfa0119c274f22d8ce8b7899af"
+        "sha256:c2cdbc6b4111fbba80ff3bea160d8391f4461eb1ae364f29c5bed3e8a2721e8b"
     )
     derive_factory_paid_budget_approval_receipt_digest_v1,

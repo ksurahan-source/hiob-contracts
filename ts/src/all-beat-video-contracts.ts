@@ -3,7 +3,10 @@ import { z } from 'zod';
 
 import { DIGEST_RE, sha256Digest } from './factory/digest.js';
 import { assertStrictCanonicalValue, strictUtcMicros } from './strict-contract-value.js';
-import type { FactoryPaidBudgetAuthorityV1 } from './factory-paid-budget-authority-v1.js';
+import {
+  VerifiedFactoryPaidBudgetAuthorityV1,
+  type FactoryPaidBudgetAuthorityV1,
+} from './factory-paid-budget-authority-v1.js';
 
 const DigestSchema = z.string().regex(DIGEST_RE);
 const NonBlankString = z.string().refine((value) => value.trim().length > 0, 'string must not be blank');
@@ -483,7 +486,7 @@ function isCredentialFreeHttpsUrl(value: string): boolean {
   } catch { return false; }
 }
 
-export function factoryBeatManifestBindsPaidAuthorityV1(
+export function factoryBeatManifestStructurallyBindsPaidAuthorityV1(
   manifest: FactoryBeatManifestV1,
   authority: FactoryPaidBudgetAuthorityV1,
 ): boolean {
@@ -492,6 +495,29 @@ export function factoryBeatManifestBindsPaidAuthorityV1(
     && manifest.factory_revision === authority.factory_revision
     && manifest.beats.length === authority.all_beat_count
     && manifest.paid_budget_authority_digest === authority.authority_digest;
+}
+
+export function factoryBeatManifestBindsPaidAuthorityV1(
+  manifest: FactoryBeatManifestV1,
+  authority: unknown,
+): boolean {
+  return authority instanceof VerifiedFactoryPaidBudgetAuthorityV1
+    && factoryBeatManifestStructurallyBindsPaidAuthorityV1(
+      manifest, authority.authority,
+    );
+}
+
+export function requireFactoryBeatManifestPaidAuthorityV1(
+  manifest: FactoryBeatManifestV1,
+  authority: unknown,
+): VerifiedFactoryPaidBudgetAuthorityV1 {
+  if (!(authority instanceof VerifiedFactoryPaidBudgetAuthorityV1)) {
+    throw new TypeError('execution requires VerifiedFactoryPaidBudgetAuthorityV1');
+  }
+  if (!factoryBeatManifestBindsPaidAuthorityV1(manifest, authority)) {
+    throw new TypeError('verified paid authority does not bind factory manifest');
+  }
+  return authority;
 }
 
 export function beatVideoRequestBindsManifestV1(

@@ -30,7 +30,10 @@ from .ares_script_revision_v1 import (
     _FROZEN_STRICT,
     canonical_contract_digest_v1,
 )
-from .factory_paid_budget_authority_v1 import FactoryPaidBudgetAuthorityV1
+from .factory_paid_budget_authority_v1 import (
+    FactoryPaidBudgetAuthorityV1,
+    VerifiedFactoryPaidBudgetAuthorityV1,
+)
 
 
 PositiveInt = Annotated[int, Field(gt=0, le=9_007_199_254_740_991)]
@@ -568,10 +571,12 @@ class ReelsFactoryReceiptV2(BaseModel):
         return self
 
 
-def factory_beat_manifest_binds_paid_authority_v1(
+def factory_beat_manifest_structurally_binds_paid_authority_v1(
     manifest: FactoryBeatManifestV1,
     authority: FactoryPaidBudgetAuthorityV1,
 ) -> bool:
+    """Compare sealed wire data only; this does not authorize paid execution."""
+
     return (
         manifest.workspace_id == authority.workspace_id
         and manifest.run_id == authority.run_id
@@ -579,6 +584,33 @@ def factory_beat_manifest_binds_paid_authority_v1(
         and len(manifest.beats) == authority.all_beat_count
         and manifest.paid_budget_authority_digest == authority.authority_digest
     )
+
+
+def factory_beat_manifest_binds_paid_authority_v1(
+    manifest: FactoryBeatManifestV1,
+    authority: object,
+) -> bool:
+    """Authorize binding only when durable verification minted the capability."""
+
+    return (
+        isinstance(authority, VerifiedFactoryPaidBudgetAuthorityV1)
+        and factory_beat_manifest_structurally_binds_paid_authority_v1(
+            manifest, authority.authority
+        )
+    )
+
+
+def require_factory_beat_manifest_paid_authority_v1(
+    manifest: FactoryBeatManifestV1,
+    authority: object,
+) -> VerifiedFactoryPaidBudgetAuthorityV1:
+    """Fail-closed execution guard; raw parsed authority data is rejected."""
+
+    if not isinstance(authority, VerifiedFactoryPaidBudgetAuthorityV1):
+        raise TypeError("execution requires VerifiedFactoryPaidBudgetAuthorityV1")
+    if not factory_beat_manifest_binds_paid_authority_v1(manifest, authority):
+        raise ValueError("verified paid authority does not bind factory manifest")
+    return authority
 
 
 def beat_video_request_binds_manifest_v1(
@@ -668,6 +700,8 @@ __all__ = [
     "derive_hephaestus_final_render_receipt_digest_v2",
     "derive_reels_factory_receipt_digest_v2",
     "factory_beat_manifest_binds_paid_authority_v1",
+    "factory_beat_manifest_structurally_binds_paid_authority_v1",
+    "require_factory_beat_manifest_paid_authority_v1",
     "beat_video_request_binds_manifest_v1",
     "reels_factory_receipt_binds_chain_v2",
 ]

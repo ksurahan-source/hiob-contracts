@@ -88,6 +88,8 @@ def derive_factory_paid_budget_approval_subject_digest_v1(
                 "max_total_cost_microunits"
             ],
             "currency": data["currency"],
+            "cost_profile_digest": data["cost_profile_digest"],
+            "pricing_policy_revision": data["pricing_policy_revision"],
         }
     )
 
@@ -107,6 +109,8 @@ def derive_factory_paid_budget_idempotency_key_v1(
             "approval_subject_digest": data["approval_subject_digest"],
             "approval_receipt_id": data["approval_receipt_id"],
             "approval_receipt_digest": data["approval_receipt_digest"],
+            "cost_profile_digest": data["cost_profile_digest"],
+            "pricing_policy_revision": data["pricing_policy_revision"],
         }
     )
 
@@ -138,6 +142,8 @@ class FactoryPaidBudgetApprovalResolverV1(Protocol):
         policy_version: str,
         approval_subject_digest: str,
         approver_account_id: str,
+        cost_profile_digest: str,
+        pricing_policy_revision: int,
     ) -> bool: ...
 
 
@@ -154,6 +160,8 @@ class FactoryPaidBudgetAuthorityV1(BaseModel):
     paid_calls: FactoryPaidCallCardinalityV1
     max_total_cost_microunits: PositiveSafeInt
     currency: CurrencyCode
+    cost_profile_digest: DigestStr
+    pricing_policy_revision: NonNegativeInt
     approval_receipt_id: NonBlankStr
     approval_receipt_digest: DigestStr
     approval_subject_digest: DigestStr
@@ -200,13 +208,44 @@ class FactoryPaidBudgetAuthorityV1(BaseModel):
         approval_receipt: "FactoryPaidBudgetApprovalReceiptV1",
         at_utc: str,
         resolver: FactoryPaidBudgetApprovalResolverV1,
-    ) -> "FactoryPaidBudgetAuthorityV1":
+    ) -> "VerifiedFactoryPaidBudgetAuthorityV1":
         authority = cls.model_validate(_as_json_dict(value))
         if not approval_receipt.authorizes(
             authority, at_utc=at_utc, resolver=resolver
         ):
             raise ValueError("authority requires current durable approval")
-        return authority
+        return VerifiedFactoryPaidBudgetAuthorityV1(
+            authority, _token=_VERIFIED_AUTHORITY_TOKEN
+        )
+
+
+_VERIFIED_AUTHORITY_TOKEN = object()
+
+
+class VerifiedFactoryPaidBudgetAuthorityV1:
+    """In-process paid capability; deliberately not a wire contract."""
+
+    __slots__ = ("__authority",)
+
+    def __init__(
+        self,
+        authority: FactoryPaidBudgetAuthorityV1,
+        *,
+        _token: object,
+    ) -> None:
+        if _token is not _VERIFIED_AUTHORITY_TOKEN:
+            raise TypeError("verified authority can only be minted by from_verified")
+        self.__authority = authority
+
+    @property
+    def authority(self) -> FactoryPaidBudgetAuthorityV1:
+        return self.__authority
+
+    def __reduce_ex__(self, _protocol: int) -> object:
+        raise TypeError("verified paid authority is not serializable")
+
+    def __repr__(self) -> str:
+        return "VerifiedFactoryPaidBudgetAuthorityV1(<sealed>)"
 
 
 class FactoryPaidBudgetApprovalReceiptV1(BaseModel):
@@ -223,6 +262,8 @@ class FactoryPaidBudgetApprovalReceiptV1(BaseModel):
     paid_calls: FactoryPaidCallCardinalityV1
     max_total_cost_microunits: PositiveSafeInt
     currency: CurrencyCode
+    cost_profile_digest: DigestStr
+    pricing_policy_revision: NonNegativeInt
     approval_subject_digest: DigestStr
     approver_account_id: NonBlankStr
     decision: Literal["approved"]
@@ -272,6 +313,9 @@ class FactoryPaidBudgetApprovalReceiptV1(BaseModel):
             and self.max_total_cost_microunits
             == authority.max_total_cost_microunits
             and self.currency == authority.currency
+            and self.cost_profile_digest == authority.cost_profile_digest
+            and self.pricing_policy_revision
+            == authority.pricing_policy_revision
             and self.approval_subject_digest == authority.approval_subject_digest
         )
 
@@ -301,6 +345,8 @@ class FactoryPaidBudgetApprovalReceiptV1(BaseModel):
             policy_version=self.policy_version,
             approval_subject_digest=self.approval_subject_digest,
             approver_account_id=self.approver_account_id,
+            cost_profile_digest=self.cost_profile_digest,
+            pricing_policy_revision=self.pricing_policy_revision,
         )
 
 
@@ -312,10 +358,12 @@ def build_factory_paid_budget_authority_v1(
     all_beat_count: int,
     max_total_cost_microunits: int,
     currency: str,
+    cost_profile_digest: str,
+    pricing_policy_revision: int,
     approval_receipt: FactoryPaidBudgetApprovalReceiptV1,
     at_utc: str,
     resolver: FactoryPaidBudgetApprovalResolverV1,
-) -> FactoryPaidBudgetAuthorityV1:
+) -> VerifiedFactoryPaidBudgetAuthorityV1:
     """Build only from a typed, current, durable approval receipt."""
 
     body: dict[str, Any] = {
@@ -327,6 +375,8 @@ def build_factory_paid_budget_authority_v1(
         "paid_calls": factory_paid_call_cardinality_v1(all_beat_count),
         "max_total_cost_microunits": max_total_cost_microunits,
         "currency": currency,
+        "cost_profile_digest": cost_profile_digest,
+        "pricing_policy_revision": pricing_policy_revision,
         "approval_receipt_id": approval_receipt.receipt_id,
         "approval_receipt_digest": approval_receipt.receipt_digest,
     }
@@ -354,6 +404,7 @@ __all__ = [
     "FactoryPaidBudgetApprovalResolverV1",
     "FactoryPaidBudgetApprovalReceiptV1",
     "FactoryPaidBudgetAuthorityV1",
+    "VerifiedFactoryPaidBudgetAuthorityV1",
     "factory_paid_call_cardinality_v1",
     "derive_factory_paid_budget_approval_subject_digest_v1",
     "derive_factory_paid_budget_idempotency_key_v1",

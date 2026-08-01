@@ -13,6 +13,8 @@ import {
   deriveFactoryPaidBudgetAuthorityDigestV1,
   deriveFactoryPaidBudgetIdempotencyKeyV1,
   factoryBeatManifestBindsPaidAuthorityV1,
+  factoryBeatManifestStructurallyBindsPaidAuthorityV1,
+  requireFactoryBeatManifestPaidAuthorityV1,
 } from './index.js';
 import { sha256Digest } from './factory/digest.js';
 
@@ -54,6 +56,8 @@ function authority(overrides: Record<string, unknown> = {}) {
     all_beat_count: 5,
     max_total_cost_microunits: 12_500_000,
     currency: 'USD',
+    cost_profile_digest: costProfileDigest,
+    pricing_policy_revision: 3,
     approval_receipt: receipt,
     at_utc: '2026-08-01T08:00:00Z',
     resolver,
@@ -105,6 +109,15 @@ test('verified authority is non-serializable and is the only manifest capability
   };
   assert.equal(factoryBeatManifestBindsPaidAuthorityV1(manifest as never, verified), true);
   assert.equal(factoryBeatManifestBindsPaidAuthorityV1(manifest as never, authority() as never), false);
+  assert.equal(
+    factoryBeatManifestStructurallyBindsPaidAuthorityV1(manifest as never, authority()),
+    true,
+  );
+  assert.equal(requireFactoryBeatManifestPaidAuthorityV1(manifest as never, verified), verified);
+  assert.throws(
+    () => requireFactoryBeatManifestPaidAuthorityV1(manifest as never, authority()),
+    /VerifiedFactoryPaidBudgetAuthority/,
+  );
 });
 
 test('cost profile and current pricing revision bind resolver identity', () => {
@@ -175,20 +188,28 @@ test('mirror rejects count, money, currency, approval, and legacy drift', () => 
     FactoryPaidBudgetAuthorityV1Schema.safeParse(approvalDrift).success,
     false,
   );
+  for (const drift of [
+    { cost_profile_digest: sha256Digest({ pricing: 'other' }) },
+    { pricing_policy_revision: 4 },
+  ]) {
+    const changed = { ...authority(), ...drift };
+    changed.authority_digest = deriveFactoryPaidBudgetAuthorityDigestV1(changed);
+    assert.equal(FactoryPaidBudgetAuthorityV1Schema.safeParse(changed).success, false);
+  }
 });
 
 test('mirror parity vectors match Python authority', () => {
   const value = authority();
   assert.equal(
     value.approval_subject_digest,
-    'sha256:0064203849c310151ff1e8b3ecc478e27d28294e4119b81366c568f8df25b9db',
+    'sha256:860647e42e99dec7d580e5a323207e617f1351bfe5d20b20b99e77edc4cc55a4',
   );
   assert.equal(
     value.idempotency_key,
-    'sha256:83f4b2491567bbea3b86b971f1bd4613a5ebc2ee3d96060dcac9301689e0063a',
+    'sha256:692f716bcad148945500ca48292ab1aee705bf128de1f2515a2d9449e1308ba1',
   );
   assert.equal(
     value.authority_digest,
-    'sha256:57bf474f67bddce6272f5540dd45cdf1cb4cd7cfa0119c274f22d8ce8b7899af',
+    'sha256:c2cdbc6b4111fbba80ff3bea160d8391f4461eb1ae364f29c5bed3e8a2721e8b',
   );
 });

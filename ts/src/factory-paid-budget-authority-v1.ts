@@ -73,6 +73,8 @@ export function deriveFactoryPaidBudgetApprovalSubjectDigestV1(
     paid_calls: data.paid_calls,
     max_total_cost_microunits: data.max_total_cost_microunits,
     currency: data.currency,
+    cost_profile_digest: data.cost_profile_digest,
+    pricing_policy_revision: data.pricing_policy_revision,
   });
 }
 
@@ -88,6 +90,8 @@ export function deriveFactoryPaidBudgetIdempotencyKeyV1(
     approval_subject_digest: data.approval_subject_digest,
     approval_receipt_id: data.approval_receipt_id,
     approval_receipt_digest: data.approval_receipt_digest,
+    cost_profile_digest: data.cost_profile_digest,
+    pricing_policy_revision: data.pricing_policy_revision,
   });
 }
 
@@ -109,6 +113,8 @@ export const FactoryPaidBudgetAuthorityV1Schema = z
     paid_calls: FactoryPaidCallCardinalityV1Schema,
     max_total_cost_microunits: PositiveSafeInteger,
     currency: CurrencyCode,
+    cost_profile_digest: DigestSchema,
+    pricing_policy_revision: NonNegativeSafeInteger,
     approval_receipt_id: NonBlankString,
     approval_receipt_digest: DigestSchema,
     approval_subject_digest: DigestSchema,
@@ -180,6 +186,8 @@ export const FactoryPaidBudgetApprovalReceiptV1Schema = z
     paid_calls: FactoryPaidCallCardinalityV1Schema,
     max_total_cost_microunits: PositiveSafeInteger,
     currency: CurrencyCode,
+    cost_profile_digest: DigestSchema,
+    pricing_policy_revision: NonNegativeSafeInteger,
     approval_subject_digest: DigestSchema,
     approver_account_id: NonBlankString,
     decision: z.literal('approved'),
@@ -232,6 +240,8 @@ export interface FactoryPaidBudgetApprovalResolverV1 {
     policy_version: string;
     approval_subject_digest: string;
     approver_account_id: string;
+    cost_profile_digest: string;
+    pricing_policy_revision: number;
   }): boolean;
 }
 
@@ -247,6 +257,8 @@ export function factoryPaidBudgetApprovalReceiptStructurallyBindsV1(
     && sha256Digest(receipt.paid_calls) === sha256Digest(authority.paid_calls)
     && receipt.max_total_cost_microunits === authority.max_total_cost_microunits
     && receipt.currency === authority.currency
+    && receipt.cost_profile_digest === authority.cost_profile_digest
+    && receipt.pricing_policy_revision === authority.pricing_policy_revision
     && receipt.approval_subject_digest === authority.approval_subject_digest;
 }
 
@@ -268,7 +280,36 @@ export function factoryPaidBudgetApprovalReceiptAuthorizesV1(
     policy_version: receipt.policy_version,
     approval_subject_digest: receipt.approval_subject_digest,
     approver_account_id: receipt.approver_account_id,
+    cost_profile_digest: receipt.cost_profile_digest,
+    pricing_policy_revision: receipt.pricing_policy_revision,
   });
+}
+
+const VERIFIED_AUTHORITY_TOKEN = Symbol('verified-factory-paid-budget-authority');
+
+export class VerifiedFactoryPaidBudgetAuthorityV1 {
+  readonly #authority: FactoryPaidBudgetAuthorityV1;
+
+  private constructor(authority: FactoryPaidBudgetAuthorityV1, token: symbol) {
+    if (token !== VERIFIED_AUTHORITY_TOKEN) {
+      throw new TypeError('verified authority can only be minted by fromVerified');
+    }
+    this.#authority = authority;
+    Object.freeze(this);
+  }
+
+  static mint(
+    authority: FactoryPaidBudgetAuthorityV1,
+    token: symbol,
+  ): VerifiedFactoryPaidBudgetAuthorityV1 {
+    return new VerifiedFactoryPaidBudgetAuthorityV1(authority, token);
+  }
+
+  get authority(): FactoryPaidBudgetAuthorityV1 { return this.#authority; }
+
+  toJSON(): never {
+    throw new TypeError('verified paid authority is not serializable');
+  }
 }
 
 export function factoryPaidBudgetAuthorityFromVerifiedV1(
@@ -276,12 +317,14 @@ export function factoryPaidBudgetAuthorityFromVerifiedV1(
   receipt: FactoryPaidBudgetApprovalReceiptV1,
   atUtc: string,
   resolver: FactoryPaidBudgetApprovalResolverV1,
-): FactoryPaidBudgetAuthorityV1 {
+): VerifiedFactoryPaidBudgetAuthorityV1 {
   const authority = FactoryPaidBudgetAuthorityV1Schema.parse(value);
   if (!factoryPaidBudgetApprovalReceiptAuthorizesV1(receipt, authority, atUtc, resolver)) {
     throw new TypeError('authority requires current durable approval');
   }
-  return authority;
+  return VerifiedFactoryPaidBudgetAuthorityV1.mint(
+    authority, VERIFIED_AUTHORITY_TOKEN,
+  );
 }
 
 export interface FactoryPaidBudgetAuthorityBuildInputV1 {
@@ -291,6 +334,8 @@ export interface FactoryPaidBudgetAuthorityBuildInputV1 {
   all_beat_count: number;
   max_total_cost_microunits: number;
   currency: string;
+  cost_profile_digest: string;
+  pricing_policy_revision: number;
   approval_receipt: FactoryPaidBudgetApprovalReceiptV1;
   at_utc: string;
   resolver: FactoryPaidBudgetApprovalResolverV1;
@@ -298,7 +343,7 @@ export interface FactoryPaidBudgetAuthorityBuildInputV1 {
 
 export function buildFactoryPaidBudgetAuthorityV1(
   input: FactoryPaidBudgetAuthorityBuildInputV1,
-): FactoryPaidBudgetAuthorityV1 {
+): VerifiedFactoryPaidBudgetAuthorityV1 {
   const body: Record<string, unknown> = {
     contract_version: FACTORY_PAID_BUDGET_AUTHORITY_VERSION_V1,
     workspace_id: input.workspace_id,
@@ -308,6 +353,8 @@ export function buildFactoryPaidBudgetAuthorityV1(
     paid_calls: factoryPaidCallCardinalityV1(input.all_beat_count),
     max_total_cost_microunits: input.max_total_cost_microunits,
     currency: input.currency,
+    cost_profile_digest: input.cost_profile_digest,
+    pricing_policy_revision: input.pricing_policy_revision,
     approval_receipt_id: input.approval_receipt.receipt_id,
     approval_receipt_digest: input.approval_receipt.receipt_digest,
   };
