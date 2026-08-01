@@ -287,22 +287,34 @@ export function factoryPaidBudgetApprovalReceiptAuthorizesV1(
 
 const VERIFIED_AUTHORITY_TOKEN = Symbol('verified-factory-paid-budget-authority');
 
+function deepFreezeCapabilityValue<T>(value: T): T {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.values(value as Record<string, unknown>).forEach(deepFreezeCapabilityValue);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 export class VerifiedFactoryPaidBudgetAuthorityV1 {
   readonly #authority: FactoryPaidBudgetAuthorityV1;
 
-  private constructor(authority: FactoryPaidBudgetAuthorityV1, token: symbol) {
+  constructor(authority: FactoryPaidBudgetAuthorityV1, token: symbol) {
     if (token !== VERIFIED_AUTHORITY_TOKEN) {
       throw new TypeError('verified authority can only be minted by fromVerified');
     }
-    this.#authority = authority;
+    this.#authority = deepFreezeCapabilityValue(authority);
     Object.freeze(this);
   }
 
-  static mint(
-    authority: FactoryPaidBudgetAuthorityV1,
-    token: symbol,
-  ): VerifiedFactoryPaidBudgetAuthorityV1 {
-    return new VerifiedFactoryPaidBudgetAuthorityV1(authority, token);
+  static unwrap(
+    candidate: unknown,
+  ): FactoryPaidBudgetAuthorityV1 | null {
+    if (!(candidate instanceof VerifiedFactoryPaidBudgetAuthorityV1)) return null;
+    try {
+      return candidate.#authority;
+    } catch {
+      return null;
+    }
   }
 
   get authority(): FactoryPaidBudgetAuthorityV1 { return this.#authority; }
@@ -310,6 +322,23 @@ export class VerifiedFactoryPaidBudgetAuthorityV1 {
   toJSON(): never {
     throw new TypeError('verified paid authority is not serializable');
   }
+}
+
+Object.freeze(VerifiedFactoryPaidBudgetAuthorityV1.prototype);
+Object.freeze(VerifiedFactoryPaidBudgetAuthorityV1);
+
+function mintVerifiedFactoryPaidBudgetAuthorityV1(
+  authority: FactoryPaidBudgetAuthorityV1,
+): VerifiedFactoryPaidBudgetAuthorityV1 {
+  return new VerifiedFactoryPaidBudgetAuthorityV1(
+    authority, VERIFIED_AUTHORITY_TOKEN,
+  );
+}
+
+export function unwrapVerifiedFactoryPaidBudgetAuthorityV1(
+  candidate: unknown,
+): FactoryPaidBudgetAuthorityV1 | null {
+  return VerifiedFactoryPaidBudgetAuthorityV1.unwrap(candidate);
 }
 
 export function factoryPaidBudgetAuthorityFromVerifiedV1(
@@ -322,9 +351,7 @@ export function factoryPaidBudgetAuthorityFromVerifiedV1(
   if (!factoryPaidBudgetApprovalReceiptAuthorizesV1(receipt, authority, atUtc, resolver)) {
     throw new TypeError('authority requires current durable approval');
   }
-  return VerifiedFactoryPaidBudgetAuthorityV1.mint(
-    authority, VERIFIED_AUTHORITY_TOKEN,
-  );
+  return mintVerifiedFactoryPaidBudgetAuthorityV1(authority);
 }
 
 export interface FactoryPaidBudgetAuthorityBuildInputV1 {

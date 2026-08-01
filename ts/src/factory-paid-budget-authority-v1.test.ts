@@ -102,6 +102,12 @@ test('verified authority is non-serializable and is the only manifest capability
   const verified = verifiedAuthority();
   assert.equal(verified instanceof VerifiedFactoryPaidBudgetAuthorityV1, true);
   assert.throws(() => JSON.stringify(verified));
+  assert.throws(
+    () => new VerifiedFactoryPaidBudgetAuthorityV1(authority(), Symbol('fake')),
+    /only be minted/,
+  );
+  assert.equal(Object.isFrozen(VerifiedFactoryPaidBudgetAuthorityV1), true);
+  assert.equal(Object.isFrozen(VerifiedFactoryPaidBudgetAuthorityV1.prototype), true);
   const manifest = {
     workspace_id: workspaceId, run_id: runId, factory_revision: 7,
     beats: Array.from({ length: 5 }, () => ({})),
@@ -175,7 +181,7 @@ test('mirror rejects count, money, currency, approval, and legacy drift', () => 
     ).success,
     false,
   );
-  const paidCallDrift = authority();
+  const paidCallDrift = structuredClone(authority());
   paidCallDrift.paid_calls.video = 4;
   paidCallDrift.approval_subject_digest = (
     deriveFactoryPaidBudgetApprovalSubjectDigestV1(paidCallDrift)

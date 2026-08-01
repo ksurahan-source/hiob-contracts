@@ -5,6 +5,7 @@ import { DIGEST_RE, sha256Digest } from './factory/digest.js';
 import { assertStrictCanonicalValue, strictUtcMicros } from './strict-contract-value.js';
 import {
   VerifiedFactoryPaidBudgetAuthorityV1,
+  unwrapVerifiedFactoryPaidBudgetAuthorityV1,
   type FactoryPaidBudgetAuthorityV1,
 } from './factory-paid-budget-authority-v1.js';
 
@@ -501,23 +502,22 @@ export function factoryBeatManifestBindsPaidAuthorityV1(
   manifest: FactoryBeatManifestV1,
   authority: unknown,
 ): boolean {
-  return authority instanceof VerifiedFactoryPaidBudgetAuthorityV1
-    && factoryBeatManifestStructurallyBindsPaidAuthorityV1(
-      manifest, authority.authority,
-    );
+  const sealed = unwrapVerifiedFactoryPaidBudgetAuthorityV1(authority);
+  return sealed !== null
+    && factoryBeatManifestStructurallyBindsPaidAuthorityV1(manifest, sealed);
 }
 
 export function requireFactoryBeatManifestPaidAuthorityV1(
   manifest: FactoryBeatManifestV1,
   authority: unknown,
 ): VerifiedFactoryPaidBudgetAuthorityV1 {
-  if (!(authority instanceof VerifiedFactoryPaidBudgetAuthorityV1)) {
+  if (unwrapVerifiedFactoryPaidBudgetAuthorityV1(authority) === null) {
     throw new TypeError('execution requires VerifiedFactoryPaidBudgetAuthorityV1');
   }
   if (!factoryBeatManifestBindsPaidAuthorityV1(manifest, authority)) {
     throw new TypeError('verified paid authority does not bind factory manifest');
   }
-  return authority;
+  return authority as VerifiedFactoryPaidBudgetAuthorityV1;
 }
 
 export function beatVideoRequestBindsManifestV1(

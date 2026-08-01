@@ -9,6 +9,7 @@ PaidCallBudget.v1 execution contract.
 from __future__ import annotations
 
 from typing import Annotated, Any, Literal, Mapping, Protocol
+from weakref import WeakKeyDictionary
 
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
@@ -220,12 +221,15 @@ class FactoryPaidBudgetAuthorityV1(BaseModel):
 
 
 _VERIFIED_AUTHORITY_TOKEN = object()
+_VERIFIED_AUTHORITY_REGISTRY: WeakKeyDictionary[
+    object, FactoryPaidBudgetAuthorityV1
+] = WeakKeyDictionary()
 
 
 class VerifiedFactoryPaidBudgetAuthorityV1:
     """In-process paid capability; deliberately not a wire contract."""
 
-    __slots__ = ("__authority",)
+    __slots__ = ("__weakref__",)
 
     def __init__(
         self,
@@ -235,17 +239,42 @@ class VerifiedFactoryPaidBudgetAuthorityV1:
     ) -> None:
         if _token is not _VERIFIED_AUTHORITY_TOKEN:
             raise TypeError("verified authority can only be minted by from_verified")
-        self.__authority = authority
+        _VERIFIED_AUTHORITY_REGISTRY[self] = authority
 
     @property
     def authority(self) -> FactoryPaidBudgetAuthorityV1:
-        return self.__authority
+        return _unwrap_verified_factory_paid_budget_authority_v1(self)
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise TypeError("verified paid authority is immutable")
+
+    def __delattr__(self, _name: str) -> None:
+        raise TypeError("verified paid authority is immutable")
+
+    def __copy__(self) -> object:
+        raise TypeError("verified paid authority cannot be copied")
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> object:
+        raise TypeError("verified paid authority cannot be copied")
 
     def __reduce_ex__(self, _protocol: int) -> object:
         raise TypeError("verified paid authority is not serializable")
 
     def __repr__(self) -> str:
         return "VerifiedFactoryPaidBudgetAuthorityV1(<sealed>)"
+
+
+def _unwrap_verified_factory_paid_budget_authority_v1(
+    capability: object,
+) -> FactoryPaidBudgetAuthorityV1:
+    """Module-private brand check and registry unwrap for execution guards."""
+
+    if not isinstance(capability, VerifiedFactoryPaidBudgetAuthorityV1):
+        raise TypeError("execution requires VerifiedFactoryPaidBudgetAuthorityV1")
+    try:
+        return _VERIFIED_AUTHORITY_REGISTRY[capability]
+    except KeyError as exc:
+        raise TypeError("unminted verified paid authority capability") from exc
 
 
 class FactoryPaidBudgetApprovalReceiptV1(BaseModel):
