@@ -38,6 +38,35 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "BeatPersona": ("hiob_contracts.beat_personas", "BeatPersona"),
     "BeatPersonas": ("hiob_contracts.beat_personas", "BeatPersonas"),
     "ElementLocks": ("hiob_contracts.element_locks", "ElementLocks"),
+    # All-beat video V2 factory chain.
+    "FactoryBeatManifest": (
+        "hiob_contracts.all_beat_video",
+        "FactoryBeatManifestV1",
+    ),
+    "BeatVideoRequest": (
+        "hiob_contracts.all_beat_video",
+        "BeatVideoRequestV1",
+    ),
+    "BeatVideoReceipt": (
+        "hiob_contracts.all_beat_video",
+        "BeatVideoReceiptV1",
+    ),
+    "BeatArtifactSetReceipt": (
+        "hiob_contracts.all_beat_video",
+        "BeatArtifactSetReceiptV1",
+    ),
+    "AtroposFanInManifest": (
+        "hiob_contracts.all_beat_video",
+        "AtroposFanInManifestV2",
+    ),
+    "HephaestusFinalRenderReceipt": (
+        "hiob_contracts.all_beat_video",
+        "HephaestusFinalRenderReceiptV2",
+    ),
+    "ReelsFactoryReceiptV2": (
+        "hiob_contracts.all_beat_video",
+        "ReelsFactoryReceiptV2",
+    ),
     # Phase-3 edge targets (j2p / p2a)
     "ParzifalTargetInput": ("hiob_contracts.parzifal_target_input", "ParzifalTargetInput"),
     "AresScriptInput": ("hiob_contracts.ares_script_input", "AresScriptInput"),

@@ -147,6 +147,10 @@ def _video_receipt(beat_index: int) -> dict:
         "factory_manifest_digest": request["factory_manifest_digest"],
         "generation_nonce": request["generation_nonce"],
         "request_digest": request["request_digest"],
+        "duration_ms": request["duration_ms"],
+        "fps": request["fps"],
+        "width": request["width"],
+        "height": request["height"],
         "provider": request["provider"],
         "model": request["model"],
         "provider_job_id": f"provider-job-{beat_index}",
@@ -283,6 +287,7 @@ def test_manifest_requires_exact_zero_based_all_beat_order(indices: list[int]) -
     body = _manifest_body()
     for beat, index in zip(body["beats"], indices, strict=True):
         beat["beat_index"] = index
+        beat["reference_artifacts"][0]["beat_index"] = index
     body["manifest_digest"] = derive_factory_beat_manifest_digest_v1(body)
 
     with pytest.raises(ValidationError, match="0..N-1"):
@@ -397,8 +402,8 @@ def test_contract_registry_and_fail_loud_validation_expose_consumers() -> None:
 
 def test_digest_vector_is_stable_for_python_typescript_parity() -> None:
     assert _manifest()["manifest_digest"] == (
-        "sha256:1fcdf990fae5d519375562bf432291405e990a0f0b2d555b6d3d7e873ae3bb01"
+        "sha256:7946182c7515f98c374bfe326e88ebfb33aa4d59fa0f6fdb18e637cd4d32a126"
     )
     assert _factory_receipt()["receipt_digest"] == (
-        "sha256:e48552233e8955af1509e13824f1e5fc919ae7823cc14646b34eef84cc1553c7"
+        "sha256:408bc3bc4d72ed8b1ef351088c377b63d373a7a6f345fe8c118d4d111390b9c8"
     )

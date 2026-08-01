@@ -115,6 +115,10 @@ function videoReceipt(beatIndex: number) {
     factory_manifest_digest: videoRequest.factory_manifest_digest,
     generation_nonce: videoRequest.generation_nonce,
     request_digest: videoRequest.request_digest,
+    duration_ms: videoRequest.duration_ms,
+    fps: videoRequest.fps,
+    width: videoRequest.width,
+    height: videoRequest.height,
     provider: videoRequest.provider,
     model: videoRequest.model,
     provider_job_id: `provider-job-${beatIndex}`,
@@ -227,10 +231,10 @@ test('TypeScript mirror rejects gaps, partial fan-in, and output substitution', 
 test('Python-authoritative canonical digest vectors remain byte-identical', () => {
   assert.equal(
     manifest().manifest_digest,
-    'sha256:1fcdf990fae5d519375562bf432291405e990a0f0b2d555b6d3d7e873ae3bb01',
+    'sha256:7946182c7515f98c374bfe326e88ebfb33aa4d59fa0f6fdb18e637cd4d32a126',
   );
   assert.equal(
     factoryReceipt().receipt_digest,
-    'sha256:e48552233e8955af1509e13824f1e5fc919ae7823cc14646b34eef84cc1553c7',
+    'sha256:408bc3bc4d72ed8b1ef351088c377b63d373a7a6f345fe8c118d4d111390b9c8',
   );
 });
