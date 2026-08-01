@@ -28,6 +28,7 @@ const planDigest = sha256Digest({ plan: 'approved-v2' });
 const timelineDigest = sha256Digest({ timeline: 'all-beats' });
 const audioMixDigest = sha256Digest({ audio: 'sealed-mix' });
 const renderPolicyDigest = sha256Digest({ render: 'vertical-1080p' });
+const authorityDigest = sha256Digest({ authority: 'paid-all-beats' });
 
 function artifact(
   beatIndex: number | null,
@@ -66,6 +67,7 @@ function manifest() {
     run_id: runId,
     factory_revision: 11,
     plan_digest: planDigest,
+    paid_budget_authority_digest: authorityDigest,
     beats: [0, 1].map((beatIndex) => ({
       beat_index: beatIndex,
       generation_nonce: `00000000-0000-4000-8000-00000000001${beatIndex}`,
@@ -79,7 +81,8 @@ function manifest() {
       model: 'kling-video-v2.1-master',
     })),
   };
-  return { ...body, manifest_digest: deriveFactoryBeatManifestDigestV1(body) };
+  const withKey = { ...body, idempotency_key: deriveFactoryBeatManifestIdempotencyKeyV1(body) };
+  return { ...withKey, manifest_digest: deriveFactoryBeatManifestDigestV1(withKey) };
 }
 
 function request(beatIndex: number) {
@@ -92,6 +95,7 @@ function request(beatIndex: number) {
     beat_index: beatIndex,
     factory_revision: factoryManifest.factory_revision,
     plan_digest: planDigest,
+    paid_budget_authority_digest: authorityDigest,
     factory_manifest_digest: factoryManifest.manifest_digest,
     generation_nonce: beat.generation_nonce,
     prompt: beat.prompt,
@@ -115,6 +119,7 @@ function videoReceipt(beatIndex: number) {
     beat_index: beatIndex,
     factory_revision: videoRequest.factory_revision,
     plan_digest: planDigest,
+    paid_budget_authority_digest: authorityDigest,
     factory_manifest_digest: videoRequest.factory_manifest_digest,
     generation_nonce: videoRequest.generation_nonce,
     request_digest: videoRequest.request_digest,
@@ -139,6 +144,7 @@ function artifactSet() {
     run_id: runId,
     factory_revision: factoryManifest.factory_revision,
     plan_digest: planDigest,
+    paid_budget_authority_digest: authorityDigest,
     factory_manifest_digest: factoryManifest.manifest_digest,
     expected_beat_count: factoryManifest.beats.length,
     video_receipts: [videoReceipt(0), videoReceipt(1)],
@@ -154,6 +160,7 @@ function fanIn() {
     run_id: runId,
     factory_revision: setReceipt.factory_revision,
     plan_digest: planDigest,
+    paid_budget_authority_digest: authorityDigest,
     factory_manifest_digest: setReceipt.factory_manifest_digest,
     beat_artifact_set_receipt: setReceipt,
     video_artifacts: setReceipt.video_receipts.map((receipt) => receipt.artifact),
@@ -192,6 +199,7 @@ function factoryReceipt() {
     run_id: runId,
     factory_revision: factoryManifest.factory_revision,
     plan_digest: planDigest,
+    paid_budget_authority_digest: authorityDigest,
     factory_manifest_digest: factoryManifest.manifest_digest,
     beat_artifact_set_receipt_digest: setReceipt.receipt_digest,
     fan_in_manifest_digest: fanInManifest.manifest_digest,
@@ -204,14 +212,17 @@ function factoryReceipt() {
 }
 
 test('TypeScript mirror accepts the complete all-beat chain', () => {
-  FactoryBeatManifestV1Schema.parse(manifest());
+  const parsedManifest = FactoryBeatManifestV1Schema.parse(manifest());
   BeatVideoRequestV1Schema.parse(request(0));
   BeatVideoReceiptV1Schema.parse(videoReceipt(0));
   BeatArtifactSetReceiptV1Schema.parse(artifactSet());
   AtroposFanInManifestV2Schema.parse(fanIn());
   HephaestusFinalRenderReceiptV2Schema.parse(finalRender());
+  const parsedSet = BeatArtifactSetReceiptV1Schema.parse(artifactSet());
+  const parsedFanIn = AtroposFanInManifestV2Schema.parse(fanIn());
   const result = ReelsFactoryReceiptV2Schema.parse(factoryReceipt());
   assert.equal(result.status, 'succeeded');
+  assert.equal(reelsFactoryReceiptBindsChainV2(result, parsedManifest, parsedSet, parsedFanIn), true);
 });
 
 test('mirror rejects a rehashed request that drifts from its manifest beat', () => {
@@ -226,6 +237,10 @@ test('mirror rejects a rehashed request that drifts from its manifest beat', () 
 test('mirror rejects unsafe canonical values and impossible UTC dates', () => {
   assert.throws(() => deriveFactoryBeatManifestDigestV1({ unsafe: Number.MAX_SAFE_INTEGER + 1 }));
   assert.throws(() => deriveFactoryBeatManifestDigestV1({ surrogate: '\ud800' }));
+  const surrogateRequest = request(0);
+  surrogateRequest.prompt = '\ud800';
+  assert.doesNotThrow(() => BeatVideoRequestV1Schema.safeParse(surrogateRequest));
+  assert.equal(BeatVideoRequestV1Schema.safeParse(surrogateRequest).success, false);
   const sparse: unknown[] = [];
   sparse[1] = 'x';
   assert.throws(() => deriveFactoryBeatManifestDigestV1({ sparse }));
@@ -233,6 +248,29 @@ test('mirror rejects unsafe canonical values and impossible UTC dates', () => {
   render.rendered_at_utc = '2026-02-31T08:00:00Z';
   render.receipt_digest = deriveHephaestusFinalRenderReceiptDigestV2(render);
   assert.equal(HephaestusFinalRenderReceiptV2Schema.safeParse(render).success, false);
+  for (const outputUrl of ['https:///missing-host.mp4', 'https://user:pass@cdn.example/out.mp4']) {
+    const invalidUrl = finalRender();
+    invalidUrl.output_url = outputUrl;
+    invalidUrl.receipt_digest = deriveHephaestusFinalRenderReceiptDigestV2(invalidUrl);
+    assert.equal(HephaestusFinalRenderReceiptV2Schema.safeParse(invalidUrl).success, false);
+  }
+});
+
+test('manifest accepts revision zero and caps all-beat count at sixteen', () => {
+  const revisionZero = manifest();
+  revisionZero.factory_revision = 0;
+  revisionZero.idempotency_key = deriveFactoryBeatManifestIdempotencyKeyV1(revisionZero);
+  revisionZero.manifest_digest = deriveFactoryBeatManifestDigestV1(revisionZero);
+  assert.equal(FactoryBeatManifestV1Schema.parse(revisionZero).factory_revision, 0);
+  const tooMany = manifest();
+  tooMany.beats = Array.from({ length: 17 }, (_, index) => ({
+    ...structuredClone(tooMany.beats[0]), beat_index: index,
+    generation_nonce: `00000000-0000-4000-8000-${index.toString().padStart(12, '0')}`,
+    reference_artifacts: [{ ...structuredClone(tooMany.beats[0].reference_artifacts[0]), beat_index: index }],
+  }));
+  tooMany.idempotency_key = deriveFactoryBeatManifestIdempotencyKeyV1(tooMany);
+  tooMany.manifest_digest = deriveFactoryBeatManifestDigestV1(tooMany);
+  assert.equal(FactoryBeatManifestV1Schema.safeParse(tooMany).success, false);
 });
 
 test('TypeScript mirror rejects gaps, partial fan-in, and output substitution', () => {
@@ -255,10 +293,10 @@ test('TypeScript mirror rejects gaps, partial fan-in, and output substitution', 
 test('Python-authoritative canonical digest vectors remain byte-identical', () => {
   assert.equal(
     manifest().manifest_digest,
-    'sha256:7946182c7515f98c374bfe326e88ebfb33aa4d59fa0f6fdb18e637cd4d32a126',
+    'sha256:9afbef2bb2fe6ef1ecb8d168e0a5c3441c90ad73f9a69cc5f4bee74d2c3b1acd',
   );
   assert.equal(
     factoryReceipt().receipt_digest,
-    'sha256:408bc3bc4d72ed8b1ef351088c377b63d373a7a6f345fe8c118d4d111390b9c8',
+    'sha256:8aaa8f391e121cffe978c0c2026ef3b10b0ebd06fefd520da440c437447bbd6f',
   );
 });

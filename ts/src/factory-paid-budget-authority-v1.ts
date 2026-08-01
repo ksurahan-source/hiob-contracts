@@ -2,6 +2,7 @@
 import { z } from 'zod';
 
 import { DIGEST_RE, sha256Digest } from './factory/digest.js';
+import { assertStrictCanonicalValue, strictUtcMicros } from './strict-contract-value.js';
 
 export const FACTORY_PAID_BUDGET_AUTHORITY_VERSION_V1 = (
   'FactoryPaidBudgetAuthority.v1'
@@ -20,6 +21,10 @@ const NonNegativeSafeInteger = z.number().int().nonnegative().max(Number.MAX_SAF
 const PositiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const AllBeatCount = z.number().int().min(1).max(16);
 const CurrencyCode = z.string().regex(/^[A-Z]{3}$/);
+
+function safeDerivedDigest(derive: () => string): string | null {
+  try { return derive(); } catch { return null; }
+}
 
 export const FactoryPaidCallCardinalityV1Schema = z
   .object({
@@ -51,6 +56,7 @@ function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('factory paid budget input must be an object');
   }
+  assertStrictCanonicalValue(value);
   return value as Record<string, unknown>;
 }
 
@@ -111,6 +117,8 @@ export const FactoryPaidBudgetAuthorityV1Schema = z
   })
   .strict()
   .superRefine((value, ctx) => {
+    if (!Number.isSafeInteger(value.all_beat_count)
+      || !Number.isSafeInteger(value.max_total_cost_microunits)) return;
     const expectedCalls = factoryPaidCallCardinalityV1(value.all_beat_count);
     if (sha256Digest(value.paid_calls) !== sha256Digest(expectedCalls)) {
       ctx.addIssue({
@@ -119,7 +127,9 @@ export const FactoryPaidBudgetAuthorityV1Schema = z
         path: ['paid_calls'],
       });
     }
-    const expectedSubject = deriveFactoryPaidBudgetApprovalSubjectDigestV1(value);
+    const expectedSubject = safeDerivedDigest(
+      () => deriveFactoryPaidBudgetApprovalSubjectDigestV1(value),
+    );
     if (value.approval_subject_digest !== expectedSubject) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -127,7 +137,9 @@ export const FactoryPaidBudgetAuthorityV1Schema = z
         path: ['approval_subject_digest'],
       });
     }
-    const expectedIdempotency = deriveFactoryPaidBudgetIdempotencyKeyV1(value);
+    const expectedIdempotency = safeDerivedDigest(
+      () => deriveFactoryPaidBudgetIdempotencyKeyV1(value),
+    );
     if (value.idempotency_key !== expectedIdempotency) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -135,7 +147,9 @@ export const FactoryPaidBudgetAuthorityV1Schema = z
         path: ['idempotency_key'],
       });
     }
-    const expectedAuthority = deriveFactoryPaidBudgetAuthorityDigestV1(value);
+    const expectedAuthority = safeDerivedDigest(
+      () => deriveFactoryPaidBudgetAuthorityDigestV1(value),
+    );
     if (value.authority_digest !== expectedAuthority) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -145,6 +159,131 @@ export const FactoryPaidBudgetAuthorityV1Schema = z
     }
   });
 
+export function deriveFactoryPaidBudgetApprovalReceiptDigestV1(value: unknown): string {
+  const data = { ...asRecord(value) };
+  delete data.receipt_digest;
+  return sha256Digest(data);
+}
+
+const UtcTimestamp = z.string().refine((value) => {
+  try { strictUtcMicros(value); return true; } catch { return false; }
+}, 'timestamp must be a real strict UTC instant');
+
+export const FactoryPaidBudgetApprovalReceiptV1Schema = z
+  .object({
+    contract_version: z.literal('FactoryPaidBudgetApprovalReceipt.v1'),
+    receipt_id: NonBlankString,
+    workspace_id: UuidString,
+    run_id: UuidString,
+    factory_revision: NonNegativeSafeInteger,
+    all_beat_count: AllBeatCount,
+    paid_calls: FactoryPaidCallCardinalityV1Schema,
+    max_total_cost_microunits: PositiveSafeInteger,
+    currency: CurrencyCode,
+    approval_subject_digest: DigestSchema,
+    approver_account_id: NonBlankString,
+    decision: z.literal('approved'),
+    policy_version: NonBlankString,
+    state_revision: PositiveSafeInteger,
+    approved_at_utc: UtcTimestamp,
+    expires_at_utc: UtcTimestamp,
+    revoked_at_utc: UtcTimestamp.nullable(),
+    transaction_audit_id: NonBlankString,
+    receipt_digest: DigestSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const issue = (message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    if (value.transaction_audit_id !== value.receipt_id) issue('transaction_audit_id must equal receipt_id');
+    if (sha256Digest(value.paid_calls) !== sha256Digest(factoryPaidCallCardinalityV1(value.all_beat_count))) {
+      issue('paid_calls must equal exact all_beat_count cardinality');
+    }
+    if (value.approval_subject_digest !== safeDerivedDigest(
+      () => deriveFactoryPaidBudgetApprovalSubjectDigestV1(value),
+    )) {
+      issue('approval_subject_digest does not match paid budget scope');
+    }
+    try {
+      const approved = strictUtcMicros(value.approved_at_utc);
+      const expires = strictUtcMicros(value.expires_at_utc);
+      if (expires <= approved) issue('expires_at_utc must follow approved_at_utc');
+      if (value.revoked_at_utc !== null) {
+        const revoked = strictUtcMicros(value.revoked_at_utc);
+        if (revoked < approved || revoked > expires) issue('revoked_at_utc must fall within approval lifetime');
+      }
+    } catch { issue('receipt timestamps must be valid strict UTC'); }
+    if (value.receipt_digest !== safeDerivedDigest(
+      () => deriveFactoryPaidBudgetApprovalReceiptDigestV1(value),
+    )) {
+      issue('receipt_digest does not match approval receipt');
+    }
+  });
+
+export type FactoryPaidBudgetApprovalReceiptV1 = z.infer<typeof FactoryPaidBudgetApprovalReceiptV1Schema>;
+
+export interface FactoryPaidBudgetApprovalResolverV1 {
+  isCurrentApproval(identity: {
+    receipt_id: string;
+    receipt_digest: string;
+    workspace_id: string;
+    run_id: string;
+    factory_revision: number;
+    state_revision: number;
+    policy_version: string;
+    approval_subject_digest: string;
+    approver_account_id: string;
+  }): boolean;
+}
+
+export function factoryPaidBudgetApprovalReceiptStructurallyBindsV1(
+  receipt: FactoryPaidBudgetApprovalReceiptV1,
+  authority: FactoryPaidBudgetAuthorityV1,
+): boolean {
+  return receipt.receipt_id === authority.approval_receipt_id
+    && receipt.receipt_digest === authority.approval_receipt_digest
+    && receipt.workspace_id === authority.workspace_id && receipt.run_id === authority.run_id
+    && receipt.factory_revision === authority.factory_revision
+    && receipt.all_beat_count === authority.all_beat_count
+    && sha256Digest(receipt.paid_calls) === sha256Digest(authority.paid_calls)
+    && receipt.max_total_cost_microunits === authority.max_total_cost_microunits
+    && receipt.currency === authority.currency
+    && receipt.approval_subject_digest === authority.approval_subject_digest;
+}
+
+export function factoryPaidBudgetApprovalReceiptAuthorizesV1(
+  receipt: FactoryPaidBudgetApprovalReceiptV1,
+  authority: FactoryPaidBudgetAuthorityV1,
+  atUtc: string,
+  resolver: FactoryPaidBudgetApprovalResolverV1,
+): boolean {
+  if (!factoryPaidBudgetApprovalReceiptStructurallyBindsV1(receipt, authority)) return false;
+  const at = strictUtcMicros(atUtc);
+  if (at < strictUtcMicros(receipt.approved_at_utc)
+    || at >= strictUtcMicros(receipt.expires_at_utc)
+    || receipt.revoked_at_utc !== null) return false;
+  return resolver.isCurrentApproval({
+    receipt_id: receipt.receipt_id, receipt_digest: receipt.receipt_digest,
+    workspace_id: receipt.workspace_id, run_id: receipt.run_id,
+    factory_revision: receipt.factory_revision, state_revision: receipt.state_revision,
+    policy_version: receipt.policy_version,
+    approval_subject_digest: receipt.approval_subject_digest,
+    approver_account_id: receipt.approver_account_id,
+  });
+}
+
+export function factoryPaidBudgetAuthorityFromVerifiedV1(
+  value: unknown,
+  receipt: FactoryPaidBudgetApprovalReceiptV1,
+  atUtc: string,
+  resolver: FactoryPaidBudgetApprovalResolverV1,
+): FactoryPaidBudgetAuthorityV1 {
+  const authority = FactoryPaidBudgetAuthorityV1Schema.parse(value);
+  if (!factoryPaidBudgetApprovalReceiptAuthorizesV1(receipt, authority, atUtc, resolver)) {
+    throw new TypeError('authority requires current durable approval');
+  }
+  return authority;
+}
+
 export interface FactoryPaidBudgetAuthorityBuildInputV1 {
   workspace_id: string;
   run_id: string;
@@ -152,8 +291,9 @@ export interface FactoryPaidBudgetAuthorityBuildInputV1 {
   all_beat_count: number;
   max_total_cost_microunits: number;
   currency: string;
-  approval_receipt_id: string;
-  approval_receipt_digest: string;
+  approval_receipt: FactoryPaidBudgetApprovalReceiptV1;
+  at_utc: string;
+  resolver: FactoryPaidBudgetApprovalResolverV1;
 }
 
 export function buildFactoryPaidBudgetAuthorityV1(
@@ -168,15 +308,17 @@ export function buildFactoryPaidBudgetAuthorityV1(
     paid_calls: factoryPaidCallCardinalityV1(input.all_beat_count),
     max_total_cost_microunits: input.max_total_cost_microunits,
     currency: input.currency,
-    approval_receipt_id: input.approval_receipt_id,
-    approval_receipt_digest: input.approval_receipt_digest,
+    approval_receipt_id: input.approval_receipt.receipt_id,
+    approval_receipt_digest: input.approval_receipt.receipt_digest,
   };
   body.approval_subject_digest = (
     deriveFactoryPaidBudgetApprovalSubjectDigestV1(body)
   );
   body.idempotency_key = deriveFactoryPaidBudgetIdempotencyKeyV1(body);
   body.authority_digest = deriveFactoryPaidBudgetAuthorityDigestV1(body);
-  return FactoryPaidBudgetAuthorityV1Schema.parse(body);
+  return factoryPaidBudgetAuthorityFromVerifiedV1(
+    body, input.approval_receipt, input.at_utc, input.resolver,
+  );
 }
 
 export type FactoryPaidCallCardinalityV1 = z.infer<

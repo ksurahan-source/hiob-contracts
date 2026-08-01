@@ -8,6 +8,7 @@ import {
   factoryPaidBudgetAuthorityFromVerifiedV1,
   buildFactoryPaidBudgetAuthorityV1,
   deriveFactoryPaidBudgetApprovalSubjectDigestV1,
+  deriveFactoryPaidBudgetApprovalReceiptDigestV1,
   deriveFactoryPaidBudgetAuthorityDigestV1,
   deriveFactoryPaidBudgetIdempotencyKeyV1,
 } from './index.js';
@@ -15,9 +16,29 @@ import { sha256Digest } from './factory/digest.js';
 
 const workspaceId = '00000000-0000-4000-8000-000000000001';
 const runId = '00000000-0000-4000-8000-000000000002';
-const approvalReceiptDigest = sha256Digest({ approval: 'paid-budget-v1' });
+const resolver = { isCurrentApproval: () => true };
+
+function approvalReceipt(overrides: Record<string, unknown> = {}) {
+  const body = {
+    contract_version: 'FactoryPaidBudgetApprovalReceipt.v1' as const,
+    receipt_id: 'approval-paid-budget-1', workspace_id: workspaceId,
+    run_id: runId, factory_revision: 7, all_beat_count: 5,
+    paid_calls: { script: 1 as const, image: 5, video: 5, voice: 5, render: 1 as const, retries: 0 as const, fallbacks: 0 as const, character_lock: 0 as const },
+    max_total_cost_microunits: 12_500_000, currency: 'USD',
+    approver_account_id: 'account-owner', decision: 'approved' as const,
+    policy_version: 'paid-budget-policy-v1', state_revision: 1,
+    approved_at_utc: '2026-08-01T07:00:00Z', expires_at_utc: '2026-08-01T09:00:00Z',
+    revoked_at_utc: null, transaction_audit_id: 'approval-paid-budget-1',
+    ...overrides,
+  };
+  const withSubject = { ...body, approval_subject_digest: deriveFactoryPaidBudgetApprovalSubjectDigestV1(body) };
+  return FactoryPaidBudgetApprovalReceiptV1Schema.parse({
+    ...withSubject, receipt_digest: deriveFactoryPaidBudgetApprovalReceiptDigestV1(withSubject),
+  });
+}
 
 function authority(overrides: Record<string, unknown> = {}) {
+  const receipt = approvalReceipt(overrides);
   return buildFactoryPaidBudgetAuthorityV1({
     workspace_id: workspaceId,
     run_id: runId,
@@ -25,9 +46,9 @@ function authority(overrides: Record<string, unknown> = {}) {
     all_beat_count: 5,
     max_total_cost_microunits: 12_500_000,
     currency: 'USD',
-    approval_receipt_id: 'approval-paid-budget-1',
-    approval_receipt_digest: approvalReceiptDigest,
-    ...overrides,
+    approval_receipt: receipt,
+    at_utc: '2026-08-01T08:00:00Z',
+    resolver,
   });
 }
 
@@ -48,28 +69,21 @@ test('mirror builds and validates every pre-script paid binding', () => {
 });
 
 test('structural receipt is not bearer authority without current resolver state', () => {
-  const body = {
-    contract_version: 'FactoryPaidBudgetApprovalReceipt.v1' as const,
-    receipt_id: 'approval-paid-budget-1', workspace_id: workspaceId,
-    run_id: runId, factory_revision: 7, all_beat_count: 5,
-    paid_calls: { script: 1, image: 5, video: 5, voice: 5, render: 1, retries: 0, fallbacks: 0, character_lock: 0 },
-    max_total_cost_microunits: 12_500_000, currency: 'USD',
-    approval_subject_digest: authority().approval_subject_digest,
-    approver_account_id: 'account-owner', decision: 'approved' as const,
-    policy_version: 'paid-budget-policy-v1', state_revision: 1,
-    approved_at_utc: '2026-08-01T07:00:00Z', expires_at_utc: '2026-08-01T09:00:00Z',
-    revoked_at_utc: null, transaction_audit_id: 'approval-paid-budget-1',
-  };
-  const receipt = FactoryPaidBudgetApprovalReceiptV1Schema.parse({
-    ...body, receipt_digest: sha256Digest(body),
-  });
-  const resolver = { isCurrentApproval: () => false };
+  const receipt = approvalReceipt();
+  const staleResolver = { isCurrentApproval: () => false };
   assert.equal(factoryPaidBudgetApprovalReceiptAuthorizesV1(
-    receipt, authority(), '2026-08-01T08:00:00Z', resolver,
+    receipt, authority(), '2026-08-01T08:00:00Z', staleResolver,
   ), false);
   assert.throws(() => factoryPaidBudgetAuthorityFromVerifiedV1(
-    authority(), receipt, '2026-08-01T08:00:00Z', resolver,
+    authority(), receipt, '2026-08-01T08:00:00Z', staleResolver,
   ));
+});
+
+test('approval receipt safeParse rejects impossible UTC without throwing', () => {
+  const receipt = approvalReceipt();
+  const invalid = { ...receipt, expires_at_utc: '2026-02-31T09:00:00Z' };
+  assert.doesNotThrow(() => FactoryPaidBudgetApprovalReceiptV1Schema.safeParse(invalid));
+  assert.equal(FactoryPaidBudgetApprovalReceiptV1Schema.safeParse(invalid).success, false);
 });
 
 test('mirror rejects count, money, currency, approval, and legacy drift', () => {
@@ -131,10 +145,10 @@ test('mirror parity vectors match Python authority', () => {
   );
   assert.equal(
     value.idempotency_key,
-    'sha256:53a29f902bce3f2777c0b4888c03eb3ddc99d604eba0c7d3516f03c8d7a49942',
+    'sha256:83f4b2491567bbea3b86b971f1bd4613a5ebc2ee3d96060dcac9301689e0063a',
   );
   assert.equal(
     value.authority_digest,
-    'sha256:c4421ca6c74a7490a6c0ee3cd39ae0aea71018d5528ded5c2bda08d3adebbc8e',
+    'sha256:57bf474f67bddce6272f5540dd45cdf1cb4cd7cfa0119c274f22d8ce8b7899af',
   );
 });

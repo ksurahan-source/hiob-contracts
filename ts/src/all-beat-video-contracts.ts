@@ -1,8 +1,9 @@
 /** TypeScript/Zod mirror of Python-authoritative all_beat_video.py. */
 import { z } from 'zod';
 
-import { ArtifactRefSchema } from './factory/planet-output.js';
 import { DIGEST_RE, sha256Digest } from './factory/digest.js';
+import { assertStrictCanonicalValue, strictUtcMicros } from './strict-contract-value.js';
+import type { FactoryPaidBudgetAuthorityV1 } from './factory-paid-budget-authority-v1.js';
 
 const DigestSchema = z.string().regex(DIGEST_RE);
 const NonBlankString = z.string().refine((value) => value.trim().length > 0, 'string must not be blank');
@@ -14,8 +15,23 @@ const PositiveSafeInteger = z.number().int().positive().max(Number.MAX_SAFE_INTE
 const NonNegativeSafeInteger = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const UtcTimestamp = z
   .string()
-  .regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/)
-  .refine((value) => !Number.isNaN(Date.parse(value)), 'timestamp must be valid UTC');
+  .refine((value) => { try { strictUtcMicros(value); return true; } catch { return false; } }, 'timestamp must be valid UTC');
+
+export const StrictAllBeatArtifactRefV1Schema = z.object({
+  artifact_id: NonBlankString, kind: NonBlankString, uri: NonBlankString,
+  sha256: DigestSchema, mime: NonBlankString, bytes_len: NonNegativeSafeInteger,
+  duration_ms: NonNegativeSafeInteger.nullable().default(null),
+  width: NonNegativeSafeInteger.nullable().default(null),
+  height: NonNegativeSafeInteger.nullable().default(null),
+  beat_index: NonNegativeSafeInteger.nullable().default(null),
+  producer_planet: NonBlankString, producer_node_id: NonBlankString,
+  execution_id: NonBlankString, producer_revision: NonBlankString,
+  image_digest: DigestSchema.nullable().default(null),
+  source_output_digests: z.array(DigestSchema).default([]),
+  edge_receipt_digests: z.array(DigestSchema).default([]),
+  provenance_refs: z.array(NonBlankString).default([]),
+  consent_refs: z.array(NonBlankString).default([]),
+}).strict();
 
 export const ALL_BEAT_VIDEO_CONTRACT_VERSIONS = Object.freeze({
   FactoryBeatManifest: 'FactoryBeatManifest.v1',
@@ -33,7 +49,33 @@ function withoutField(value: unknown, field: string): Record<string, unknown> {
   }
   const body = { ...(value as Record<string, unknown>) };
   delete body[field];
+  assertStrictCanonicalValue(body);
   return body;
+}
+
+function safelyEqualsDigest(actual: string, derive: () => string): boolean {
+  try { return actual === derive(); } catch { return false; }
+}
+
+function safelyCanonicalEqual(left: unknown, right: unknown): boolean {
+  try {
+    assertStrictCanonicalValue(left);
+    assertStrictCanonicalValue(right);
+    return sha256Digest(left) === sha256Digest(right);
+  } catch { return false; }
+}
+
+export function deriveFactoryBeatManifestIdempotencyKeyV1(value: unknown): string {
+  const data = value as Record<string, unknown>;
+  const identity = {
+    purpose: 'factory-beat-manifest.v1', workspace_id: data.workspace_id,
+    run_id: data.run_id, factory_revision: data.factory_revision,
+    plan_digest: data.plan_digest,
+    paid_budget_authority_digest: data.paid_budget_authority_digest,
+    beats: data.beats,
+  };
+  assertStrictCanonicalValue(identity);
+  return sha256Digest(identity);
 }
 
 export function deriveFactoryBeatManifestDigestV1(value: unknown): string {
@@ -78,7 +120,7 @@ function isRelativeStorageKey(value: string): boolean {
 }
 
 function validateReferenceArtifacts(
-  artifacts: z.infer<typeof ArtifactRefSchema>[],
+  artifacts: z.infer<typeof StrictAllBeatArtifactRefV1Schema>[],
   beatIndex: number,
   ctx: z.RefinementCtx,
   path: (string | number)[],
@@ -111,7 +153,7 @@ function validateReferenceArtifacts(
 }
 
 function validateVideoArtifact(
-  artifact: z.infer<typeof ArtifactRefSchema>,
+  artifact: z.infer<typeof StrictAllBeatArtifactRefV1Schema>,
   beatIndex: number | null,
   ctx: z.RefinementCtx,
   path: (string | number)[],
@@ -151,7 +193,7 @@ export const FactoryBeatSpecV1Schema = z
     fps: PositiveSafeInteger,
     width: PositiveSafeInteger,
     height: PositiveSafeInteger,
-    reference_artifacts: z.array(ArtifactRefSchema).min(1),
+    reference_artifacts: z.array(StrictAllBeatArtifactRefV1Schema).min(1),
     provider: NonBlankString,
     model: NonBlankString,
   })
@@ -165,9 +207,11 @@ export const FactoryBeatManifestV1Schema = z
     contract_version: z.literal('FactoryBeatManifest.v1'),
     workspace_id: UuidString,
     run_id: UuidString,
-    factory_revision: PositiveSafeInteger,
+    factory_revision: NonNegativeSafeInteger,
     plan_digest: DigestSchema,
-    beats: z.array(FactoryBeatSpecV1Schema).min(1).max(64),
+    paid_budget_authority_digest: DigestSchema,
+    beats: z.array(FactoryBeatSpecV1Schema).min(1).max(16),
+    idempotency_key: DigestSchema,
     manifest_digest: DigestSchema,
   })
   .strict()
@@ -180,7 +224,10 @@ export const FactoryBeatManifestV1Schema = z
     if (new Set(nonces).size !== nonces.length) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'generation_nonce must be unique per beat', path: ['beats'] });
     }
-    if (value.manifest_digest !== deriveFactoryBeatManifestDigestV1(value)) {
+    if (!safelyEqualsDigest(value.idempotency_key, () => deriveFactoryBeatManifestIdempotencyKeyV1(value))) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'idempotency_key does not match factory beat manifest', path: ['idempotency_key'] });
+    }
+    if (!safelyEqualsDigest(value.manifest_digest, () => deriveFactoryBeatManifestDigestV1(value))) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'manifest_digest does not match factory beat manifest', path: ['manifest_digest'] });
     }
   });
@@ -191,8 +238,9 @@ export const BeatVideoRequestV1Schema = z
     workspace_id: UuidString,
     run_id: UuidString,
     beat_index: NonNegativeSafeInteger,
-    factory_revision: PositiveSafeInteger,
+    factory_revision: NonNegativeSafeInteger,
     plan_digest: DigestSchema,
+    paid_budget_authority_digest: DigestSchema,
     factory_manifest_digest: DigestSchema,
     generation_nonce: UuidString,
     prompt: NonBlankString,
@@ -200,7 +248,7 @@ export const BeatVideoRequestV1Schema = z
     fps: PositiveSafeInteger,
     width: PositiveSafeInteger,
     height: PositiveSafeInteger,
-    reference_artifacts: z.array(ArtifactRefSchema).min(1),
+    reference_artifacts: z.array(StrictAllBeatArtifactRefV1Schema).min(1),
     provider: NonBlankString,
     model: NonBlankString,
     request_digest: DigestSchema,
@@ -208,7 +256,7 @@ export const BeatVideoRequestV1Schema = z
   .strict()
   .superRefine((value, ctx) => {
     validateReferenceArtifacts(value.reference_artifacts, value.beat_index, ctx, ['reference_artifacts']);
-    if (value.request_digest !== deriveBeatVideoRequestDigestV1(value)) {
+    if (!safelyEqualsDigest(value.request_digest, () => deriveBeatVideoRequestDigestV1(value))) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'request_digest does not match beat video request', path: ['request_digest'] });
     }
   });
@@ -219,8 +267,9 @@ export const BeatVideoReceiptV1Schema = z
     workspace_id: UuidString,
     run_id: UuidString,
     beat_index: NonNegativeSafeInteger,
-    factory_revision: PositiveSafeInteger,
+    factory_revision: NonNegativeSafeInteger,
     plan_digest: DigestSchema,
+    paid_budget_authority_digest: DigestSchema,
     factory_manifest_digest: DigestSchema,
     generation_nonce: UuidString,
     request_digest: DigestSchema,
@@ -232,7 +281,7 @@ export const BeatVideoReceiptV1Schema = z
     model: NonBlankString,
     provider_job_id: NonBlankString,
     status: z.literal('succeeded'),
-    artifact: ArtifactRefSchema,
+    artifact: StrictAllBeatArtifactRefV1Schema,
     receipt_digest: DigestSchema,
   })
   .strict()
@@ -245,7 +294,7 @@ export const BeatVideoReceiptV1Schema = z
     ) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'artifact dimensions or duration do not match request', path: ['artifact'] });
     }
-    if (value.receipt_digest !== deriveBeatVideoReceiptDigestV1(value)) {
+    if (!safelyEqualsDigest(value.receipt_digest, () => deriveBeatVideoReceiptDigestV1(value))) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'receipt_digest does not match beat video receipt', path: ['receipt_digest'] });
     }
   });
@@ -259,6 +308,7 @@ export function beatVideoReceiptBindsRequestV1(
     && receipt.beat_index === request.beat_index
     && receipt.factory_revision === request.factory_revision
     && receipt.plan_digest === request.plan_digest
+    && receipt.paid_budget_authority_digest === request.paid_budget_authority_digest
     && receipt.factory_manifest_digest === request.factory_manifest_digest
     && receipt.generation_nonce === request.generation_nonce
     && receipt.request_digest === request.request_digest
@@ -275,8 +325,9 @@ export const BeatArtifactSetReceiptV1Schema = z
     contract_version: z.literal('BeatArtifactSetReceipt.v1'),
     workspace_id: UuidString,
     run_id: UuidString,
-    factory_revision: PositiveSafeInteger,
+    factory_revision: NonNegativeSafeInteger,
     plan_digest: DigestSchema,
+    paid_budget_authority_digest: DigestSchema,
     factory_manifest_digest: DigestSchema,
     expected_beat_count: PositiveSafeInteger,
     video_receipts: z.array(BeatVideoReceiptV1Schema).min(1),
@@ -299,6 +350,7 @@ export const BeatArtifactSetReceiptV1Schema = z
         || receipt.run_id !== value.run_id
         || receipt.factory_revision !== value.factory_revision
         || receipt.plan_digest !== value.plan_digest
+        || receipt.paid_budget_authority_digest !== value.paid_budget_authority_digest
         || receipt.factory_manifest_digest !== value.factory_manifest_digest
       ) {
         ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'video receipt scope or digest does not match set', path: ['video_receipts', index] });
@@ -309,7 +361,7 @@ export const BeatArtifactSetReceiptV1Schema = z
       receiptDigests.add(receipt.receipt_digest);
       artifactDigests.add(receipt.artifact.sha256);
     });
-    if (value.receipt_digest !== deriveBeatArtifactSetReceiptDigestV1(value)) {
+    if (!safelyEqualsDigest(value.receipt_digest, () => deriveBeatArtifactSetReceiptDigestV1(value))) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'receipt_digest does not match beat artifact set', path: ['receipt_digest'] });
     }
   });
@@ -319,11 +371,12 @@ export const AtroposFanInManifestV2Schema = z
     contract_version: z.literal('AtroposFanInManifest.v2'),
     workspace_id: UuidString,
     run_id: UuidString,
-    factory_revision: PositiveSafeInteger,
+    factory_revision: NonNegativeSafeInteger,
     plan_digest: DigestSchema,
+    paid_budget_authority_digest: DigestSchema,
     factory_manifest_digest: DigestSchema,
     beat_artifact_set_receipt: BeatArtifactSetReceiptV1Schema,
-    video_artifacts: z.array(ArtifactRefSchema).min(1),
+    video_artifacts: z.array(StrictAllBeatArtifactRefV1Schema).min(1),
     timeline_digest: DigestSchema,
     audio_mix_digest: DigestSchema,
     render_policy_digest: DigestSchema,
@@ -337,15 +390,16 @@ export const AtroposFanInManifestV2Schema = z
       || receipt.run_id !== value.run_id
       || receipt.factory_revision !== value.factory_revision
       || receipt.plan_digest !== value.plan_digest
+      || receipt.paid_budget_authority_digest !== value.paid_budget_authority_digest
       || receipt.factory_manifest_digest !== value.factory_manifest_digest
     ) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'beat artifact set scope or digest does not match fan-in', path: ['beat_artifact_set_receipt'] });
     }
     const expected = receipt.video_receipts.map((item) => item.artifact);
-    if (sha256Digest(value.video_artifacts) !== sha256Digest(expected)) {
+    if (!safelyCanonicalEqual(value.video_artifacts, expected)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'video_artifacts must exactly match ordered video receipts', path: ['video_artifacts'] });
     }
-    if (value.manifest_digest !== deriveAtroposFanInManifestDigestV2(value)) {
+    if (!safelyEqualsDigest(value.manifest_digest, () => deriveAtroposFanInManifestDigestV2(value))) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'manifest_digest does not match Atropos fan-in', path: ['manifest_digest'] });
     }
   });
@@ -355,11 +409,11 @@ export const HephaestusFinalRenderReceiptV2Schema = z
     contract_version: z.literal('HephaestusFinalRenderReceipt.v2'),
     workspace_id: UuidString,
     run_id: UuidString,
-    factory_revision: PositiveSafeInteger,
+    factory_revision: NonNegativeSafeInteger,
     fan_in_manifest_digest: DigestSchema,
     status: z.literal('ready'),
-    output_artifact: ArtifactRefSchema,
-    output_url: z.string().regex(/^https:\/\/\S+$/, 'output_url must be durable HTTPS'),
+    output_artifact: StrictAllBeatArtifactRefV1Schema,
+    output_url: z.string().refine(isCredentialFreeHttpsUrl, 'output_url must be credential-free HTTPS with a valid host'),
     mechanical_qa_passed: z.literal(true),
     rendered_at_utc: UtcTimestamp,
     receipt_digest: DigestSchema,
@@ -367,7 +421,7 @@ export const HephaestusFinalRenderReceiptV2Schema = z
   .strict()
   .superRefine((value, ctx) => {
     validateVideoArtifact(value.output_artifact, null, ctx, ['output_artifact']);
-    if (value.receipt_digest !== deriveHephaestusFinalRenderReceiptDigestV2(value)) {
+    if (!safelyEqualsDigest(value.receipt_digest, () => deriveHephaestusFinalRenderReceiptDigestV2(value))) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'receipt_digest does not match final render receipt', path: ['receipt_digest'] });
     }
   });
@@ -377,14 +431,15 @@ export const ReelsFactoryReceiptV2Schema = z
     contract_version: z.literal('ReelsFactoryReceipt.v2'),
     workspace_id: UuidString,
     run_id: UuidString,
-    factory_revision: PositiveSafeInteger,
+    factory_revision: NonNegativeSafeInteger,
     plan_digest: DigestSchema,
+    paid_budget_authority_digest: DigestSchema,
     factory_manifest_digest: DigestSchema,
     beat_artifact_set_receipt_digest: DigestSchema,
     fan_in_manifest_digest: DigestSchema,
     final_render_receipt: HephaestusFinalRenderReceiptV2Schema,
     status: z.literal('succeeded'),
-    output_url: z.string().regex(/^https:\/\/\S+$/, 'output_url must be durable HTTPS'),
+    output_url: z.string().refine(isCredentialFreeHttpsUrl, 'output_url must be credential-free HTTPS with a valid host'),
     output_sha256: DigestSchema,
     receipt_digest: DigestSchema,
   })
@@ -407,12 +462,82 @@ export const ReelsFactoryReceiptV2Schema = z
     if (render.output_artifact.sha256 !== value.output_sha256) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'output_sha256 does not match final render artifact', path: ['output_sha256'] });
     }
-    if (value.receipt_digest !== deriveReelsFactoryReceiptDigestV2(value)) {
+    if (!safelyEqualsDigest(value.receipt_digest, () => deriveReelsFactoryReceiptDigestV2(value))) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'receipt_digest does not match reels factory receipt', path: ['receipt_digest'] });
     }
   });
 
+function isCredentialFreeHttpsUrl(value: string): boolean {
+  try {
+    if (/\s/.test(value)) return false;
+    const rawAuthority = /^https:\/\/([^/?#]+)/.exec(value)?.[1];
+    if (!rawAuthority || rawAuthority.includes('@')) return false;
+    const parsed = new URL(value);
+    const hostname = parsed.hostname;
+    const dnsHost = hostname.length <= 253 && hostname.replace(/\.$/, '').split('.').every(
+      (label) => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(label),
+    );
+    const ipv6Host = /^\[[0-9A-Fa-f:]+\]$/.test(hostname);
+    return parsed.protocol === 'https:' && hostname.length > 0 && (dnsHost || ipv6Host)
+      && parsed.username === '' && parsed.password === '';
+  } catch { return false; }
+}
+
+export function factoryBeatManifestBindsPaidAuthorityV1(
+  manifest: FactoryBeatManifestV1,
+  authority: FactoryPaidBudgetAuthorityV1,
+): boolean {
+  return manifest.workspace_id === authority.workspace_id
+    && manifest.run_id === authority.run_id
+    && manifest.factory_revision === authority.factory_revision
+    && manifest.beats.length === authority.all_beat_count
+    && manifest.paid_budget_authority_digest === authority.authority_digest;
+}
+
+export function beatVideoRequestBindsManifestV1(
+  request: BeatVideoRequestV1,
+  manifest: FactoryBeatManifestV1,
+): boolean {
+  const beat = manifest.beats[request.beat_index];
+  return beat !== undefined
+    && request.workspace_id === manifest.workspace_id && request.run_id === manifest.run_id
+    && request.factory_revision === manifest.factory_revision
+    && request.plan_digest === manifest.plan_digest
+    && request.paid_budget_authority_digest === manifest.paid_budget_authority_digest
+    && request.factory_manifest_digest === manifest.manifest_digest
+    && request.generation_nonce === beat.generation_nonce && request.prompt === beat.prompt
+    && request.duration_ms === beat.duration_ms && request.fps === beat.fps
+    && request.width === beat.width && request.height === beat.height
+    && sha256Digest(request.reference_artifacts) === sha256Digest(beat.reference_artifacts)
+    && request.provider === beat.provider && request.model === beat.model;
+}
+
+export function reelsFactoryReceiptBindsChainV2(
+  factory: ReelsFactoryReceiptV2,
+  manifest: FactoryBeatManifestV1,
+  artifactSet: BeatArtifactSetReceiptV1,
+  fanIn: AtroposFanInManifestV2,
+): boolean {
+  const scope = [factory.workspace_id, factory.run_id, factory.factory_revision,
+    factory.plan_digest, factory.paid_budget_authority_digest, factory.factory_manifest_digest];
+  return sha256Digest(scope) === sha256Digest([
+    manifest.workspace_id, manifest.run_id, manifest.factory_revision,
+    manifest.plan_digest, manifest.paid_budget_authority_digest, manifest.manifest_digest,
+  ]) && sha256Digest(scope) === sha256Digest([
+    artifactSet.workspace_id, artifactSet.run_id, artifactSet.factory_revision,
+    artifactSet.plan_digest, artifactSet.paid_budget_authority_digest,
+    artifactSet.factory_manifest_digest,
+  ]) && sha256Digest(scope) === sha256Digest([
+    fanIn.workspace_id, fanIn.run_id, fanIn.factory_revision, fanIn.plan_digest,
+    fanIn.paid_budget_authority_digest, fanIn.factory_manifest_digest,
+  ]) && factory.beat_artifact_set_receipt_digest === artifactSet.receipt_digest
+    && sha256Digest(fanIn.beat_artifact_set_receipt) === sha256Digest(artifactSet)
+    && factory.fan_in_manifest_digest === fanIn.manifest_digest
+    && factory.final_render_receipt.fan_in_manifest_digest === fanIn.manifest_digest;
+}
+
 export type FactoryBeatSpecV1 = z.infer<typeof FactoryBeatSpecV1Schema>;
+export type StrictAllBeatArtifactRefV1 = z.infer<typeof StrictAllBeatArtifactRefV1Schema>;
 export type FactoryBeatManifestV1 = z.infer<typeof FactoryBeatManifestV1Schema>;
 export type BeatVideoRequestV1 = z.infer<typeof BeatVideoRequestV1Schema>;
 export type BeatVideoReceiptV1 = z.infer<typeof BeatVideoReceiptV1Schema>;

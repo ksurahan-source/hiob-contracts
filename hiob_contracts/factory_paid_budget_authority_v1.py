@@ -8,7 +8,7 @@ PaidCallBudget.v1 execution contract.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Mapping
+from typing import Annotated, Any, Literal, Mapping, Protocol
 
 from pydantic import BaseModel, Field, StringConstraints, model_validator
 
@@ -18,11 +18,15 @@ from .ares_script_revision_v1 import (
     NonNegativeInt,
     UuidStr,
     _FROZEN_STRICT,
+    _parse_utc,
     canonical_contract_digest_v1,
 )
 
 
 FACTORY_PAID_BUDGET_AUTHORITY_VERSION_V1 = "FactoryPaidBudgetAuthority.v1"
+FACTORY_PAID_BUDGET_APPROVAL_RECEIPT_VERSION_V1 = (
+    "FactoryPaidBudgetApprovalReceipt.v1"
+)
 PositiveSafeInt = Annotated[int, Field(gt=0, le=9_007_199_254_740_991)]
 AllBeatCount = Annotated[int, Field(ge=1, le=16)]
 CurrencyCode = Annotated[str, StringConstraints(pattern=r"^[A-Z]{3}$")]
@@ -113,8 +117,32 @@ def derive_factory_paid_budget_authority_digest_v1(
     return canonical_contract_digest_v1(value, exclude={"authority_digest"})
 
 
+def derive_factory_paid_budget_approval_receipt_digest_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return canonical_contract_digest_v1(value, exclude={"receipt_digest"})
+
+
+class FactoryPaidBudgetApprovalResolverV1(Protocol):
+    """Durable authority required to prove an approval is still current."""
+
+    def is_current_approval(
+        self,
+        *,
+        receipt_id: str,
+        receipt_digest: str,
+        workspace_id: str,
+        run_id: str,
+        factory_revision: int,
+        state_revision: int,
+        policy_version: str,
+        approval_subject_digest: str,
+        approver_account_id: str,
+    ) -> bool: ...
+
+
 class FactoryPaidBudgetAuthorityV1(BaseModel):
-    """Durable approval proof for pre-script paid scope and ceiling."""
+    """Structurally sealed scope; validation alone is not execution authority."""
 
     model_config = _FROZEN_STRICT
 
@@ -164,6 +192,117 @@ class FactoryPaidBudgetAuthorityV1(BaseModel):
             )
         return self
 
+    @classmethod
+    def from_verified(
+        cls,
+        value: Mapping[str, Any] | BaseModel,
+        *,
+        approval_receipt: "FactoryPaidBudgetApprovalReceiptV1",
+        at_utc: str,
+        resolver: FactoryPaidBudgetApprovalResolverV1,
+    ) -> "FactoryPaidBudgetAuthorityV1":
+        authority = cls.model_validate(_as_json_dict(value))
+        if not approval_receipt.authorizes(
+            authority, at_utc=at_utc, resolver=resolver
+        ):
+            raise ValueError("authority requires current durable approval")
+        return authority
+
+
+class FactoryPaidBudgetApprovalReceiptV1(BaseModel):
+    """Approval evidence; never bearer authority without its durable resolver."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["FactoryPaidBudgetApprovalReceipt.v1"]
+    receipt_id: NonBlankStr
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    all_beat_count: AllBeatCount
+    paid_calls: FactoryPaidCallCardinalityV1
+    max_total_cost_microunits: PositiveSafeInt
+    currency: CurrencyCode
+    approval_subject_digest: DigestStr
+    approver_account_id: NonBlankStr
+    decision: Literal["approved"]
+    policy_version: NonBlankStr
+    state_revision: PositiveSafeInt
+    approved_at_utc: str
+    expires_at_utc: str
+    revoked_at_utc: str | None
+    transaction_audit_id: NonBlankStr
+    receipt_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_receipt(self) -> "FactoryPaidBudgetApprovalReceiptV1":
+        if self.transaction_audit_id != self.receipt_id:
+            raise ValueError("transaction_audit_id must equal receipt_id")
+        if self.paid_calls.model_dump() != factory_paid_call_cardinality_v1(
+            self.all_beat_count
+        ):
+            raise ValueError("paid_calls must equal exact all_beat_count cardinality")
+        if self.approval_subject_digest != (
+            derive_factory_paid_budget_approval_subject_digest_v1(self)
+        ):
+            raise ValueError("approval_subject_digest does not match paid budget scope")
+        approved = _parse_utc(self.approved_at_utc)
+        expires = _parse_utc(self.expires_at_utc)
+        if expires <= approved:
+            raise ValueError("expires_at_utc must follow approved_at_utc")
+        if self.revoked_at_utc is not None:
+            revoked = _parse_utc(self.revoked_at_utc)
+            if revoked < approved or revoked > expires:
+                raise ValueError("revoked_at_utc must fall within approval lifetime")
+        if self.receipt_digest != (
+            derive_factory_paid_budget_approval_receipt_digest_v1(self)
+        ):
+            raise ValueError("receipt_digest does not match approval receipt")
+        return self
+
+    def structurally_binds(self, authority: FactoryPaidBudgetAuthorityV1) -> bool:
+        return (
+            self.receipt_id == authority.approval_receipt_id
+            and self.receipt_digest == authority.approval_receipt_digest
+            and self.workspace_id == authority.workspace_id
+            and self.run_id == authority.run_id
+            and self.factory_revision == authority.factory_revision
+            and self.all_beat_count == authority.all_beat_count
+            and self.paid_calls == authority.paid_calls
+            and self.max_total_cost_microunits
+            == authority.max_total_cost_microunits
+            and self.currency == authority.currency
+            and self.approval_subject_digest == authority.approval_subject_digest
+        )
+
+    def authorizes(
+        self,
+        authority: FactoryPaidBudgetAuthorityV1,
+        *,
+        at_utc: str,
+        resolver: FactoryPaidBudgetApprovalResolverV1,
+    ) -> bool:
+        if not self.structurally_binds(authority):
+            return False
+        at = _parse_utc(at_utc)
+        if (
+            at < _parse_utc(self.approved_at_utc)
+            or at >= _parse_utc(self.expires_at_utc)
+            or self.revoked_at_utc is not None
+        ):
+            return False
+        return resolver.is_current_approval(
+            receipt_id=self.receipt_id,
+            receipt_digest=self.receipt_digest,
+            workspace_id=self.workspace_id,
+            run_id=self.run_id,
+            factory_revision=self.factory_revision,
+            state_revision=self.state_revision,
+            policy_version=self.policy_version,
+            approval_subject_digest=self.approval_subject_digest,
+            approver_account_id=self.approver_account_id,
+        )
+
 
 def build_factory_paid_budget_authority_v1(
     *,
@@ -173,10 +312,11 @@ def build_factory_paid_budget_authority_v1(
     all_beat_count: int,
     max_total_cost_microunits: int,
     currency: str,
-    approval_receipt_id: str,
-    approval_receipt_digest: str,
+    approval_receipt: FactoryPaidBudgetApprovalReceiptV1,
+    at_utc: str,
+    resolver: FactoryPaidBudgetApprovalResolverV1,
 ) -> FactoryPaidBudgetAuthorityV1:
-    """Build the only valid exact-cardinality authority shape."""
+    """Build only from a typed, current, durable approval receipt."""
 
     body: dict[str, Any] = {
         "contract_version": FACTORY_PAID_BUDGET_AUTHORITY_VERSION_V1,
@@ -187,8 +327,8 @@ def build_factory_paid_budget_authority_v1(
         "paid_calls": factory_paid_call_cardinality_v1(all_beat_count),
         "max_total_cost_microunits": max_total_cost_microunits,
         "currency": currency,
-        "approval_receipt_id": approval_receipt_id,
-        "approval_receipt_digest": approval_receipt_digest,
+        "approval_receipt_id": approval_receipt.receipt_id,
+        "approval_receipt_digest": approval_receipt.receipt_digest,
     }
     body["approval_subject_digest"] = (
         derive_factory_paid_budget_approval_subject_digest_v1(body)
@@ -199,16 +339,25 @@ def build_factory_paid_budget_authority_v1(
     body["authority_digest"] = (
         derive_factory_paid_budget_authority_digest_v1(body)
     )
-    return FactoryPaidBudgetAuthorityV1.model_validate(body)
+    return FactoryPaidBudgetAuthorityV1.from_verified(
+        body,
+        approval_receipt=approval_receipt,
+        at_utc=at_utc,
+        resolver=resolver,
+    )
 
 
 __all__ = [
     "FACTORY_PAID_BUDGET_AUTHORITY_VERSION_V1",
+    "FACTORY_PAID_BUDGET_APPROVAL_RECEIPT_VERSION_V1",
     "FactoryPaidCallCardinalityV1",
+    "FactoryPaidBudgetApprovalResolverV1",
+    "FactoryPaidBudgetApprovalReceiptV1",
     "FactoryPaidBudgetAuthorityV1",
     "factory_paid_call_cardinality_v1",
     "derive_factory_paid_budget_approval_subject_digest_v1",
     "derive_factory_paid_budget_idempotency_key_v1",
     "derive_factory_paid_budget_authority_digest_v1",
+    "derive_factory_paid_budget_approval_receipt_digest_v1",
     "build_factory_paid_budget_authority_v1",
 ]

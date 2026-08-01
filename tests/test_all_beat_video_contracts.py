@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -39,6 +40,7 @@ PLAN_DIGEST = sha256_digest({"plan": "approved-v2"})
 TIMELINE_DIGEST = sha256_digest({"timeline": "all-beats"})
 AUDIO_MIX_DIGEST = sha256_digest({"audio": "sealed-mix"})
 RENDER_POLICY_DIGEST = sha256_digest({"render": "vertical-1080p"})
+AUTHORITY_DIGEST = sha256_digest({"authority": "paid-all-beats"})
 
 
 def _artifact(
@@ -79,6 +81,7 @@ def _manifest_body() -> dict:
         "run_id": RUN_ID,
         "factory_revision": 11,
         "plan_digest": PLAN_DIGEST,
+        "paid_budget_authority_digest": AUTHORITY_DIGEST,
         "beats": [
             {
                 "beat_index": index,
@@ -106,6 +109,7 @@ def _manifest_body() -> dict:
 
 def _manifest() -> dict:
     body = _manifest_body()
+    body["idempotency_key"] = derive_factory_beat_manifest_idempotency_key_v1(body)
     return {
         **body,
         "manifest_digest": derive_factory_beat_manifest_digest_v1(body),
@@ -122,6 +126,7 @@ def _request(beat_index: int) -> dict:
         "beat_index": beat_index,
         "factory_revision": manifest["factory_revision"],
         "plan_digest": PLAN_DIGEST,
+        "paid_budget_authority_digest": AUTHORITY_DIGEST,
         "factory_manifest_digest": manifest["manifest_digest"],
         "generation_nonce": beat["generation_nonce"],
         "prompt": beat["prompt"],
@@ -148,6 +153,7 @@ def _video_receipt(beat_index: int) -> dict:
         "beat_index": beat_index,
         "factory_revision": request["factory_revision"],
         "plan_digest": PLAN_DIGEST,
+        "paid_budget_authority_digest": AUTHORITY_DIGEST,
         "factory_manifest_digest": request["factory_manifest_digest"],
         "generation_nonce": request["generation_nonce"],
         "request_digest": request["request_digest"],
@@ -181,6 +187,7 @@ def _artifact_set() -> dict:
         "run_id": RUN_ID,
         "factory_revision": manifest["factory_revision"],
         "plan_digest": PLAN_DIGEST,
+        "paid_budget_authority_digest": AUTHORITY_DIGEST,
         "factory_manifest_digest": manifest["manifest_digest"],
         "expected_beat_count": len(manifest["beats"]),
         "video_receipts": [_video_receipt(0), _video_receipt(1)],
@@ -199,6 +206,7 @@ def _fan_in() -> dict:
         "run_id": RUN_ID,
         "factory_revision": artifact_set["factory_revision"],
         "plan_digest": PLAN_DIGEST,
+        "paid_budget_authority_digest": AUTHORITY_DIGEST,
         "factory_manifest_digest": artifact_set["factory_manifest_digest"],
         "beat_artifact_set_receipt": artifact_set,
         "video_artifacts": [
@@ -251,6 +259,7 @@ def _factory_receipt() -> dict:
         "run_id": RUN_ID,
         "factory_revision": manifest["factory_revision"],
         "plan_digest": PLAN_DIGEST,
+        "paid_budget_authority_digest": AUTHORITY_DIGEST,
         "factory_manifest_digest": manifest["manifest_digest"],
         "beat_artifact_set_receipt_digest": artifact_set["receipt_digest"],
         "fan_in_manifest_digest": fan_in["manifest_digest"],
@@ -292,6 +301,7 @@ def test_manifest_requires_exact_zero_based_all_beat_order(indices: list[int]) -
     for beat, index in zip(body["beats"], indices, strict=True):
         beat["beat_index"] = index
         beat["reference_artifacts"][0]["beat_index"] = index
+    body["idempotency_key"] = derive_factory_beat_manifest_idempotency_key_v1(body)
     body["manifest_digest"] = derive_factory_beat_manifest_digest_v1(body)
 
     with pytest.raises(ValidationError, match="0..N-1"):
@@ -302,6 +312,18 @@ def test_request_rejects_digest_and_reference_beat_drift() -> None:
     request = _request(0)
     request["prompt"] = "tampered"
     with pytest.raises(ValidationError, match="request_digest"):
+        BeatVideoRequestV1.model_validate(request)
+
+    request = _request(0)
+    request["reference_artifacts"][0]["beat_index"] = 1
+    request["request_digest"] = derive_beat_video_request_digest_v1(request)
+    with pytest.raises(ValidationError, match="reference artifact beat_index"):
+        BeatVideoRequestV1.model_validate(request)
+
+    request = _request(0)
+    request["reference_artifacts"][0]["uri"] = "https://cdn.example/image.png"
+    request["request_digest"] = derive_beat_video_request_digest_v1(request)
+    with pytest.raises(ValidationError, match="relative storage key"):
         BeatVideoRequestV1.model_validate(request)
 
 
@@ -331,7 +353,18 @@ def test_manifest_caps_beats_binds_authority_and_accepts_revision_zero() -> None
     body["factory_revision"] = 0
     body["idempotency_key"] = derive_factory_beat_manifest_idempotency_key_v1(body)
     body["manifest_digest"] = derive_factory_beat_manifest_digest_v1(body)
-    assert FactoryBeatManifestV1.model_validate(body).factory_revision == 0
+    manifest = FactoryBeatManifestV1.model_validate(body)
+    assert manifest.factory_revision == 0
+    authority = SimpleNamespace(
+        workspace_id=manifest.workspace_id,
+        run_id=manifest.run_id,
+        factory_revision=0,
+        all_beat_count=len(manifest.beats),
+        authority_digest=AUTHORITY_DIGEST,
+    )
+    assert factory_beat_manifest_binds_paid_authority_v1(manifest, authority)
+    authority.authority_digest = sha256_digest({"authority": "other"})
+    assert not factory_beat_manifest_binds_paid_authority_v1(manifest, authority)
 
 
 def test_terminal_verifier_rejects_rehashed_cross_chain_substitution() -> None:
@@ -344,6 +377,7 @@ def test_terminal_verifier_rejects_rehashed_cross_chain_substitution() -> None:
     )
     alien = _manifest()
     alien["plan_digest"] = sha256_digest({"plan": "alien"})
+    alien["idempotency_key"] = derive_factory_beat_manifest_idempotency_key_v1(alien)
     alien["manifest_digest"] = derive_factory_beat_manifest_digest_v1(alien)
     assert not reels_factory_receipt_binds_chain_v2(
         factory,
@@ -369,22 +403,9 @@ def test_output_url_requires_valid_credential_free_https_host(url: str) -> None:
 def test_all_beat_artifact_integer_fields_are_strict_json_safe(value) -> None:
     request = _request(0)
     request["reference_artifacts"][0]["bytes_len"] = value
-    request["request_digest"] = derive_beat_video_request_digest_v1(request)
     with pytest.raises((ValidationError, ValueError)):
+        request["request_digest"] = derive_beat_video_request_digest_v1(request)
         BeatVideoRequestV1.model_validate(request)
-
-    request = _request(0)
-    request["reference_artifacts"][0]["beat_index"] = 1
-    request["request_digest"] = derive_beat_video_request_digest_v1(request)
-    with pytest.raises(ValidationError, match="reference artifact beat_index"):
-        BeatVideoRequestV1.model_validate(request)
-
-    request = _request(0)
-    request["reference_artifacts"][0]["uri"] = "https://cdn.example/image.png"
-    request["request_digest"] = derive_beat_video_request_digest_v1(request)
-    with pytest.raises(ValidationError, match="relative storage key"):
-        BeatVideoRequestV1.model_validate(request)
-
 
 def test_video_receipt_rejects_non_video_or_wrong_beat_artifact() -> None:
     receipt = _video_receipt(0)
@@ -475,8 +496,8 @@ def test_contract_registry_and_fail_loud_validation_expose_consumers() -> None:
 
 def test_digest_vector_is_stable_for_python_typescript_parity() -> None:
     assert _manifest()["manifest_digest"] == (
-        "sha256:7946182c7515f98c374bfe326e88ebfb33aa4d59fa0f6fdb18e637cd4d32a126"
+        "sha256:9afbef2bb2fe6ef1ecb8d168e0a5c3441c90ad73f9a69cc5f4bee74d2c3b1acd"
     )
     assert _factory_receipt()["receipt_digest"] == (
-        "sha256:408bc3bc4d72ed8b1ef351088c377b63d373a7a6f345fe8c118d4d111390b9c8"
+        "sha256:8aaa8f391e121cffe978c0c2026ef3b10b0ebd06fefd520da440c437447bbd6f"
     )

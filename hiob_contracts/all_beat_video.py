@@ -15,7 +15,10 @@ receipts.  They cannot be represented as a successful artifact receipt.
 
 from __future__ import annotations
 
+import ipaddress
+import re
 from typing import Annotated, Any, Literal, Mapping
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -27,7 +30,7 @@ from .ares_script_revision_v1 import (
     _FROZEN_STRICT,
     canonical_contract_digest_v1,
 )
-from .factory import ArtifactRef
+from .factory_paid_budget_authority_v1 import FactoryPaidBudgetAuthorityV1
 
 
 PositiveInt = Annotated[int, Field(gt=0, le=9_007_199_254_740_991)]
@@ -71,7 +74,7 @@ def _assert_relative_storage_key(value: str, field: str) -> None:
 
 
 def _assert_reference_artifacts(
-    artifacts: tuple[ArtifactRef, ...],
+    artifacts: tuple["StrictAllBeatArtifactRefV1", ...],
     beat_index: int,
 ) -> None:
     digests: set[str] = set()
@@ -87,7 +90,7 @@ def _assert_reference_artifacts(
 
 
 def _assert_video_artifact(
-    artifact: ArtifactRef,
+    artifact: "StrictAllBeatArtifactRefV1",
     *,
     beat_index: int | None,
     final: bool = False,
@@ -109,10 +112,90 @@ def _assert_video_artifact(
         raise ValueError("final artifact must not be bound to one beat")
 
 
+def _assert_https_url(value: str) -> None:
+    if any(char.isspace() for char in value):
+        raise ValueError("output_url must be credential-free HTTPS with a valid host")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("output_url must be credential-free HTTPS with a valid host") from exc
+    hostname = parsed.hostname
+    hostname_valid = False
+    if hostname:
+        try:
+            ipaddress.ip_address(hostname)
+            hostname_valid = True
+        except ValueError:
+            labels = hostname.rstrip(".").split(".")
+            hostname_valid = len(hostname) <= 253 and all(
+                re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?", label)
+                for label in labels
+            )
+    if (
+        parsed.scheme != "https"
+        or not hostname
+        or not hostname_valid
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None and not 1 <= port <= 65535
+    ):
+        raise ValueError("output_url must be credential-free HTTPS with a valid host")
+
+
+class StrictAllBeatArtifactRefV1(BaseModel):
+    """Strict JSON-safe adapter for legacy ArtifactRef's wire shape."""
+
+    model_config = _FROZEN_STRICT
+
+    artifact_id: NonBlankStr
+    kind: NonBlankStr
+    uri: NonBlankStr
+    sha256: DigestStr
+    mime: NonBlankStr
+    bytes_len: NonNegativeInt
+    duration_ms: NonNegativeInt | None = None
+    width: NonNegativeInt | None = None
+    height: NonNegativeInt | None = None
+    beat_index: NonNegativeInt | None = None
+    producer_planet: NonBlankStr
+    producer_node_id: NonBlankStr
+    execution_id: NonBlankStr
+    producer_revision: NonBlankStr
+    image_digest: DigestStr | None = None
+    source_output_digests: tuple[DigestStr, ...] = ()
+    edge_receipt_digests: tuple[DigestStr, ...] = ()
+    provenance_refs: tuple[NonBlankStr, ...] = ()
+    consent_refs: tuple[NonBlankStr, ...] = ()
+
+    @field_validator(
+        "source_output_digests", "edge_receipt_digests",
+        "provenance_refs", "consent_refs", mode="before"
+    )
+    @classmethod
+    def _tuple_fields(cls, value: Any) -> Any:
+        return _as_tuple(value)
+
+
 def derive_factory_beat_manifest_digest_v1(
     value: Mapping[str, Any] | BaseModel,
 ) -> str:
     return _derive_digest(value, "manifest_digest")
+
+
+def derive_factory_beat_manifest_idempotency_key_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    data = value.model_dump(mode="json") if isinstance(value, BaseModel) else dict(value)
+    return canonical_contract_digest_v1({
+        "purpose": "factory-beat-manifest.v1",
+        "workspace_id": data["workspace_id"],
+        "run_id": data["run_id"],
+        "factory_revision": data["factory_revision"],
+        "plan_digest": data["plan_digest"],
+        "paid_budget_authority_digest": data["paid_budget_authority_digest"],
+        "beats": data["beats"],
+    })
 
 
 def derive_beat_video_request_digest_v1(
@@ -163,7 +246,7 @@ class FactoryBeatSpecV1(BaseModel):
     fps: PositiveInt
     width: PositiveInt
     height: PositiveInt
-    reference_artifacts: tuple[ArtifactRef, ...] = Field(min_length=1)
+    reference_artifacts: tuple[StrictAllBeatArtifactRefV1, ...] = Field(min_length=1)
     provider: NonBlankStr
     model: NonBlankStr
 
@@ -186,9 +269,11 @@ class FactoryBeatManifestV1(BaseModel):
     contract_version: Literal["FactoryBeatManifest.v1"]
     workspace_id: UuidStr
     run_id: UuidStr
-    factory_revision: PositiveInt
+    factory_revision: NonNegativeInt
     plan_digest: DigestStr
-    beats: tuple[FactoryBeatSpecV1, ...] = Field(min_length=1, max_length=64)
+    paid_budget_authority_digest: DigestStr
+    beats: tuple[FactoryBeatSpecV1, ...] = Field(min_length=1, max_length=16)
+    idempotency_key: DigestStr
     manifest_digest: DigestStr
 
     @field_validator("beats", mode="before")
@@ -204,6 +289,8 @@ class FactoryBeatManifestV1(BaseModel):
         nonces = [beat.generation_nonce for beat in self.beats]
         if len(nonces) != len(set(nonces)):
             raise ValueError("generation_nonce must be unique per beat")
+        if self.idempotency_key != derive_factory_beat_manifest_idempotency_key_v1(self):
+            raise ValueError("idempotency_key does not match factory beat manifest")
         if self.manifest_digest != derive_factory_beat_manifest_digest_v1(self):
             raise ValueError("manifest_digest does not match factory beat manifest")
         return self
@@ -218,8 +305,9 @@ class BeatVideoRequestV1(BaseModel):
     workspace_id: UuidStr
     run_id: UuidStr
     beat_index: NonNegativeInt
-    factory_revision: PositiveInt
+    factory_revision: NonNegativeInt
     plan_digest: DigestStr
+    paid_budget_authority_digest: DigestStr
     factory_manifest_digest: DigestStr
     generation_nonce: UuidStr
     prompt: NonBlankStr
@@ -227,7 +315,7 @@ class BeatVideoRequestV1(BaseModel):
     fps: PositiveInt
     width: PositiveInt
     height: PositiveInt
-    reference_artifacts: tuple[ArtifactRef, ...] = Field(min_length=1)
+    reference_artifacts: tuple[StrictAllBeatArtifactRefV1, ...] = Field(min_length=1)
     provider: NonBlankStr
     model: NonBlankStr
     request_digest: DigestStr
@@ -254,8 +342,9 @@ class BeatVideoReceiptV1(BaseModel):
     workspace_id: UuidStr
     run_id: UuidStr
     beat_index: NonNegativeInt
-    factory_revision: PositiveInt
+    factory_revision: NonNegativeInt
     plan_digest: DigestStr
+    paid_budget_authority_digest: DigestStr
     factory_manifest_digest: DigestStr
     generation_nonce: UuidStr
     request_digest: DigestStr
@@ -267,7 +356,7 @@ class BeatVideoReceiptV1(BaseModel):
     model: NonBlankStr
     provider_job_id: NonBlankStr
     status: Literal["succeeded"]
-    artifact: ArtifactRef
+    artifact: StrictAllBeatArtifactRefV1
     receipt_digest: DigestStr
 
     @model_validator(mode="after")
@@ -290,6 +379,7 @@ class BeatVideoReceiptV1(BaseModel):
             and self.beat_index == request.beat_index
             and self.factory_revision == request.factory_revision
             and self.plan_digest == request.plan_digest
+            and self.paid_budget_authority_digest == request.paid_budget_authority_digest
             and self.factory_manifest_digest == request.factory_manifest_digest
             and self.generation_nonce == request.generation_nonce
             and self.request_digest == request.request_digest
@@ -310,8 +400,9 @@ class BeatArtifactSetReceiptV1(BaseModel):
     contract_version: Literal["BeatArtifactSetReceipt.v1"]
     workspace_id: UuidStr
     run_id: UuidStr
-    factory_revision: PositiveInt
+    factory_revision: NonNegativeInt
     plan_digest: DigestStr
+    paid_budget_authority_digest: DigestStr
     factory_manifest_digest: DigestStr
     expected_beat_count: PositiveInt
     video_receipts: tuple[BeatVideoReceiptV1, ...] = Field(min_length=1)
@@ -338,6 +429,7 @@ class BeatArtifactSetReceiptV1(BaseModel):
                 or receipt.run_id != self.run_id
                 or receipt.factory_revision != self.factory_revision
                 or receipt.plan_digest != self.plan_digest
+                or receipt.paid_budget_authority_digest != self.paid_budget_authority_digest
                 or receipt.factory_manifest_digest != self.factory_manifest_digest
             ):
                 raise ValueError("video receipt scope or digest does not match set")
@@ -360,11 +452,12 @@ class AtroposFanInManifestV2(BaseModel):
     contract_version: Literal["AtroposFanInManifest.v2"]
     workspace_id: UuidStr
     run_id: UuidStr
-    factory_revision: PositiveInt
+    factory_revision: NonNegativeInt
     plan_digest: DigestStr
+    paid_budget_authority_digest: DigestStr
     factory_manifest_digest: DigestStr
     beat_artifact_set_receipt: BeatArtifactSetReceiptV1
-    video_artifacts: tuple[ArtifactRef, ...] = Field(min_length=1)
+    video_artifacts: tuple[StrictAllBeatArtifactRefV1, ...] = Field(min_length=1)
     timeline_digest: DigestStr
     audio_mix_digest: DigestStr
     render_policy_digest: DigestStr
@@ -383,6 +476,7 @@ class AtroposFanInManifestV2(BaseModel):
             or receipt.run_id != self.run_id
             or receipt.factory_revision != self.factory_revision
             or receipt.plan_digest != self.plan_digest
+            or receipt.paid_budget_authority_digest != self.paid_budget_authority_digest
             or receipt.factory_manifest_digest != self.factory_manifest_digest
         ):
             raise ValueError("beat artifact set scope or digest does not match fan-in")
@@ -402,10 +496,10 @@ class HephaestusFinalRenderReceiptV2(BaseModel):
     contract_version: Literal["HephaestusFinalRenderReceipt.v2"]
     workspace_id: UuidStr
     run_id: UuidStr
-    factory_revision: PositiveInt
+    factory_revision: NonNegativeInt
     fan_in_manifest_digest: DigestStr
     status: Literal["ready"]
-    output_artifact: ArtifactRef
+    output_artifact: StrictAllBeatArtifactRefV1
     output_url: NonBlankStr
     mechanical_qa_passed: Literal[True]
     rendered_at_utc: UtcTimestamp
@@ -414,8 +508,7 @@ class HephaestusFinalRenderReceiptV2(BaseModel):
     @field_validator("output_url")
     @classmethod
     def _durable_output_url(cls, value: str) -> str:
-        if not value.startswith("https://") or any(char.isspace() for char in value):
-            raise ValueError("output_url must be durable HTTPS")
+        _assert_https_url(value)
         return value
 
     @model_validator(mode="after")
@@ -437,8 +530,9 @@ class ReelsFactoryReceiptV2(BaseModel):
     contract_version: Literal["ReelsFactoryReceipt.v2"]
     workspace_id: UuidStr
     run_id: UuidStr
-    factory_revision: PositiveInt
+    factory_revision: NonNegativeInt
     plan_digest: DigestStr
+    paid_budget_authority_digest: DigestStr
     factory_manifest_digest: DigestStr
     beat_artifact_set_receipt_digest: DigestStr
     fan_in_manifest_digest: DigestStr
@@ -447,6 +541,12 @@ class ReelsFactoryReceiptV2(BaseModel):
     output_url: NonBlankStr
     output_sha256: DigestStr
     receipt_digest: DigestStr
+
+    @field_validator("output_url")
+    @classmethod
+    def _durable_output_url(cls, value: str) -> str:
+        _assert_https_url(value)
+        return value
 
     @model_validator(mode="after")
     def _bind_terminal_success(self) -> "ReelsFactoryReceiptV2":
@@ -468,9 +568,90 @@ class ReelsFactoryReceiptV2(BaseModel):
         return self
 
 
+def factory_beat_manifest_binds_paid_authority_v1(
+    manifest: FactoryBeatManifestV1,
+    authority: FactoryPaidBudgetAuthorityV1,
+) -> bool:
+    return (
+        manifest.workspace_id == authority.workspace_id
+        and manifest.run_id == authority.run_id
+        and manifest.factory_revision == authority.factory_revision
+        and len(manifest.beats) == authority.all_beat_count
+        and manifest.paid_budget_authority_digest == authority.authority_digest
+    )
+
+
+def beat_video_request_binds_manifest_v1(
+    request: BeatVideoRequestV1,
+    manifest: FactoryBeatManifestV1,
+) -> bool:
+    if request.beat_index >= len(manifest.beats):
+        return False
+    beat = manifest.beats[request.beat_index]
+    return (
+        request.workspace_id == manifest.workspace_id
+        and request.run_id == manifest.run_id
+        and request.factory_revision == manifest.factory_revision
+        and request.plan_digest == manifest.plan_digest
+        and request.paid_budget_authority_digest
+        == manifest.paid_budget_authority_digest
+        and request.factory_manifest_digest == manifest.manifest_digest
+        and request.generation_nonce == beat.generation_nonce
+        and request.prompt == beat.prompt
+        and request.duration_ms == beat.duration_ms
+        and request.fps == beat.fps
+        and request.width == beat.width
+        and request.height == beat.height
+        and request.reference_artifacts == beat.reference_artifacts
+        and request.provider == beat.provider
+        and request.model == beat.model
+    )
+
+
+def reels_factory_receipt_binds_chain_v2(
+    factory: ReelsFactoryReceiptV2,
+    manifest: FactoryBeatManifestV1,
+    artifact_set: BeatArtifactSetReceiptV1,
+    fan_in: AtroposFanInManifestV2,
+) -> bool:
+    scope = (
+        factory.workspace_id,
+        factory.run_id,
+        factory.factory_revision,
+        factory.plan_digest,
+        factory.paid_budget_authority_digest,
+        factory.factory_manifest_digest,
+    )
+    return (
+        scope == (
+            manifest.workspace_id, manifest.run_id, manifest.factory_revision,
+            manifest.plan_digest, manifest.paid_budget_authority_digest,
+            manifest.manifest_digest,
+        )
+        and scope == (
+            artifact_set.workspace_id, artifact_set.run_id,
+            artifact_set.factory_revision, artifact_set.plan_digest,
+            artifact_set.paid_budget_authority_digest,
+            artifact_set.factory_manifest_digest,
+        )
+        and scope == (
+            fan_in.workspace_id, fan_in.run_id, fan_in.factory_revision,
+            fan_in.plan_digest, fan_in.paid_budget_authority_digest,
+            fan_in.factory_manifest_digest,
+        )
+        and factory.beat_artifact_set_receipt_digest
+        == artifact_set.receipt_digest
+        and fan_in.beat_artifact_set_receipt == artifact_set
+        and factory.fan_in_manifest_digest == fan_in.manifest_digest
+        and factory.final_render_receipt.fan_in_manifest_digest
+        == fan_in.manifest_digest
+    )
+
+
 __all__ = [
     "ALL_BEAT_VIDEO_CONTRACT_VERSIONS",
     "FactoryBeatSpecV1",
+    "StrictAllBeatArtifactRefV1",
     "FactoryBeatManifestV1",
     "BeatVideoRequestV1",
     "BeatVideoReceiptV1",
@@ -479,10 +660,14 @@ __all__ = [
     "HephaestusFinalRenderReceiptV2",
     "ReelsFactoryReceiptV2",
     "derive_factory_beat_manifest_digest_v1",
+    "derive_factory_beat_manifest_idempotency_key_v1",
     "derive_beat_video_request_digest_v1",
     "derive_beat_video_receipt_digest_v1",
     "derive_beat_artifact_set_receipt_digest_v1",
     "derive_atropos_fan_in_manifest_digest_v2",
     "derive_hephaestus_final_render_receipt_digest_v2",
     "derive_reels_factory_receipt_digest_v2",
+    "factory_beat_manifest_binds_paid_authority_v1",
+    "beat_video_request_binds_manifest_v1",
+    "reels_factory_receipt_binds_chain_v2",
 ]

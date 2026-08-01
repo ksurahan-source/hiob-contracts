@@ -11,6 +11,7 @@ from hiob_contracts import (
     FactoryPaidBudgetAuthorityV1,
     build_factory_paid_budget_authority_v1,
     derive_factory_paid_budget_approval_subject_digest_v1,
+    derive_factory_paid_budget_approval_receipt_digest_v1,
     derive_factory_paid_budget_authority_digest_v1,
     derive_factory_paid_budget_idempotency_key_v1,
     registered_contracts,
@@ -57,6 +58,13 @@ def _approval_receipt(**changes):
         "transaction_audit_id": "approval-paid-budget-1",
     }
     body.update(changes)
+    if "all_beat_count" in changes and "paid_calls" not in changes:
+        count = changes["all_beat_count"]
+        body["paid_calls"] = {
+            "script": 1, "image": count, "video": count, "voice": count,
+            "render": 1, "retries": 0, "fallbacks": 0,
+            "character_lock": 0,
+        }
     body["approval_subject_digest"] = (
         derive_factory_paid_budget_approval_subject_digest_v1(body)
     )
@@ -67,7 +75,23 @@ def _approval_receipt(**changes):
 
 
 def _authority(**changes):
-    receipt = changes.pop("approval_receipt", _approval_receipt())
+    receipt = changes.pop("approval_receipt", None)
+    scope = {
+        key: changes.pop(key)
+        for key in list(changes)
+        if key in {
+            "workspace_id", "run_id", "factory_revision", "all_beat_count",
+            "max_total_cost_microunits", "currency",
+        }
+    }
+    if receipt is None:
+        receipt_id = changes.pop("approval_receipt_id", "approval-paid-budget-1")
+        changes.pop("approval_receipt_digest", None)
+        receipt = _approval_receipt(
+            **scope,
+            receipt_id=receipt_id,
+            transaction_audit_id=receipt_id,
+        )
     body = {
         "workspace_id": WORKSPACE_ID,
         "run_id": RUN_ID,
@@ -78,6 +102,7 @@ def _authority(**changes):
         "approval_receipt": receipt,
         "at_utc": "2026-08-01T08:00:00Z",
         "resolver": _Resolver(),
+        **scope,
     }
     body.update(changes)
     return build_factory_paid_budget_authority_v1(**body).model_dump(mode="json")
@@ -308,9 +333,16 @@ def test_authority_does_not_collide_with_legacy_or_plan_budget_shape(
 
 def test_registry_exposes_fail_loud_consumer_surface() -> None:
     assert "FactoryPaidBudgetAuthority" in registered_contracts()
+    assert "FactoryPaidBudgetApprovalReceipt" in registered_contracts()
     result = validate_payload("FactoryPaidBudgetAuthority", _authority())
     assert result.ok is True
     assert isinstance(result.obj, FactoryPaidBudgetAuthorityV1)
+    receipt_result = validate_payload(
+        "FactoryPaidBudgetApprovalReceipt",
+        _approval_receipt().model_dump(mode="json"),
+    )
+    assert receipt_result.ok is True
+    assert isinstance(receipt_result.obj, FactoryPaidBudgetApprovalReceiptV1)
 
 
 def test_python_typescript_digest_vectors_are_stable() -> None:
@@ -319,9 +351,9 @@ def test_python_typescript_digest_vectors_are_stable() -> None:
         "sha256:0064203849c310151ff1e8b3ecc478e27d28294e4119b81366c568f8df25b9db"
     )
     assert value["idempotency_key"] == (
-        "sha256:53a29f902bce3f2777c0b4888c03eb3ddc99d604eba0c7d3516f03c8d7a49942"
+        "sha256:83f4b2491567bbea3b86b971f1bd4613a5ebc2ee3d96060dcac9301689e0063a"
     )
     assert value["authority_digest"] == (
-        "sha256:c4421ca6c74a7490a6c0ee3cd39ae0aea71018d5528ded5c2bda08d3adebbc8e"
+        "sha256:57bf474f67bddce6272f5540dd45cdf1cb4cd7cfa0119c274f22d8ce8b7899af"
     )
     derive_factory_paid_budget_approval_receipt_digest_v1,
