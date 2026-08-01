@@ -1,4 +1,4 @@
-"""All-beat video V2 factory contract chain."""
+"""All-beat video V2/V3 factory contract chain."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pydantic import ValidationError
 import hiob_contracts
 from hiob_contracts import (
     AtroposFanInManifestV2,
+    AtroposFanInManifestV3,
     BeatArtifactSetReceiptV1,
     BeatVideoReceiptV1,
     BeatVideoRequestV1,
@@ -22,6 +23,7 @@ from hiob_contracts import (
     reels_factory_receipt_binds_chain_v2,
     derive_factory_beat_manifest_idempotency_key_v1,
     derive_atropos_fan_in_manifest_digest_v2,
+    derive_atropos_fan_in_manifest_digest_v3,
     derive_beat_artifact_set_receipt_digest_v1,
     derive_beat_video_receipt_digest_v1,
     derive_beat_video_request_digest_v1,
@@ -51,19 +53,29 @@ def _artifact(
     sha_seed: str,
     duration_ms: int | None = None,
 ) -> dict:
+    is_video = kind == "video"
+    is_audio = kind == "audio"
     return {
         "artifact_id": artifact_id,
         "kind": kind,
         "uri": f"factory-artifacts/{artifact_id}",
         "sha256": sha256_digest({"artifact": sha_seed}),
-        "mime": "video/mp4" if kind == "video" else "image/png",
+        "mime": "video/mp4" if is_video else "audio/mpeg" if is_audio else "image/png",
         "bytes_len": 2048,
         "duration_ms": duration_ms,
-        "width": 1080,
-        "height": 1920,
+        "width": None if is_audio else 1080,
+        "height": None if is_audio else 1920,
         "beat_index": beat_index,
-        "producer_planet": "hephaestus" if kind == "video" else "athena",
-        "producer_node_id": "video.materialize" if kind == "video" else "image.materialize",
+        "producer_planet": (
+            "hephaestus" if is_video else "orpheus" if is_audio else "athena"
+        ),
+        "producer_node_id": (
+            "video.materialize"
+            if is_video
+            else "voice.materialize"
+            if is_audio
+            else "image.materialize"
+        ),
         "execution_id": f"exec-{artifact_id}",
         "producer_revision": "rev-1",
         "image_digest": None,
@@ -198,7 +210,20 @@ def _artifact_set() -> dict:
     }
 
 
-def _fan_in() -> dict:
+def _audio_artifacts() -> list[dict]:
+    return [
+        _artifact(
+            beat_index,
+            kind="audio",
+            artifact_id=f"voice-{beat_index}.mp3",
+            sha_seed=f"audio-{beat_index}",
+            duration_ms=5000,
+        )
+        for beat_index in range(2)
+    ]
+
+
+def _fan_in_v2() -> dict:
     artifact_set = _artifact_set()
     body = {
         "contract_version": "AtroposFanInManifest.v2",
@@ -222,8 +247,34 @@ def _fan_in() -> dict:
     }
 
 
-def _final_render() -> dict:
-    fan_in = _fan_in()
+def _fan_in_v3() -> dict:
+    artifact_set = _artifact_set()
+    audio_artifacts = _audio_artifacts()
+    body = {
+        "contract_version": "AtroposFanInManifest.v3",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "factory_revision": artifact_set["factory_revision"],
+        "plan_digest": PLAN_DIGEST,
+        "paid_budget_authority_digest": AUTHORITY_DIGEST,
+        "factory_manifest_digest": artifact_set["factory_manifest_digest"],
+        "beat_artifact_set_receipt": artifact_set,
+        "video_artifacts": [
+            receipt["artifact"] for receipt in artifact_set["video_receipts"]
+        ],
+        "audio_artifacts": audio_artifacts,
+        "timeline_digest": TIMELINE_DIGEST,
+        "audio_mix_digest": sha256_digest({"audio_artifacts": audio_artifacts}),
+        "render_policy_digest": RENDER_POLICY_DIGEST,
+    }
+    return {
+        **body,
+        "manifest_digest": derive_atropos_fan_in_manifest_digest_v3(body),
+    }
+
+
+def _final_render(fan_in: dict | None = None) -> dict:
+    fan_in = _fan_in_v3() if fan_in is None else fan_in
     body = {
         "contract_version": "HephaestusFinalRenderReceipt.v2",
         "workspace_id": WORKSPACE_ID,
@@ -248,11 +299,11 @@ def _final_render() -> dict:
     }
 
 
-def _factory_receipt() -> dict:
+def _factory_receipt(fan_in: dict | None = None) -> dict:
     manifest = _manifest()
     artifact_set = _artifact_set()
-    fan_in = _fan_in()
-    final_render = _final_render()
+    fan_in = _fan_in_v3() if fan_in is None else fan_in
+    final_render = _final_render(fan_in)
     body = {
         "contract_version": "ReelsFactoryReceipt.v2",
         "workspace_id": WORKSPACE_ID,
@@ -279,7 +330,7 @@ def test_valid_all_beat_chain_is_canonical_frozen_and_public() -> None:
     requests = [BeatVideoRequestV1.model_validate(_request(i)) for i in range(2)]
     receipts = [BeatVideoReceiptV1.model_validate(_video_receipt(i)) for i in range(2)]
     artifact_set = BeatArtifactSetReceiptV1.model_validate(_artifact_set())
-    fan_in = AtroposFanInManifestV2.model_validate(_fan_in())
+    fan_in = AtroposFanInManifestV3.model_validate(_fan_in_v3())
     final_render = HephaestusFinalRenderReceiptV2.model_validate(_final_render())
     factory = ReelsFactoryReceiptV2.model_validate(_factory_receipt())
 
@@ -289,10 +340,34 @@ def test_valid_all_beat_chain_is_canonical_frozen_and_public() -> None:
     ]
     assert artifact_set.expected_beat_count == 2
     assert [artifact.beat_index for artifact in fan_in.video_artifacts] == [0, 1]
+    assert [artifact.beat_index for artifact in fan_in.audio_artifacts] == [0, 1]
     assert final_render.output_url == factory.output_url
     assert hiob_contracts.ReelsFactoryReceiptV2 is ReelsFactoryReceiptV2
     with pytest.raises(ValidationError):
         manifest.beats[0].prompt = "mutated"
+
+
+def test_stored_v2_fan_in_and_factory_receipt_remain_byte_compatible() -> None:
+    fan_in_payload = _fan_in_v2()
+    fan_in = AtroposFanInManifestV2.model_validate(fan_in_payload)
+    factory = ReelsFactoryReceiptV2.model_validate(_factory_receipt(fan_in_payload))
+
+    assert fan_in.manifest_digest == (
+        "sha256:5898d7f56f6cf323fc099e3a3bc1181caf4adf203927541a0ec0a2784417b268"
+    )
+    assert factory.receipt_digest == (
+        "sha256:8aaa8f391e121cffe978c0c2026ef3b10b0ebd06fefd520da440c437447bbd6f"
+    )
+    assert reels_factory_receipt_binds_chain_v2(
+        factory,
+        FactoryBeatManifestV1.model_validate(_manifest()),
+        BeatArtifactSetReceiptV1.model_validate(_artifact_set()),
+        fan_in,
+    )
+
+    v3_only_field = {**fan_in_payload, "audio_artifacts": _audio_artifacts()}
+    with pytest.raises(ValidationError, match="audio_artifacts"):
+        AtroposFanInManifestV2.model_validate(v3_only_field)
 
 
 @pytest.mark.parametrize("indices", [[1, 0], [0, 2], [0, 0]])
@@ -369,7 +444,7 @@ def test_terminal_verifier_rejects_rehashed_cross_chain_substitution() -> None:
     factory = ReelsFactoryReceiptV2.model_validate(_factory_receipt())
     manifest = FactoryBeatManifestV1.model_validate(_manifest())
     artifact_set = BeatArtifactSetReceiptV1.model_validate(_artifact_set())
-    fan_in = AtroposFanInManifestV2.model_validate(_fan_in())
+    fan_in = AtroposFanInManifestV3.model_validate(_fan_in_v3())
     assert reels_factory_receipt_binds_chain_v2(
         factory, manifest, artifact_set, fan_in
     )
@@ -437,12 +512,88 @@ def test_artifact_set_rejects_partial_or_cross_scope_fan_in() -> None:
 
 
 def test_atropos_fan_in_rejects_artifact_substitution() -> None:
-    fan_in = _fan_in()
+    fan_in = _fan_in_v2()
     fan_in["video_artifacts"][1] = deepcopy(fan_in["video_artifacts"][0])
     fan_in["manifest_digest"] = derive_atropos_fan_in_manifest_digest_v2(fan_in)
 
     with pytest.raises(ValidationError, match="video_artifacts"):
         AtroposFanInManifestV2.model_validate(fan_in)
+
+
+def test_atropos_fan_in_requires_audio_artifacts() -> None:
+    fan_in = _fan_in_v3()
+    del fan_in["audio_artifacts"]
+    fan_in["manifest_digest"] = derive_atropos_fan_in_manifest_digest_v3(fan_in)
+
+    with pytest.raises(ValidationError, match="audio_artifacts"):
+        AtroposFanInManifestV3.model_validate(fan_in)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("kind", "video"),
+        ("mime", "application/octet-stream"),
+        ("mime", "audio/"),
+        ("mime", "audio/ "),
+        ("bytes_len", 0),
+        ("duration_ms", 0),
+        ("width", 1),
+        ("height", 1),
+    ],
+)
+def test_atropos_fan_in_rejects_invalid_audio_artifact_shape(
+    field: str,
+    value: object,
+) -> None:
+    fan_in = _fan_in_v3()
+    fan_in["audio_artifacts"][0][field] = value
+    fan_in["manifest_digest"] = derive_atropos_fan_in_manifest_digest_v3(fan_in)
+
+    with pytest.raises(ValidationError, match="audio artifact"):
+        AtroposFanInManifestV3.model_validate(fan_in)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "reordered", "duplicate", "duplicate_id", "duplicate_sha",
+        "duplicate_uri", "wrong_beat",
+    ],
+)
+def test_atropos_fan_in_audio_beats_exactly_match_video_beats(mutation: str) -> None:
+    fan_in = _fan_in_v3()
+    if mutation == "reordered":
+        fan_in["audio_artifacts"].reverse()
+    elif mutation == "duplicate":
+        fan_in["audio_artifacts"][1] = deepcopy(fan_in["audio_artifacts"][0])
+    elif mutation == "duplicate_id":
+        fan_in["audio_artifacts"][1]["artifact_id"] = (
+            fan_in["audio_artifacts"][0]["artifact_id"]
+        )
+    elif mutation == "duplicate_sha":
+        fan_in["audio_artifacts"][1]["sha256"] = (
+            fan_in["audio_artifacts"][0]["sha256"]
+        )
+    elif mutation == "duplicate_uri":
+        fan_in["audio_artifacts"][1]["uri"] = (
+            fan_in["audio_artifacts"][0]["uri"]
+        )
+    else:
+        fan_in["audio_artifacts"][1]["beat_index"] = 2
+    fan_in["manifest_digest"] = derive_atropos_fan_in_manifest_digest_v3(fan_in)
+
+    with pytest.raises(ValidationError, match="audio_artifacts"):
+        AtroposFanInManifestV3.model_validate(fan_in)
+
+
+def test_atropos_fan_in_audio_mix_digest_binds_ordered_artifacts() -> None:
+    fan_in = _fan_in_v3()
+    fan_in["audio_mix_digest"] = sha256_digest({"audio_artifacts": []})
+    fan_in["manifest_digest"] = derive_atropos_fan_in_manifest_digest_v3(fan_in)
+
+    with pytest.raises(ValidationError, match="audio_mix_digest"):
+        AtroposFanInManifestV3.model_validate(fan_in)
 
 
 @pytest.mark.parametrize(
@@ -483,6 +634,8 @@ def test_contract_registry_and_fail_loud_validation_expose_consumers() -> None:
         "BeatVideoReceipt",
         "BeatArtifactSetReceipt",
         "AtroposFanInManifest",
+        "AtroposFanInManifestV2",
+        "AtroposFanInManifestV3",
         "HephaestusFinalRenderReceipt",
         "ReelsFactoryReceiptV2",
     }
@@ -490,6 +643,8 @@ def test_contract_registry_and_fail_loud_validation_expose_consumers() -> None:
     result = validate_payload("ReelsFactoryReceiptV2", _factory_receipt())
     assert result.ok is True
     assert isinstance(result.obj, ReelsFactoryReceiptV2)
+    assert validate_payload("AtroposFanInManifestV2", _fan_in_v2()).ok is True
+    assert validate_payload("AtroposFanInManifestV3", _fan_in_v3()).ok is True
 
 
 def test_digest_vector_is_stable_for_python_typescript_parity() -> None:
@@ -497,5 +652,8 @@ def test_digest_vector_is_stable_for_python_typescript_parity() -> None:
         "sha256:9afbef2bb2fe6ef1ecb8d168e0a5c3441c90ad73f9a69cc5f4bee74d2c3b1acd"
     )
     assert _factory_receipt()["receipt_digest"] == (
+        "sha256:02811fe85bebbef85965088d8361527579c8d0eb6b8100c1601be3f6c142db6d"
+    )
+    assert _factory_receipt(_fan_in_v2())["receipt_digest"] == (
         "sha256:8aaa8f391e121cffe978c0c2026ef3b10b0ebd06fefd520da440c437447bbd6f"
     )

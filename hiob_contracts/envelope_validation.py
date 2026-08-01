@@ -38,7 +38,7 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "BeatPersona": ("hiob_contracts.beat_personas", "BeatPersona"),
     "BeatPersonas": ("hiob_contracts.beat_personas", "BeatPersonas"),
     "ElementLocks": ("hiob_contracts.element_locks", "ElementLocks"),
-    # All-beat video V2 factory chain.
+    # All-beat video V2/V3 factory chain.
     "FactoryBeatManifest": (
         "hiob_contracts.all_beat_video",
         "FactoryBeatManifestV1",
@@ -58,6 +58,14 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "AtroposFanInManifest": (
         "hiob_contracts.all_beat_video",
         "AtroposFanInManifestV2",
+    ),
+    "AtroposFanInManifestV2": (
+        "hiob_contracts.all_beat_video",
+        "AtroposFanInManifestV2",
+    ),
+    "AtroposFanInManifestV3": (
+        "hiob_contracts.all_beat_video",
+        "AtroposFanInManifestV3",
     ),
     "HephaestusFinalRenderReceipt": (
         "hiob_contracts.all_beat_video",
