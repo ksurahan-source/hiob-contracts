@@ -116,6 +116,27 @@ def _assert_video_artifact(
         raise ValueError("final artifact must not be bound to one beat")
 
 
+def _assert_audio_artifact(artifact: "StrictAllBeatArtifactRefV1") -> None:
+    _assert_relative_storage_key(artifact.uri, "audio artifact uri")
+    if (
+        artifact.kind != "audio"
+        or re.fullmatch(
+            r"audio/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*",
+            artifact.mime,
+        )
+        is None
+    ):
+        raise ValueError("audio artifact must have kind audio and an audio/* MIME")
+    if artifact.bytes_len <= 0:
+        raise ValueError("audio artifact bytes_len must be positive")
+    if artifact.duration_ms is None or artifact.duration_ms <= 0:
+        raise ValueError("audio artifact duration_ms must be positive")
+    if artifact.width is not None or artifact.height is not None:
+        raise ValueError("audio artifact width and height must be null")
+    if artifact.beat_index is None:
+        raise ValueError("audio artifact beat_index is required")
+
+
 def _assert_https_url(value: str) -> None:
     if any(char.isspace() for char in value):
         raise ValueError("output_url must be credential-free HTTPS with a valid host")
@@ -462,12 +483,13 @@ class AtroposFanInManifestV2(BaseModel):
     factory_manifest_digest: DigestStr
     beat_artifact_set_receipt: BeatArtifactSetReceiptV1
     video_artifacts: tuple[StrictAllBeatArtifactRefV1, ...] = Field(min_length=1)
+    audio_artifacts: tuple[StrictAllBeatArtifactRefV1, ...] = Field(min_length=1)
     timeline_digest: DigestStr
     audio_mix_digest: DigestStr
     render_policy_digest: DigestStr
     manifest_digest: DigestStr
 
-    @field_validator("video_artifacts", mode="before")
+    @field_validator("video_artifacts", "audio_artifacts", mode="before")
     @classmethod
     def _artifacts_tuple(cls, value: Any) -> Any:
         return _as_tuple(value)
@@ -487,6 +509,31 @@ class AtroposFanInManifestV2(BaseModel):
         expected = tuple(item.artifact for item in receipt.video_receipts)
         if self.video_artifacts != expected:
             raise ValueError("video_artifacts must exactly match ordered video receipts")
+        for artifact in self.audio_artifacts:
+            _assert_audio_artifact(artifact)
+        audio_beats = tuple(artifact.beat_index for artifact in self.audio_artifacts)
+        video_beats = tuple(artifact.beat_index for artifact in self.video_artifacts)
+        if (
+            audio_beats != video_beats
+            or len(set(audio_beats)) != len(audio_beats)
+            or len({artifact.artifact_id for artifact in self.audio_artifacts})
+            != len(self.audio_artifacts)
+            or len({artifact.sha256 for artifact in self.audio_artifacts})
+            != len(self.audio_artifacts)
+        ):
+            raise ValueError(
+                "audio_artifacts must uniquely match ordered video artifact beats"
+            )
+        expected_audio_mix_digest = canonical_contract_digest_v1({
+            "audio_artifacts": [
+                artifact.model_dump(mode="json")
+                for artifact in self.audio_artifacts
+            ]
+        })
+        if self.audio_mix_digest != expected_audio_mix_digest:
+            raise ValueError(
+                "audio_mix_digest must exactly bind ordered audio_artifacts"
+            )
         if self.manifest_digest != derive_atropos_fan_in_manifest_digest_v2(self):
             raise ValueError("manifest_digest does not match Atropos fan-in")
         return self
