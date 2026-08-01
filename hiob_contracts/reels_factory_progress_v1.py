@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Mapping, Any
+from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -29,6 +29,18 @@ class ReelsFactoryProviderAttemptsV1(BaseModel):
 
     script: int = Field(ge=0)
     image: int = Field(ge=0)
+    voice: int = Field(ge=0)
+    render: int = Field(ge=0)
+
+
+class ReelsFactoryProviderAttemptsV2(BaseModel):
+    """All-beat paid-attempt ledger including the video leaf."""
+
+    model_config = _STRICT_FROZEN
+
+    script: int = Field(ge=0)
+    image: int = Field(ge=0)
+    video: int = Field(ge=0)
     voice: int = Field(ge=0)
     render: int = Field(ge=0)
 
@@ -68,8 +80,33 @@ class ReelsFactoryProgressReceiptV1(BaseModel):
         return self
 
 
+class ReelsFactoryProgressReceiptV2(BaseModel):
+    """All-beat non-terminal proof with an explicit video attempt lane."""
+
+    model_config = _STRICT_FROZEN
+
+    contract_version: Literal["ReelsFactoryProgressReceipt.v2"]
+    run_id: UuidStr
+    idempotency_key: NonBlankStr
+    revision: int = Field(ge=1)
+    stage: Literal["script", "image", "video", "voice", "render"]
+    provider_attempts: ReelsFactoryProviderAttemptsV2
+    receipt_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _digest_matches_payload(self) -> "ReelsFactoryProgressReceiptV2":
+        if (
+            self.receipt_digest
+            != derive_reels_factory_progress_receipt_digest_v1(self)
+        ):
+            raise ValueError("receipt_digest does not match progress payload")
+        return self
+
+
 __all__ = [
     "ReelsFactoryProgressReceiptV1",
+    "ReelsFactoryProgressReceiptV2",
     "ReelsFactoryProviderAttemptsV1",
+    "ReelsFactoryProviderAttemptsV2",
     "derive_reels_factory_progress_receipt_digest_v1",
 ]

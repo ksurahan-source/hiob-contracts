@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from hiob_contracts import (
     ReelsFactoryFailureReceiptV1,
+    ReelsFactoryFailureReceiptV2,
     derive_reels_factory_failure_receipt_digest_v1,
 )
 
@@ -45,6 +46,26 @@ def test_failure_receipt_has_exact_terminal_shape() -> None:
         "provider_attempts",
         "receipt_digest",
     }
+
+
+def test_v2_failure_preserves_video_attempt_lane() -> None:
+    receipt = _receipt(
+        contract_version="ReelsFactoryFailureReceipt.v2",
+        stage="video",
+        code="VIDEO_PROVIDER_TERMINAL",
+        provider_attempts={
+            "script": 1,
+            "image": 1,
+            "video": 1,
+            "voice": 0,
+            "render": 0,
+        },
+    )
+
+    value = ReelsFactoryFailureReceiptV2.model_validate(receipt)
+
+    assert value.stage == "video"
+    assert value.provider_attempts.video == 1
 
 
 @pytest.mark.parametrize("provider_call", ["none", "confirmed", "unknown"])

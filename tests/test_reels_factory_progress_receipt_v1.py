@@ -5,6 +5,7 @@ from pydantic import ValidationError
 
 from hiob_contracts import (
     ReelsFactoryProgressReceiptV1,
+    ReelsFactoryProgressReceiptV2,
     derive_reels_factory_progress_receipt_digest_v1,
 )
 
@@ -47,6 +48,25 @@ def test_progress_receipt_has_exact_sealed_shape() -> None:
         "provider_attempts",
         "receipt_digest",
     }
+
+
+def test_v2_progress_preserves_video_attempt_lane() -> None:
+    receipt = _receipt(
+        contract_version="ReelsFactoryProgressReceipt.v2",
+        stage="video",
+        provider_attempts={
+            "script": 1,
+            "image": 1,
+            "video": 1,
+            "voice": 0,
+            "render": 0,
+        },
+    )
+
+    value = ReelsFactoryProgressReceiptV2.model_validate(receipt)
+
+    assert value.stage == "video"
+    assert value.provider_attempts.video == 1
 
 
 def test_progress_receipt_rejects_digest_drift_and_extra_authority() -> None:
