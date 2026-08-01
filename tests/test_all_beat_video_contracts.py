@@ -18,6 +18,7 @@ from hiob_contracts import (
     FactoryBeatManifestV1,
     HephaestusFinalRenderReceiptV2,
     ReelsFactoryReceiptV2,
+    StarReelsViewV2,
     beat_video_request_binds_manifest_v1,
     factory_beat_manifest_binds_paid_authority_v1,
     reels_factory_receipt_binds_chain_v2,
@@ -345,6 +346,50 @@ def test_valid_all_beat_chain_is_canonical_frozen_and_public() -> None:
     assert hiob_contracts.ReelsFactoryReceiptV2 is ReelsFactoryReceiptV2
     with pytest.raises(ValidationError):
         manifest.beats[0].prompt = "mutated"
+
+
+def test_star_customer_view_accepts_ready_all_beat_factory_receipt() -> None:
+    view = StarReelsViewV2.model_validate(
+        {
+            "contract_version": "StarReelsView.v2",
+            "section": "RunStatus",
+            "status": "ready",
+            "revision": 1,
+            "stage_output": None,
+            "budget": {
+                "script": 1,
+                "image": 2,
+                "video": 2,
+                "voice": 2,
+                "render": 1,
+                "retries": 0,
+                "fallbacks": 0,
+                "character_lock": 0,
+                "all_beat_count": 2,
+                "paid_budget_authority_digest": AUTHORITY_DIGEST,
+                "beat_artifact_set_receipt": _artifact_set(),
+            },
+            "review_digest": None,
+            "receipts": {
+                "factory": _factory_receipt(),
+                "script_approval": None,
+                "plan_approval": None,
+            },
+            "provider_call": "confirmed",
+            "error": None,
+        }
+    )
+
+    assert view.status == "ready"
+    assert view.receipts.factory.contract_version == "ReelsFactoryReceipt.v2"
+
+    mismatched = view.model_dump(mode="json")
+    mismatched["budget"]["all_beat_count"] = 1
+    mismatched["budget"]["image"] = 1
+    mismatched["budget"]["video"] = 1
+    mismatched["budget"]["voice"] = 1
+    with pytest.raises(ValidationError, match="artifact count"):
+        StarReelsViewV2.model_validate(mismatched)
 
 
 def test_stored_v2_fan_in_and_factory_receipt_remain_byte_compatible() -> None:

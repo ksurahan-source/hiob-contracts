@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from hiob_contracts import (
     ProductElementLockDraftV1,
     StarReelsViewV1,
+    StarReelsViewV2,
     canonical_contract_digest_v1,
     derive_star_product_lock_review_digest_v1,
     derive_reels_factory_failure_receipt_digest_v1,
@@ -112,6 +113,108 @@ def _failure() -> dict:
     }
 
 
+def _v2_budget() -> dict:
+    return {
+        "script": 1,
+        "image": 2,
+        "video": 2,
+        "voice": 2,
+        "render": 1,
+        "retries": 0,
+        "fallbacks": 0,
+        "character_lock": 0,
+        "all_beat_count": 2,
+        "paid_budget_authority_digest": DIGEST,
+        "beat_artifact_set_receipt": None,
+    }
+
+
+def _v2_factory_receipt(kind: str) -> dict:
+    attempts = {
+        "script": 1,
+        "image": 1,
+        "video": 1,
+        "voice": 0,
+        "render": 0,
+    }
+    if kind == "progress":
+        body = {
+            "contract_version": "ReelsFactoryProgressReceipt.v2",
+            "run_id": "00000000-0000-4000-8000-000000000002",
+            "idempotency_key": "star.reels.factory:one",
+            "revision": 2,
+            "stage": "video",
+            "provider_attempts": attempts,
+        }
+        return {
+            **body,
+            "receipt_digest": derive_reels_factory_progress_receipt_digest_v1(
+                body
+            ),
+        }
+    body = {
+        "contract_version": "ReelsFactoryFailureReceipt.v2",
+        "run_id": "00000000-0000-4000-8000-000000000002",
+        "idempotency_key": "star.reels.factory:one",
+        "revision": 2,
+        "stage": "video",
+        "code": "VIDEO_PROVIDER_TERMINAL",
+        "provider_call": "unknown",
+        "provider_attempts": attempts,
+    }
+    return {
+        **body,
+        "receipt_digest": derive_reels_factory_failure_receipt_digest_v1(body),
+    }
+
+
+@pytest.mark.parametrize(
+    ("kind", "status", "provider_call", "error"),
+    [
+        ("progress", "rendering", "confirmed", None),
+        ("failure", "failed", "unknown", "VIDEO_PROVIDER_TERMINAL"),
+    ],
+)
+def test_v2_view_preserves_video_progress_and_failure(
+    kind: str,
+    status: str,
+    provider_call: str,
+    error: str | None,
+) -> None:
+    value = StarReelsViewV2.model_validate(
+        {
+            "contract_version": "StarReelsView.v2",
+            "section": "RunStatus",
+            "status": status,
+            "revision": 2,
+            "stage_output": None,
+            "budget": _v2_budget(),
+            "review_digest": None,
+            "receipts": {
+                "factory": _v2_factory_receipt(kind),
+                "script_approval": None,
+                "plan_approval": None,
+            },
+            "provider_call": provider_call,
+            "error": error,
+        }
+    )
+
+    assert value.receipts.factory.provider_attempts.video == 1
+
+    tampered = _v2_factory_receipt(kind)
+    tampered["provider_attempts"]["video"] = 2
+    with pytest.raises(ValidationError, match="receipt_digest"):
+        StarReelsViewV2.model_validate(
+            {
+                **value.model_dump(mode="json"),
+                "receipts": {
+                    "factory": tampered,
+                    "script_approval": None,
+                    "plan_approval": None,
+                },
+            }
+        )
 def _ready() -> dict:
     render_body = {
         "contract_version": "AtroposRenderReceipt.v1",

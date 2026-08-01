@@ -52,15 +52,19 @@ from .character_lock_v1 import (
 from .render_persistence_v1 import RenderPersistenceV1
 from .reels_factory_progress_v1 import (
     ReelsFactoryProgressReceiptV1,
+    ReelsFactoryProgressReceiptV2,
     ReelsFactoryProviderAttemptsV1,
+    ReelsFactoryProviderAttemptsV2,
     derive_reels_factory_progress_receipt_digest_v1,
 )
 from .reels_factory_failure_v1 import (
     ReelsFactoryFailureReceiptV1,
+    ReelsFactoryFailureReceiptV2,
     derive_reels_factory_failure_receipt_digest_v1,
 )
 from .star_reels_view_v1 import (
     StarReelsViewV1,
+    StarReelsViewV2,
     derive_star_product_lock_review_digest_v1,
 )
 from .accepted_identity_receipt_v1 import (
@@ -412,11 +416,15 @@ __all__ = [
     "CharacterLockV1", "derive_character_lock_digest_v1",
     "RenderPersistenceV1",
     "ReelsFactoryProgressReceiptV1",
+    "ReelsFactoryProgressReceiptV2",
     "ReelsFactoryProviderAttemptsV1",
+    "ReelsFactoryProviderAttemptsV2",
     "derive_reels_factory_progress_receipt_digest_v1",
     "ReelsFactoryFailureReceiptV1",
+    "ReelsFactoryFailureReceiptV2",
     "derive_reels_factory_failure_receipt_digest_v1",
     "StarReelsViewV1",
+    "StarReelsViewV2",
     "derive_star_product_lock_review_digest_v1",
     "AcceptedIdentityReceiptV1",
     "derive_accepted_identity_receipt_digest_v1",

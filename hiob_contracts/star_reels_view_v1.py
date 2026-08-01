@@ -18,12 +18,17 @@ from .ares_script_revision_v1 import (
     UuidStr,
     canonical_contract_digest_v1,
 )
-from .reels_factory_failure_v1 import ReelsFactoryFailureReceiptV1
+from .all_beat_video import BeatArtifactSetReceiptV1, ReelsFactoryReceiptV2
+from .artemis_product_lock_v1 import ProductElementLockDraftV1
+from .reels_factory_failure_v1 import (
+    ReelsFactoryFailureReceiptV1,
+    ReelsFactoryFailureReceiptV2,
+)
 from .reels_factory_progress_v1 import (
     ReelsFactoryProgressReceiptV1,
+    ReelsFactoryProgressReceiptV2,
     ReelsFactoryProviderAttemptsV1,
 )
-from .artemis_product_lock_v1 import ProductElementLockDraftV1
 
 
 _STRICT_FROZEN = ConfigDict(
@@ -44,6 +49,40 @@ class _StarReelsBudgetV1(BaseModel):
     retries: Literal[0]
     fallbacks: Literal[0]
     character_lock: Literal[0]
+
+
+class _StarReelsBudgetV2(BaseModel):
+    model_config = _STRICT_FROZEN
+
+    script: Literal[1]
+    image: int = Field(ge=1, le=16)
+    video: int = Field(ge=1, le=16)
+    voice: int = Field(ge=1, le=16)
+    render: Literal[1]
+    retries: Literal[0]
+    fallbacks: Literal[0]
+    character_lock: Literal[0]
+    all_beat_count: int = Field(ge=1, le=16)
+    paid_budget_authority_digest: DigestStr
+    beat_artifact_set_receipt: BeatArtifactSetReceiptV1 | None
+
+    @model_validator(mode="after")
+    def _bind_all_paid_beat_lanes(self) -> "_StarReelsBudgetV2":
+        if not (
+            self.image
+            == self.video
+            == self.voice
+            == self.all_beat_count
+        ):
+            raise ValueError("all-beat paid lanes must match all_beat_count")
+        artifact_set = self.beat_artifact_set_receipt
+        if artifact_set is not None and (
+            artifact_set.expected_beat_count != self.all_beat_count
+            or artifact_set.paid_budget_authority_digest
+            != self.paid_budget_authority_digest
+        ):
+            raise ValueError("ready artifact count does not match paid budget")
+        return self
 
 
 class _AtroposRenderArtifactV1(BaseModel):
@@ -142,6 +181,19 @@ class _StarReelsViewReceiptsV1(BaseModel):
         ReelsFactoryProgressReceiptV1
         | ReelsFactoryFailureReceiptV1
         | _ReelsFactoryReadyReceiptV1
+        | None
+    )
+    script_approval: AresApprovalReceiptV1 | None
+    plan_approval: AresApprovalReceiptV1 | None
+
+
+class _StarReelsViewReceiptsV2(BaseModel):
+    model_config = _STRICT_FROZEN
+
+    factory: (
+        ReelsFactoryProgressReceiptV2
+        | ReelsFactoryFailureReceiptV2
+        | ReelsFactoryReceiptV2
         | None
     )
     script_approval: AresApprovalReceiptV1 | None
@@ -285,7 +337,7 @@ class StarReelsViewV1(BaseModel):
                 self.error is None
                 or not isinstance(
                     self.receipts.factory,
-                    ReelsFactoryFailureReceiptV1,
+                    (ReelsFactoryFailureReceiptV1, ReelsFactoryFailureReceiptV2),
                 )
             ):
                 raise ValueError(
@@ -296,7 +348,7 @@ class StarReelsViewV1(BaseModel):
 
         if self.status in {"pending", "rendering"} and not isinstance(
             self.receipts.factory,
-            ReelsFactoryProgressReceiptV1,
+            (ReelsFactoryProgressReceiptV1, ReelsFactoryProgressReceiptV2),
         ):
             raise ValueError("active state requires progress receipt")
         if (
@@ -304,22 +356,31 @@ class StarReelsViewV1(BaseModel):
             and self.status == "ready"
             and not isinstance(
                 self.receipts.factory,
-                _ReelsFactoryReadyReceiptV1,
+                (_ReelsFactoryReadyReceiptV1, ReelsFactoryReceiptV2),
             )
         ):
             raise ValueError("ready state requires final factory receipt")
         if (reviewing or product_review) and self.receipts.factory is not None:
             raise ValueError("review state cannot carry factory receipt")
         factory = self.receipts.factory
-        if isinstance(factory, ReelsFactoryFailureReceiptV1):
+        if isinstance(
+            factory,
+            (ReelsFactoryFailureReceiptV1, ReelsFactoryFailureReceiptV2),
+        ):
             expected_provider_call = factory.provider_call
-        elif isinstance(factory, ReelsFactoryProgressReceiptV1):
+        elif isinstance(
+            factory,
+            (ReelsFactoryProgressReceiptV1, ReelsFactoryProgressReceiptV2),
+        ):
             expected_provider_call = (
                 "confirmed"
                 if sum(factory.provider_attempts.model_dump().values()) > 0
                 else "none"
             )
-        elif isinstance(factory, _ReelsFactoryReadyReceiptV1):
+        elif isinstance(
+            factory,
+            (_ReelsFactoryReadyReceiptV1, ReelsFactoryReceiptV2),
+        ):
             expected_provider_call = "confirmed"
         else:
             expected_provider_call = None
@@ -333,7 +394,29 @@ class StarReelsViewV1(BaseModel):
         return self
 
 
+class StarReelsViewV2(StarReelsViewV1):
+    """All-beat projection with explicit video cost and V2 receipts."""
+
+    contract_version: Literal["StarReelsView.v2"]
+    budget: _StarReelsBudgetV2
+    receipts: _StarReelsViewReceiptsV2
+
+    @model_validator(mode="after")
+    def _bind_budget_to_ready_authority(self) -> "StarReelsViewV2":
+        factory = self.receipts.factory
+        if isinstance(factory, ReelsFactoryReceiptV2) and (
+            self.budget.beat_artifact_set_receipt is None
+            or factory.paid_budget_authority_digest
+            != self.budget.paid_budget_authority_digest
+            or factory.beat_artifact_set_receipt_digest
+            != self.budget.beat_artifact_set_receipt.receipt_digest
+        ):
+            raise ValueError("sealed all-beat budget does not match ready receipt")
+        return self
+
+
 __all__ = [
     "StarReelsViewV1",
+    "StarReelsViewV2",
     "derive_star_product_lock_review_digest_v1",
 ]

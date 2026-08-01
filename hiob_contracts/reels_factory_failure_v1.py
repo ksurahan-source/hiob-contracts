@@ -6,12 +6,17 @@ from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, model_validator
 
-from .ares_script_revision_v1 import DigestStr, NonBlankStr, UuidStr
+from .ares_script_revision_v1 import (
+    DigestStr,
+    NonBlankStr,
+    UuidStr,
+    canonical_contract_digest_v1,
+)
 from .reels_factory_progress_v1 import (
     ReelsFactoryProviderAttemptsV1,
+    ReelsFactoryProviderAttemptsV2,
     _STRICT_FROZEN,
 )
-from .ares_script_revision_v1 import canonical_contract_digest_v1
 
 
 def derive_reels_factory_failure_receipt_digest_v1(
@@ -63,7 +68,46 @@ class ReelsFactoryFailureReceiptV1(BaseModel):
         return self
 
 
+class ReelsFactoryFailureReceiptV2(BaseModel):
+    """All-beat terminal failure proof including the video attempt lane."""
+
+    model_config = _STRICT_FROZEN
+
+    contract_version: Literal["ReelsFactoryFailureReceipt.v2"]
+    run_id: UuidStr
+    idempotency_key: NonBlankStr
+    revision: int
+    stage: Literal[
+        "authority",
+        "script",
+        "project_script",
+        "plan",
+        "project_plan",
+        "scheduler",
+        "image",
+        "video",
+        "voice",
+        "render",
+    ]
+    code: NonBlankStr
+    provider_call: Literal["none", "confirmed", "unknown"]
+    provider_attempts: ReelsFactoryProviderAttemptsV2
+    receipt_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_terminal_payload(self) -> "ReelsFactoryFailureReceiptV2":
+        if self.revision < 1:
+            raise ValueError("revision must be positive")
+        if (
+            self.receipt_digest
+            != derive_reels_factory_failure_receipt_digest_v1(self)
+        ):
+            raise ValueError("receipt_digest does not match failure payload")
+        return self
+
+
 __all__ = [
     "ReelsFactoryFailureReceiptV1",
+    "ReelsFactoryFailureReceiptV2",
     "derive_reels_factory_failure_receipt_digest_v1",
 ]
