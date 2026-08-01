@@ -26,30 +26,35 @@ const workspaceId = '00000000-0000-4000-8000-000000000001';
 const runId = '00000000-0000-4000-8000-000000000002';
 const planDigest = sha256Digest({ plan: 'approved-v2' });
 const timelineDigest = sha256Digest({ timeline: 'all-beats' });
-const audioMixDigest = sha256Digest({ audio: 'sealed-mix' });
 const renderPolicyDigest = sha256Digest({ render: 'vertical-1080p' });
 const authorityDigest = sha256Digest({ authority: 'paid-all-beats' });
 
 function artifact(
   beatIndex: number | null,
-  kind: 'image' | 'video',
+  kind: 'audio' | 'image' | 'video',
   artifactId: string,
   shaSeed: string,
   durationMs: number | null = null,
 ) {
+  const isVideo = kind === 'video';
+  const isAudio = kind === 'audio';
   return {
     artifact_id: artifactId,
     kind,
     uri: `factory-artifacts/${artifactId}`,
     sha256: sha256Digest({ artifact: shaSeed }),
-    mime: kind === 'video' ? 'video/mp4' : 'image/png',
+    mime: isVideo ? 'video/mp4' : isAudio ? 'audio/mpeg' : 'image/png',
     bytes_len: 2048,
     duration_ms: durationMs,
-    width: 1080,
-    height: 1920,
+    width: isAudio ? null : 1080,
+    height: isAudio ? null : 1920,
     beat_index: beatIndex,
-    producer_planet: kind === 'video' ? 'hephaestus' : 'athena',
-    producer_node_id: kind === 'video' ? 'video.materialize' : 'image.materialize',
+    producer_planet: isVideo ? 'hephaestus' : isAudio ? 'orpheus' : 'athena',
+    producer_node_id: isVideo
+      ? 'video.materialize'
+      : isAudio
+        ? 'voice.materialize'
+        : 'image.materialize',
     execution_id: `exec-${artifactId}`,
     producer_revision: 'rev-1',
     image_digest: null,
@@ -154,6 +159,9 @@ function artifactSet() {
 
 function fanIn() {
   const setReceipt = artifactSet();
+  const audioArtifacts = [0, 1].map((beatIndex) => (
+    artifact(beatIndex, 'audio', `voice-${beatIndex}.mp3`, `audio-${beatIndex}`, 5000)
+  ));
   const body = {
     contract_version: 'AtroposFanInManifest.v2' as const,
     workspace_id: workspaceId,
@@ -164,8 +172,9 @@ function fanIn() {
     factory_manifest_digest: setReceipt.factory_manifest_digest,
     beat_artifact_set_receipt: setReceipt,
     video_artifacts: setReceipt.video_receipts.map((receipt) => receipt.artifact),
+    audio_artifacts: audioArtifacts,
     timeline_digest: timelineDigest,
-    audio_mix_digest: audioMixDigest,
+    audio_mix_digest: sha256Digest({ audio_artifacts: audioArtifacts }),
     render_policy_digest: renderPolicyDigest,
   };
   return { ...body, manifest_digest: deriveAtroposFanInManifestDigestV2(body) };
@@ -222,6 +231,7 @@ test('TypeScript mirror accepts the complete all-beat chain', () => {
   const parsedFanIn = AtroposFanInManifestV2Schema.parse(fanIn());
   const result = ReelsFactoryReceiptV2Schema.parse(factoryReceipt());
   assert.equal(result.status, 'succeeded');
+  assert.deepEqual(parsedFanIn.audio_artifacts.map((item) => item.beat_index), [0, 1]);
   assert.equal(reelsFactoryReceiptBindsChainV2(result, parsedManifest, parsedSet, parsedFanIn), true);
 });
 
@@ -290,6 +300,37 @@ test('TypeScript mirror rejects gaps, partial fan-in, and output substitution', 
   assert.equal(ReelsFactoryReceiptV2Schema.safeParse(substituted).success, false);
 });
 
+test('TypeScript mirror rejects invalid or misbound fan-in audio artifacts', () => {
+  for (const mutate of [
+    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].kind = 'video'; },
+    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].mime = 'application/octet-stream'; },
+    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].mime = 'audio/ '; },
+    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].bytes_len = 0; },
+    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].duration_ms = 0; },
+    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts[0].width = 1; },
+    (value: ReturnType<typeof fanIn>) => { value.audio_artifacts.reverse(); },
+    (value: ReturnType<typeof fanIn>) => {
+      value.audio_artifacts[1].artifact_id = value.audio_artifacts[0].artifact_id;
+    },
+    (value: ReturnType<typeof fanIn>) => {
+      value.audio_artifacts[1].sha256 = value.audio_artifacts[0].sha256;
+    },
+  ]) {
+    const invalid = fanIn();
+    mutate(invalid);
+    invalid.audio_mix_digest = sha256Digest({ audio_artifacts: invalid.audio_artifacts });
+    invalid.manifest_digest = deriveAtroposFanInManifestDigestV2(invalid);
+    assert.equal(AtroposFanInManifestV2Schema.safeParse(invalid).success, false);
+  }
+});
+
+test('TypeScript mirror binds audio_mix_digest to ordered audio artifacts', () => {
+  const invalid = fanIn();
+  invalid.audio_mix_digest = sha256Digest({ audio_artifacts: [] });
+  invalid.manifest_digest = deriveAtroposFanInManifestDigestV2(invalid);
+  assert.equal(AtroposFanInManifestV2Schema.safeParse(invalid).success, false);
+});
+
 test('Python-authoritative canonical digest vectors remain byte-identical', () => {
   assert.equal(
     manifest().manifest_digest,
@@ -297,6 +338,6 @@ test('Python-authoritative canonical digest vectors remain byte-identical', () =
   );
   assert.equal(
     factoryReceipt().receipt_digest,
-    'sha256:8aaa8f391e121cffe978c0c2026ef3b10b0ebd06fefd520da440c437447bbd6f',
+    'sha256:72e9d8b5ffe447eff97bc8a28b65df3ad6d43dcdfe2cf9a0f7eccb7e7c39ad5a',
   );
 });

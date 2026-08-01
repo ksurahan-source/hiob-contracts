@@ -38,7 +38,6 @@ WORKSPACE_ID = "00000000-0000-4000-8000-000000000001"
 RUN_ID = "00000000-0000-4000-8000-000000000002"
 PLAN_DIGEST = sha256_digest({"plan": "approved-v2"})
 TIMELINE_DIGEST = sha256_digest({"timeline": "all-beats"})
-AUDIO_MIX_DIGEST = sha256_digest({"audio": "sealed-mix"})
 RENDER_POLICY_DIGEST = sha256_digest({"render": "vertical-1080p"})
 AUTHORITY_DIGEST = sha256_digest({"authority": "paid-all-beats"})
 
@@ -51,19 +50,29 @@ def _artifact(
     sha_seed: str,
     duration_ms: int | None = None,
 ) -> dict:
+    is_video = kind == "video"
+    is_audio = kind == "audio"
     return {
         "artifact_id": artifact_id,
         "kind": kind,
         "uri": f"factory-artifacts/{artifact_id}",
         "sha256": sha256_digest({"artifact": sha_seed}),
-        "mime": "video/mp4" if kind == "video" else "image/png",
+        "mime": "video/mp4" if is_video else "audio/mpeg" if is_audio else "image/png",
         "bytes_len": 2048,
         "duration_ms": duration_ms,
-        "width": 1080,
-        "height": 1920,
+        "width": None if is_audio else 1080,
+        "height": None if is_audio else 1920,
         "beat_index": beat_index,
-        "producer_planet": "hephaestus" if kind == "video" else "athena",
-        "producer_node_id": "video.materialize" if kind == "video" else "image.materialize",
+        "producer_planet": (
+            "hephaestus" if is_video else "orpheus" if is_audio else "athena"
+        ),
+        "producer_node_id": (
+            "video.materialize"
+            if is_video
+            else "voice.materialize"
+            if is_audio
+            else "image.materialize"
+        ),
         "execution_id": f"exec-{artifact_id}",
         "producer_revision": "rev-1",
         "image_digest": None,
@@ -200,6 +209,16 @@ def _artifact_set() -> dict:
 
 def _fan_in() -> dict:
     artifact_set = _artifact_set()
+    audio_artifacts = [
+        _artifact(
+            beat_index,
+            kind="audio",
+            artifact_id=f"voice-{beat_index}.mp3",
+            sha_seed=f"audio-{beat_index}",
+            duration_ms=5000,
+        )
+        for beat_index in range(2)
+    ]
     body = {
         "contract_version": "AtroposFanInManifest.v2",
         "workspace_id": WORKSPACE_ID,
@@ -212,8 +231,9 @@ def _fan_in() -> dict:
         "video_artifacts": [
             receipt["artifact"] for receipt in artifact_set["video_receipts"]
         ],
+        "audio_artifacts": audio_artifacts,
         "timeline_digest": TIMELINE_DIGEST,
-        "audio_mix_digest": AUDIO_MIX_DIGEST,
+        "audio_mix_digest": sha256_digest({"audio_artifacts": audio_artifacts}),
         "render_policy_digest": RENDER_POLICY_DIGEST,
     }
     return {
@@ -289,6 +309,7 @@ def test_valid_all_beat_chain_is_canonical_frozen_and_public() -> None:
     ]
     assert artifact_set.expected_beat_count == 2
     assert [artifact.beat_index for artifact in fan_in.video_artifacts] == [0, 1]
+    assert [artifact.beat_index for artifact in fan_in.audio_artifacts] == [0, 1]
     assert final_render.output_url == factory.output_url
     assert hiob_contracts.ReelsFactoryReceiptV2 is ReelsFactoryReceiptV2
     with pytest.raises(ValidationError):
@@ -445,6 +466,75 @@ def test_atropos_fan_in_rejects_artifact_substitution() -> None:
         AtroposFanInManifestV2.model_validate(fan_in)
 
 
+def test_atropos_fan_in_requires_audio_artifacts() -> None:
+    fan_in = _fan_in()
+    del fan_in["audio_artifacts"]
+    fan_in["manifest_digest"] = derive_atropos_fan_in_manifest_digest_v2(fan_in)
+
+    with pytest.raises(ValidationError, match="audio_artifacts"):
+        AtroposFanInManifestV2.model_validate(fan_in)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("kind", "video"),
+        ("mime", "application/octet-stream"),
+        ("mime", "audio/"),
+        ("mime", "audio/ "),
+        ("bytes_len", 0),
+        ("duration_ms", 0),
+        ("width", 1),
+        ("height", 1),
+    ],
+)
+def test_atropos_fan_in_rejects_invalid_audio_artifact_shape(
+    field: str,
+    value: object,
+) -> None:
+    fan_in = _fan_in()
+    fan_in["audio_artifacts"][0][field] = value
+    fan_in["manifest_digest"] = derive_atropos_fan_in_manifest_digest_v2(fan_in)
+
+    with pytest.raises(ValidationError, match="audio artifact"):
+        AtroposFanInManifestV2.model_validate(fan_in)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["reordered", "duplicate", "duplicate_id", "duplicate_sha", "wrong_beat"],
+)
+def test_atropos_fan_in_audio_beats_exactly_match_video_beats(mutation: str) -> None:
+    fan_in = _fan_in()
+    if mutation == "reordered":
+        fan_in["audio_artifacts"].reverse()
+    elif mutation == "duplicate":
+        fan_in["audio_artifacts"][1] = deepcopy(fan_in["audio_artifacts"][0])
+    elif mutation == "duplicate_id":
+        fan_in["audio_artifacts"][1]["artifact_id"] = (
+            fan_in["audio_artifacts"][0]["artifact_id"]
+        )
+    elif mutation == "duplicate_sha":
+        fan_in["audio_artifacts"][1]["sha256"] = (
+            fan_in["audio_artifacts"][0]["sha256"]
+        )
+    else:
+        fan_in["audio_artifacts"][1]["beat_index"] = 2
+    fan_in["manifest_digest"] = derive_atropos_fan_in_manifest_digest_v2(fan_in)
+
+    with pytest.raises(ValidationError, match="audio_artifacts"):
+        AtroposFanInManifestV2.model_validate(fan_in)
+
+
+def test_atropos_fan_in_audio_mix_digest_binds_ordered_artifacts() -> None:
+    fan_in = _fan_in()
+    fan_in["audio_mix_digest"] = sha256_digest({"audio_artifacts": []})
+    fan_in["manifest_digest"] = derive_atropos_fan_in_manifest_digest_v2(fan_in)
+
+    with pytest.raises(ValidationError, match="audio_mix_digest"):
+        AtroposFanInManifestV2.model_validate(fan_in)
+
+
 @pytest.mark.parametrize(
     "change",
     [
@@ -497,5 +587,5 @@ def test_digest_vector_is_stable_for_python_typescript_parity() -> None:
         "sha256:9afbef2bb2fe6ef1ecb8d168e0a5c3441c90ad73f9a69cc5f4bee74d2c3b1acd"
     )
     assert _factory_receipt()["receipt_digest"] == (
-        "sha256:8aaa8f391e121cffe978c0c2026ef3b10b0ebd06fefd520da440c437447bbd6f"
+        "sha256:72e9d8b5ffe447eff97bc8a28b65df3ad6d43dcdfe2cf9a0f7eccb7e7c39ad5a"
     )

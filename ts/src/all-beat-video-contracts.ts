@@ -188,6 +188,55 @@ function validateVideoArtifact(
   }
 }
 
+function validateAudioArtifact(
+  artifact: z.infer<typeof StrictAllBeatArtifactRefV1Schema>,
+  ctx: z.RefinementCtx,
+  path: (string | number)[],
+): void {
+  if (!isRelativeStorageKey(artifact.uri)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'audio artifact uri must be a durable relative storage key',
+      path: [...path, 'uri'],
+    });
+  }
+  if (
+    artifact.kind !== 'audio'
+    || !/^audio\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/.test(artifact.mime)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'audio artifact must have kind audio and an audio/* MIME',
+      path,
+    });
+  }
+  if (
+    artifact.bytes_len <= 0
+    || artifact.duration_ms === null
+    || artifact.duration_ms <= 0
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'audio artifact bytes_len and duration_ms must be positive',
+      path,
+    });
+  }
+  if (artifact.width !== null || artifact.height !== null) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'audio artifact width and height must be null',
+      path,
+    });
+  }
+  if (artifact.beat_index === null) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'audio artifact beat_index is required',
+      path: [...path, 'beat_index'],
+    });
+  }
+}
+
 export const FactoryBeatSpecV1Schema = z
   .object({
     beat_index: NonNegativeSafeInteger,
@@ -381,6 +430,7 @@ export const AtroposFanInManifestV2Schema = z
     factory_manifest_digest: DigestSchema,
     beat_artifact_set_receipt: BeatArtifactSetReceiptV1Schema,
     video_artifacts: z.array(StrictAllBeatArtifactRefV1Schema).min(1),
+    audio_artifacts: z.array(StrictAllBeatArtifactRefV1Schema).min(1),
     timeline_digest: DigestSchema,
     audio_mix_digest: DigestSchema,
     render_policy_digest: DigestSchema,
@@ -402,6 +452,32 @@ export const AtroposFanInManifestV2Schema = z
     const expected = receipt.video_receipts.map((item) => item.artifact);
     if (!safelyCanonicalEqual(value.video_artifacts, expected)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'video_artifacts must exactly match ordered video receipts', path: ['video_artifacts'] });
+    }
+    value.audio_artifacts.forEach((artifact, index) => {
+      validateAudioArtifact(artifact, ctx, ['audio_artifacts', index]);
+    });
+    const audioBeats = value.audio_artifacts.map((artifact) => artifact.beat_index);
+    const videoBeats = value.video_artifacts.map((artifact) => artifact.beat_index);
+    const artifactIds = value.audio_artifacts.map((artifact) => artifact.artifact_id);
+    const artifactDigests = value.audio_artifacts.map((artifact) => artifact.sha256);
+    if (
+      !safelyCanonicalEqual(audioBeats, videoBeats)
+      || new Set(audioBeats).size !== audioBeats.length
+      || new Set(artifactIds).size !== artifactIds.length
+      || new Set(artifactDigests).size !== artifactDigests.length
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'audio_artifacts must uniquely match ordered video artifact beats',
+        path: ['audio_artifacts'],
+      });
+    }
+    if (value.audio_mix_digest !== sha256Digest({ audio_artifacts: value.audio_artifacts })) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'audio_mix_digest must exactly bind ordered audio_artifacts',
+        path: ['audio_mix_digest'],
+      });
     }
     if (!safelyEqualsDigest(value.manifest_digest, () => deriveAtroposFanInManifestDigestV2(value))) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'manifest_digest does not match Atropos fan-in', path: ['manifest_digest'] });
