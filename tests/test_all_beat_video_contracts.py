@@ -362,8 +362,6 @@ def test_manifest_caps_beats_binds_authority_and_accepts_revision_zero() -> None
         all_beat_count=len(manifest.beats),
         authority_digest=AUTHORITY_DIGEST,
     )
-    assert factory_beat_manifest_binds_paid_authority_v1(manifest, authority)
-    authority.authority_digest = sha256_digest({"authority": "other"})
     assert not factory_beat_manifest_binds_paid_authority_v1(manifest, authority)
 
 

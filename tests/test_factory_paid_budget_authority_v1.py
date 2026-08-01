@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import pickle
+from types import SimpleNamespace
+
 import pytest
 from pydantic import ValidationError
 
@@ -9,6 +13,7 @@ import hiob_contracts
 from hiob_contracts import (
     FactoryPaidBudgetApprovalReceiptV1,
     FactoryPaidBudgetAuthorityV1,
+    VerifiedFactoryPaidBudgetAuthorityV1,
     build_factory_paid_budget_authority_v1,
     derive_factory_paid_budget_approval_subject_digest_v1,
     derive_factory_paid_budget_approval_receipt_digest_v1,
@@ -17,19 +22,23 @@ from hiob_contracts import (
     registered_contracts,
     sha256_digest,
     validate_payload,
+    factory_beat_manifest_binds_paid_authority_v1,
 )
 
 
 WORKSPACE_ID = "00000000-0000-4000-8000-000000000001"
 RUN_ID = "00000000-0000-4000-8000-000000000002"
 APPROVAL_RECEIPT_DIGEST = sha256_digest({"approval": "paid-budget-v1"})
+COST_PROFILE_DIGEST = sha256_digest({"pricing": "fal-kling-2026-08-01"})
 
 
 class _Resolver:
     def __init__(self, current: bool = True) -> None:
         self.current = current
+        self.last_identity = None
 
-    def is_current_approval(self, **_identity) -> bool:
+    def is_current_approval(self, **identity) -> bool:
+        self.last_identity = identity
         return self.current
 
 
@@ -48,6 +57,8 @@ def _approval_receipt(**changes):
         },
         "max_total_cost_microunits": 12_500_000,
         "currency": "USD",
+        "cost_profile_digest": COST_PROFILE_DIGEST,
+        "pricing_policy_revision": 3,
         "approver_account_id": "account-owner",
         "decision": "approved",
         "policy_version": "paid-budget-policy-v1",
@@ -82,6 +93,7 @@ def _authority(**changes):
         if key in {
             "workspace_id", "run_id", "factory_revision", "all_beat_count",
             "max_total_cost_microunits", "currency",
+            "cost_profile_digest", "pricing_policy_revision",
         }
     }
     if receipt is None:
@@ -99,13 +111,17 @@ def _authority(**changes):
         "all_beat_count": 5,
         "max_total_cost_microunits": 12_500_000,
         "currency": "USD",
+        "cost_profile_digest": COST_PROFILE_DIGEST,
+        "pricing_policy_revision": 3,
         "approval_receipt": receipt,
         "at_utc": "2026-08-01T08:00:00Z",
         "resolver": _Resolver(),
         **scope,
     }
     body.update(changes)
-    return build_factory_paid_budget_authority_v1(**body).model_dump(mode="json")
+    return build_factory_paid_budget_authority_v1(
+        **body
+    ).authority.model_dump(mode="json")
 
 
 def test_receipt_is_structural_evidence_not_bearer_authority() -> None:
@@ -124,6 +140,48 @@ def test_receipt_is_structural_evidence_not_bearer_authority() -> None:
             at_utc="2026-08-01T08:00:00Z",
             resolver=_Resolver(False),
         )
+
+
+def test_verified_authority_is_nonserializable_capability_and_manifest_guard() -> None:
+    receipt = _approval_receipt()
+    parsed = FactoryPaidBudgetAuthorityV1.model_validate(_authority())
+    verified = FactoryPaidBudgetAuthorityV1.from_verified(
+        parsed.model_dump(mode="json"),
+        approval_receipt=receipt,
+        at_utc="2026-08-01T08:00:00Z",
+        resolver=_Resolver(),
+    )
+    assert isinstance(verified, VerifiedFactoryPaidBudgetAuthorityV1)
+    assert verified.authority is parsed or verified.authority == parsed
+    with pytest.raises(TypeError):
+        json.dumps(verified)
+    with pytest.raises((TypeError, pickle.PicklingError)):
+        pickle.dumps(verified)
+
+    manifest = SimpleNamespace(
+        workspace_id=parsed.workspace_id,
+        run_id=parsed.run_id,
+        factory_revision=parsed.factory_revision,
+        beats=[object()] * parsed.all_beat_count,
+        paid_budget_authority_digest=parsed.authority_digest,
+    )
+    assert factory_beat_manifest_binds_paid_authority_v1(manifest, verified)
+    assert not factory_beat_manifest_binds_paid_authority_v1(manifest, parsed)
+
+
+def test_cost_profile_and_current_pricing_revision_are_sealed_everywhere() -> None:
+    receipt = _approval_receipt()
+    authority = FactoryPaidBudgetAuthorityV1.model_validate(_authority())
+    assert authority.cost_profile_digest == COST_PROFILE_DIGEST
+    assert authority.pricing_policy_revision == 3
+    assert receipt.cost_profile_digest == authority.cost_profile_digest
+    assert receipt.pricing_policy_revision == authority.pricing_policy_revision
+    resolver = _Resolver()
+    assert receipt.authorizes(
+        authority, at_utc="2026-08-01T08:00:00Z", resolver=resolver
+    )
+    assert resolver.last_identity["cost_profile_digest"] == COST_PROFILE_DIGEST
+    assert resolver.last_identity["pricing_policy_revision"] == 3
 
 
 @pytest.mark.parametrize(

@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   FactoryPaidBudgetAuthorityV1Schema,
   FactoryPaidBudgetApprovalReceiptV1Schema,
+  VerifiedFactoryPaidBudgetAuthorityV1,
   factoryPaidBudgetApprovalReceiptAuthorizesV1,
   factoryPaidBudgetAuthorityFromVerifiedV1,
   buildFactoryPaidBudgetAuthorityV1,
@@ -11,12 +12,18 @@ import {
   deriveFactoryPaidBudgetApprovalReceiptDigestV1,
   deriveFactoryPaidBudgetAuthorityDigestV1,
   deriveFactoryPaidBudgetIdempotencyKeyV1,
+  factoryBeatManifestBindsPaidAuthorityV1,
 } from './index.js';
 import { sha256Digest } from './factory/digest.js';
 
 const workspaceId = '00000000-0000-4000-8000-000000000001';
 const runId = '00000000-0000-4000-8000-000000000002';
-const resolver = { isCurrentApproval: () => true };
+const costProfileDigest = sha256Digest({ pricing: 'fal-kling-2026-08-01' });
+let resolvedIdentity: Record<string, unknown> | null = null;
+const resolver = { isCurrentApproval: (identity: Record<string, unknown>) => {
+  resolvedIdentity = identity;
+  return true;
+} };
 
 function approvalReceipt(overrides: Record<string, unknown> = {}) {
   const body = {
@@ -25,6 +32,7 @@ function approvalReceipt(overrides: Record<string, unknown> = {}) {
     run_id: runId, factory_revision: 7, all_beat_count: 5,
     paid_calls: { script: 1 as const, image: 5, video: 5, voice: 5, render: 1 as const, retries: 0 as const, fallbacks: 0 as const, character_lock: 0 as const },
     max_total_cost_microunits: 12_500_000, currency: 'USD',
+    cost_profile_digest: costProfileDigest, pricing_policy_revision: 3,
     approver_account_id: 'account-owner', decision: 'approved' as const,
     policy_version: 'paid-budget-policy-v1', state_revision: 1,
     approved_at_utc: '2026-08-01T07:00:00Z', expires_at_utc: '2026-08-01T09:00:00Z',
@@ -49,7 +57,14 @@ function authority(overrides: Record<string, unknown> = {}) {
     approval_receipt: receipt,
     at_utc: '2026-08-01T08:00:00Z',
     resolver,
-  });
+  }).authority;
+}
+
+function verifiedAuthority() {
+  const receipt = approvalReceipt();
+  return factoryPaidBudgetAuthorityFromVerifiedV1(
+    authority(), receipt, '2026-08-01T08:00:00Z', resolver,
+  );
 }
 
 test('mirror builds and validates every pre-script paid binding', () => {
@@ -77,6 +92,31 @@ test('structural receipt is not bearer authority without current resolver state'
   assert.throws(() => factoryPaidBudgetAuthorityFromVerifiedV1(
     authority(), receipt, '2026-08-01T08:00:00Z', staleResolver,
   ));
+});
+
+test('verified authority is non-serializable and is the only manifest capability', () => {
+  const verified = verifiedAuthority();
+  assert.equal(verified instanceof VerifiedFactoryPaidBudgetAuthorityV1, true);
+  assert.throws(() => JSON.stringify(verified));
+  const manifest = {
+    workspace_id: workspaceId, run_id: runId, factory_revision: 7,
+    beats: Array.from({ length: 5 }, () => ({})),
+    paid_budget_authority_digest: authority().authority_digest,
+  };
+  assert.equal(factoryBeatManifestBindsPaidAuthorityV1(manifest as never, verified), true);
+  assert.equal(factoryBeatManifestBindsPaidAuthorityV1(manifest as never, authority() as never), false);
+});
+
+test('cost profile and current pricing revision bind resolver identity', () => {
+  const receipt = approvalReceipt();
+  const parsed = authority();
+  assert.equal(parsed.cost_profile_digest, costProfileDigest);
+  assert.equal(parsed.pricing_policy_revision, 3);
+  assert.equal(factoryPaidBudgetApprovalReceiptAuthorizesV1(
+    receipt, parsed, '2026-08-01T08:00:00Z', resolver,
+  ), true);
+  assert.equal(resolvedIdentity?.cost_profile_digest, costProfileDigest);
+  assert.equal(resolvedIdentity?.pricing_policy_revision, 3);
 });
 
 test('approval receipt safeParse rejects impossible UTC without throwing', () => {
