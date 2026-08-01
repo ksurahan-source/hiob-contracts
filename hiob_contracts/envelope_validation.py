@@ -67,6 +67,10 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "hiob_contracts.all_beat_video",
         "ReelsFactoryReceiptV2",
     ),
+    "FactoryPaidBudgetAuthority": (
+        "hiob_contracts.factory_paid_budget_authority_v1",
+        "FactoryPaidBudgetAuthorityV1",
+    ),
     # Phase-3 edge targets (j2p / p2a)
     "ParzifalTargetInput": ("hiob_contracts.parzifal_target_input", "ParzifalTargetInput"),
     "AresScriptInput": ("hiob_contracts.ares_script_input", "AresScriptInput"),

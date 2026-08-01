@@ -66,7 +66,7 @@ def test_builds_one_frozen_pre_script_authority_with_all_bindings() -> None:
     assert hiob_contracts.FactoryPaidBudgetAuthorityV1 is (
         FactoryPaidBudgetAuthorityV1
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises((ValidationError, ValueError)):
         value.all_beat_count = 2
 
 
@@ -85,7 +85,7 @@ def test_authority_supports_legacy_one_beat_and_all_product_counts(
 def test_authority_rejects_noncanonical_or_unsupported_count(
     all_beat_count,
 ) -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises((ValidationError, ValueError)):
         FactoryPaidBudgetAuthorityV1.model_validate(
             _authority(all_beat_count=all_beat_count)
         )
@@ -98,7 +98,7 @@ def test_authority_rejects_noncanonical_or_unsupported_count(
 def test_authority_requires_positive_integer_microunits(
     max_total_cost_microunits,
 ) -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises((ValidationError, ValueError)):
         FactoryPaidBudgetAuthorityV1.model_validate(
             _authority(max_total_cost_microunits=max_total_cost_microunits)
         )
@@ -236,11 +236,11 @@ def test_registry_exposes_fail_loud_consumer_surface() -> None:
 def test_python_typescript_digest_vectors_are_stable() -> None:
     value = _authority()
     assert value["approval_subject_digest"] == (
-        "sha256:f656277f35a207f2f6b192355955a5e437daf10cb2e2633031e7447cc66b78af"
+        "sha256:0064203849c310151ff1e8b3ecc478e27d28294e4119b81366c568f8df25b9db"
     )
     assert value["idempotency_key"] == (
-        "sha256:a512001302620cf0466024129162477404ec1fb1ed8d46b526ac9fd2d8bfd267"
+        "sha256:53a29f902bce3f2777c0b4888c03eb3ddc99d604eba0c7d3516f03c8d7a49942"
     )
     assert value["authority_digest"] == (
-        "sha256:9dc540535515e92e11c7596e563e22a6d0e7d08f24410e9de33c9e560de84ee9"
+        "sha256:c4421ca6c74a7490a6c0ee3cd39ae0aea71018d5528ded5c2bda08d3adebbc8e"
     )

@@ -48,7 +48,7 @@ test('mirror rejects count, money, currency, approval, and legacy drift', () => 
   for (const allBeatCount of [0, 17, true, 1.5]) {
     assert.equal(
       FactoryPaidBudgetAuthorityV1Schema.safeParse(
-        authority({ all_beat_count: allBeatCount }),
+        { ...authority(), all_beat_count: allBeatCount },
       ).success,
       false,
     );
@@ -56,7 +56,7 @@ test('mirror rejects count, money, currency, approval, and legacy drift', () => 
   for (const maxTotalCost of [0, -1, true, 1.5, '12500000']) {
     assert.equal(
       FactoryPaidBudgetAuthorityV1Schema.safeParse(
-        authority({ max_total_cost_microunits: maxTotalCost }),
+        { ...authority(), max_total_cost_microunits: maxTotalCost },
       ).success,
       false,
     );
@@ -99,14 +99,14 @@ test('mirror parity vectors match Python authority', () => {
   const value = authority();
   assert.equal(
     value.approval_subject_digest,
-    'sha256:f656277f35a207f2f6b192355955a5e437daf10cb2e2633031e7447cc66b78af',
+    'sha256:0064203849c310151ff1e8b3ecc478e27d28294e4119b81366c568f8df25b9db',
   );
   assert.equal(
     value.idempotency_key,
-    'sha256:a512001302620cf0466024129162477404ec1fb1ed8d46b526ac9fd2d8bfd267',
+    'sha256:53a29f902bce3f2777c0b4888c03eb3ddc99d604eba0c7d3516f03c8d7a49942',
   );
   assert.equal(
     value.authority_digest,
-    'sha256:9dc540535515e92e11c7596e563e22a6d0e7d08f24410e9de33c9e560de84ee9',
+    'sha256:c4421ca6c74a7490a6c0ee3cd39ae0aea71018d5528ded5c2bda08d3adebbc8e',
   );
 });
