@@ -155,3 +155,9 @@ export * from './ares-script-revision-v1.js';
 
 // Artemis product understanding: Janus observations -> grounded draft -> lock.
 export * from './artemis-product-lock-v1.js';
+
+// All-beat video factory V2 chain.
+export * from './all-beat-video-contracts.js';
+
+// Pre-script paid budget authority; separate from post-plan manifests.
+export * from './factory-paid-budget-authority-v1.js';
