@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import pickle
+import copy
 from types import SimpleNamespace
 
 import pytest
@@ -159,6 +160,12 @@ def test_verified_authority_is_nonserializable_capability_and_manifest_guard() -
         json.dumps(verified)
     with pytest.raises((TypeError, pickle.PicklingError)):
         pickle.dumps(verified)
+    with pytest.raises(TypeError):
+        copy.copy(verified)
+    with pytest.raises(TypeError):
+        copy.deepcopy(verified)
+    with pytest.raises(TypeError, match="only be minted"):
+        VerifiedFactoryPaidBudgetAuthorityV1(parsed, _token=object())
 
     manifest = SimpleNamespace(
         workspace_id=parsed.workspace_id,
@@ -177,6 +184,42 @@ def test_verified_authority_is_nonserializable_capability_and_manifest_guard() -
     ) is verified
     with pytest.raises(TypeError, match="VerifiedFactoryPaidBudgetAuthority"):
         require_factory_beat_manifest_paid_authority_v1(manifest, parsed)
+
+
+def test_verified_authority_registry_defeats_slot_and_getter_retarget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt = _approval_receipt()
+    original = FactoryPaidBudgetAuthorityV1.model_validate(_authority())
+    verified = FactoryPaidBudgetAuthorityV1.from_verified(
+        original,
+        approval_receipt=receipt,
+        at_utc="2026-08-01T08:00:00Z",
+        resolver=_Resolver(),
+    )
+    alien = FactoryPaidBudgetAuthorityV1.model_validate(
+        _authority(cost_profile_digest=sha256_digest({"pricing": "alien"}))
+    )
+    manifest = SimpleNamespace(
+        workspace_id=original.workspace_id,
+        run_id=original.run_id,
+        factory_revision=original.factory_revision,
+        beats=[object()] * original.all_beat_count,
+        paid_budget_authority_digest=original.authority_digest,
+    )
+
+    with pytest.raises((AttributeError, TypeError)):
+        object.__setattr__(
+            verified,
+            "_VerifiedFactoryPaidBudgetAuthorityV1__authority",
+            alien,
+        )
+    monkeypatch.setattr(
+        VerifiedFactoryPaidBudgetAuthorityV1,
+        "authority",
+        property(lambda _self: alien),
+    )
+    assert factory_beat_manifest_binds_paid_authority_v1(manifest, verified)
 
 
 def test_cost_profile_and_current_pricing_revision_are_sealed_everywhere() -> None:

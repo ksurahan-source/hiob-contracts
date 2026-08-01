@@ -118,6 +118,19 @@ test('verified authority is non-serializable and is the only manifest capability
     () => requireFactoryBeatManifestPaidAuthorityV1(manifest as never, authority()),
     /VerifiedFactoryPaidBudgetAuthority/,
   );
+  assert.equal(Object.isFrozen(verified.authority), true);
+  assert.equal(Object.isFrozen(verified.authority.paid_calls), true);
+  assert.throws(() => { verified.authority.paid_calls.video = 99; });
+
+  const forged = Object.setPrototypeOf(
+    { ...authority(), authority: authority() },
+    VerifiedFactoryPaidBudgetAuthorityV1.prototype,
+  );
+  assert.equal(factoryBeatManifestBindsPaidAuthorityV1(manifest as never, forged), false);
+  assert.throws(
+    () => requireFactoryBeatManifestPaidAuthorityV1(manifest as never, forged),
+    /VerifiedFactoryPaidBudgetAuthority/,
+  );
 });
 
 test('cost profile and current pricing revision bind resolver identity', () => {
