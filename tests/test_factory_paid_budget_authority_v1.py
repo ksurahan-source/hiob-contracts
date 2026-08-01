@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 import hiob_contracts
 from hiob_contracts import (
+    FactoryPaidBudgetApprovalReceiptV1,
     FactoryPaidBudgetAuthorityV1,
     build_factory_paid_budget_authority_v1,
     derive_factory_paid_budget_approval_subject_digest_v1,
@@ -23,7 +24,50 @@ RUN_ID = "00000000-0000-4000-8000-000000000002"
 APPROVAL_RECEIPT_DIGEST = sha256_digest({"approval": "paid-budget-v1"})
 
 
+class _Resolver:
+    def __init__(self, current: bool = True) -> None:
+        self.current = current
+
+    def is_current_approval(self, **_identity) -> bool:
+        return self.current
+
+
+def _approval_receipt(**changes):
+    body = {
+        "contract_version": "FactoryPaidBudgetApprovalReceipt.v1",
+        "receipt_id": "approval-paid-budget-1",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "factory_revision": 7,
+        "all_beat_count": 5,
+        "paid_calls": {
+            "script": 1, "image": 5, "video": 5, "voice": 5,
+            "render": 1, "retries": 0, "fallbacks": 0,
+            "character_lock": 0,
+        },
+        "max_total_cost_microunits": 12_500_000,
+        "currency": "USD",
+        "approver_account_id": "account-owner",
+        "decision": "approved",
+        "policy_version": "paid-budget-policy-v1",
+        "state_revision": 1,
+        "approved_at_utc": "2026-08-01T07:00:00Z",
+        "expires_at_utc": "2026-08-01T09:00:00Z",
+        "revoked_at_utc": None,
+        "transaction_audit_id": "approval-paid-budget-1",
+    }
+    body.update(changes)
+    body["approval_subject_digest"] = (
+        derive_factory_paid_budget_approval_subject_digest_v1(body)
+    )
+    body["receipt_digest"] = (
+        derive_factory_paid_budget_approval_receipt_digest_v1(body)
+    )
+    return FactoryPaidBudgetApprovalReceiptV1.model_validate(body)
+
+
 def _authority(**changes):
+    receipt = changes.pop("approval_receipt", _approval_receipt())
     body = {
         "workspace_id": WORKSPACE_ID,
         "run_id": RUN_ID,
@@ -31,11 +75,47 @@ def _authority(**changes):
         "all_beat_count": 5,
         "max_total_cost_microunits": 12_500_000,
         "currency": "USD",
-        "approval_receipt_id": "approval-paid-budget-1",
-        "approval_receipt_digest": APPROVAL_RECEIPT_DIGEST,
+        "approval_receipt": receipt,
+        "at_utc": "2026-08-01T08:00:00Z",
+        "resolver": _Resolver(),
     }
     body.update(changes)
     return build_factory_paid_budget_authority_v1(**body).model_dump(mode="json")
+
+
+def test_receipt_is_structural_evidence_not_bearer_authority() -> None:
+    receipt = _approval_receipt()
+    authority = FactoryPaidBudgetAuthorityV1.model_validate(_authority())
+    assert receipt.authorizes(
+        authority, at_utc="2026-08-01T08:00:00Z", resolver=_Resolver()
+    )
+    assert not receipt.authorizes(
+        authority, at_utc="2026-08-01T08:00:00Z", resolver=_Resolver(False)
+    )
+    with pytest.raises(ValueError, match="current durable approval"):
+        FactoryPaidBudgetAuthorityV1.from_verified(
+            authority.model_dump(mode="json"),
+            approval_receipt=receipt,
+            at_utc="2026-08-01T08:00:00Z",
+            resolver=_Resolver(False),
+        )
+
+
+@pytest.mark.parametrize(
+    ("receipt_change", "at_utc"),
+    [
+        ({"revoked_at_utc": "2026-08-01T07:30:00Z"}, "2026-08-01T08:00:00Z"),
+        ({}, "2026-08-01T09:00:00Z"),
+    ],
+)
+def test_builder_rejects_revoked_or_expired_approval(
+    receipt_change: dict, at_utc: str
+) -> None:
+    with pytest.raises(ValueError, match="current durable approval"):
+        _authority(
+            approval_receipt=_approval_receipt(**receipt_change),
+            at_utc=at_utc,
+        )
 
 
 def test_builds_one_frozen_pre_script_authority_with_all_bindings() -> None:
@@ -244,3 +324,4 @@ def test_python_typescript_digest_vectors_are_stable() -> None:
     assert value["authority_digest"] == (
         "sha256:c4421ca6c74a7490a6c0ee3cd39ae0aea71018d5528ded5c2bda08d3adebbc8e"
     )
+    derive_factory_paid_budget_approval_receipt_digest_v1,

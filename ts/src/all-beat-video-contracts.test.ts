@@ -9,6 +9,9 @@ import {
   FactoryBeatManifestV1Schema,
   HephaestusFinalRenderReceiptV2Schema,
   ReelsFactoryReceiptV2Schema,
+  beatVideoRequestBindsManifestV1,
+  reelsFactoryReceiptBindsChainV2,
+  deriveFactoryBeatManifestIdempotencyKeyV1,
   deriveAtroposFanInManifestDigestV2,
   deriveBeatArtifactSetReceiptDigestV1,
   deriveBeatVideoReceiptDigestV1,
@@ -209,6 +212,27 @@ test('TypeScript mirror accepts the complete all-beat chain', () => {
   HephaestusFinalRenderReceiptV2Schema.parse(finalRender());
   const result = ReelsFactoryReceiptV2Schema.parse(factoryReceipt());
   assert.equal(result.status, 'succeeded');
+});
+
+test('mirror rejects a rehashed request that drifts from its manifest beat', () => {
+  const parsedManifest = FactoryBeatManifestV1Schema.parse(manifest());
+  const drifted = request(0);
+  drifted.prompt = 'independently valid but unauthorized prompt';
+  drifted.request_digest = deriveBeatVideoRequestDigestV1(drifted);
+  const parsedRequest = BeatVideoRequestV1Schema.parse(drifted);
+  assert.equal(beatVideoRequestBindsManifestV1(parsedRequest, parsedManifest), false);
+});
+
+test('mirror rejects unsafe canonical values and impossible UTC dates', () => {
+  assert.throws(() => deriveFactoryBeatManifestDigestV1({ unsafe: Number.MAX_SAFE_INTEGER + 1 }));
+  assert.throws(() => deriveFactoryBeatManifestDigestV1({ surrogate: '\ud800' }));
+  const sparse: unknown[] = [];
+  sparse[1] = 'x';
+  assert.throws(() => deriveFactoryBeatManifestDigestV1({ sparse }));
+  const render = finalRender();
+  render.rendered_at_utc = '2026-02-31T08:00:00Z';
+  render.receipt_digest = deriveHephaestusFinalRenderReceiptDigestV2(render);
+  assert.equal(HephaestusFinalRenderReceiptV2Schema.safeParse(render).success, false);
 });
 
 test('TypeScript mirror rejects gaps, partial fan-in, and output substitution', () => {

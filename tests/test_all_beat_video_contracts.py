@@ -16,6 +16,10 @@ from hiob_contracts import (
     FactoryBeatManifestV1,
     HephaestusFinalRenderReceiptV2,
     ReelsFactoryReceiptV2,
+    beat_video_request_binds_manifest_v1,
+    factory_beat_manifest_binds_paid_authority_v1,
+    reels_factory_receipt_binds_chain_v2,
+    derive_factory_beat_manifest_idempotency_key_v1,
     derive_atropos_fan_in_manifest_digest_v2,
     derive_beat_artifact_set_receipt_digest_v1,
     derive_beat_video_receipt_digest_v1,
@@ -298,6 +302,75 @@ def test_request_rejects_digest_and_reference_beat_drift() -> None:
     request = _request(0)
     request["prompt"] = "tampered"
     with pytest.raises(ValidationError, match="request_digest"):
+        BeatVideoRequestV1.model_validate(request)
+
+
+def test_rehashed_request_still_must_bind_exact_manifest_beat() -> None:
+    manifest = FactoryBeatManifestV1.model_validate(_manifest())
+    request = _request(0)
+    request["prompt"] = "independently valid but unauthorized prompt"
+    request["request_digest"] = derive_beat_video_request_digest_v1(request)
+    parsed = BeatVideoRequestV1.model_validate(request)
+    assert not beat_video_request_binds_manifest_v1(parsed, manifest)
+
+
+def test_manifest_caps_beats_binds_authority_and_accepts_revision_zero() -> None:
+    body = _manifest_body()
+    body["factory_revision"] = 0
+    body["beats"] = [deepcopy(body["beats"][0]) for _ in range(17)]
+    for index, beat in enumerate(body["beats"]):
+        beat["beat_index"] = index
+        beat["generation_nonce"] = f"00000000-0000-4000-8000-{index:012d}"
+        beat["reference_artifacts"][0]["beat_index"] = index
+    body["idempotency_key"] = derive_factory_beat_manifest_idempotency_key_v1(body)
+    body["manifest_digest"] = derive_factory_beat_manifest_digest_v1(body)
+    with pytest.raises(ValidationError):
+        FactoryBeatManifestV1.model_validate(body)
+
+    body = _manifest_body()
+    body["factory_revision"] = 0
+    body["idempotency_key"] = derive_factory_beat_manifest_idempotency_key_v1(body)
+    body["manifest_digest"] = derive_factory_beat_manifest_digest_v1(body)
+    assert FactoryBeatManifestV1.model_validate(body).factory_revision == 0
+
+
+def test_terminal_verifier_rejects_rehashed_cross_chain_substitution() -> None:
+    factory = ReelsFactoryReceiptV2.model_validate(_factory_receipt())
+    manifest = FactoryBeatManifestV1.model_validate(_manifest())
+    artifact_set = BeatArtifactSetReceiptV1.model_validate(_artifact_set())
+    fan_in = AtroposFanInManifestV2.model_validate(_fan_in())
+    assert reels_factory_receipt_binds_chain_v2(
+        factory, manifest, artifact_set, fan_in
+    )
+    alien = _manifest()
+    alien["plan_digest"] = sha256_digest({"plan": "alien"})
+    alien["manifest_digest"] = derive_factory_beat_manifest_digest_v1(alien)
+    assert not reels_factory_receipt_binds_chain_v2(
+        factory,
+        FactoryBeatManifestV1.model_validate(alien),
+        artifact_set,
+        fan_in,
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["https:///missing-host.mp4", "https://user:pass@cdn.example/out.mp4"],
+)
+def test_output_url_requires_valid_credential_free_https_host(url: str) -> None:
+    render = _final_render()
+    render["output_url"] = url
+    render["receipt_digest"] = derive_hephaestus_final_render_receipt_digest_v2(render)
+    with pytest.raises(ValidationError):
+        HephaestusFinalRenderReceiptV2.model_validate(render)
+
+
+@pytest.mark.parametrize("value", [True, 1.0, "2048", 9_007_199_254_740_992])
+def test_all_beat_artifact_integer_fields_are_strict_json_safe(value) -> None:
+    request = _request(0)
+    request["reference_artifacts"][0]["bytes_len"] = value
+    request["request_digest"] = derive_beat_video_request_digest_v1(request)
+    with pytest.raises((ValidationError, ValueError)):
         BeatVideoRequestV1.model_validate(request)
 
     request = _request(0)

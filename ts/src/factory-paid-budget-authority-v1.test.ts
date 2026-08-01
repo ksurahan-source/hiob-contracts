@@ -3,6 +3,9 @@ import test from 'node:test';
 
 import {
   FactoryPaidBudgetAuthorityV1Schema,
+  FactoryPaidBudgetApprovalReceiptV1Schema,
+  factoryPaidBudgetApprovalReceiptAuthorizesV1,
+  factoryPaidBudgetAuthorityFromVerifiedV1,
   buildFactoryPaidBudgetAuthorityV1,
   deriveFactoryPaidBudgetApprovalSubjectDigestV1,
   deriveFactoryPaidBudgetAuthorityDigestV1,
@@ -42,6 +45,31 @@ test('mirror builds and validates every pre-script paid binding', () => {
     value.authority_digest,
     deriveFactoryPaidBudgetAuthorityDigestV1(value),
   );
+});
+
+test('structural receipt is not bearer authority without current resolver state', () => {
+  const body = {
+    contract_version: 'FactoryPaidBudgetApprovalReceipt.v1' as const,
+    receipt_id: 'approval-paid-budget-1', workspace_id: workspaceId,
+    run_id: runId, factory_revision: 7, all_beat_count: 5,
+    paid_calls: { script: 1, image: 5, video: 5, voice: 5, render: 1, retries: 0, fallbacks: 0, character_lock: 0 },
+    max_total_cost_microunits: 12_500_000, currency: 'USD',
+    approval_subject_digest: authority().approval_subject_digest,
+    approver_account_id: 'account-owner', decision: 'approved' as const,
+    policy_version: 'paid-budget-policy-v1', state_revision: 1,
+    approved_at_utc: '2026-08-01T07:00:00Z', expires_at_utc: '2026-08-01T09:00:00Z',
+    revoked_at_utc: null, transaction_audit_id: 'approval-paid-budget-1',
+  };
+  const receipt = FactoryPaidBudgetApprovalReceiptV1Schema.parse({
+    ...body, receipt_digest: sha256Digest(body),
+  });
+  const resolver = { isCurrentApproval: () => false };
+  assert.equal(factoryPaidBudgetApprovalReceiptAuthorizesV1(
+    receipt, authority(), '2026-08-01T08:00:00Z', resolver,
+  ), false);
+  assert.throws(() => factoryPaidBudgetAuthorityFromVerifiedV1(
+    authority(), receipt, '2026-08-01T08:00:00Z', resolver,
+  ));
 });
 
 test('mirror rejects count, money, currency, approval, and legacy drift', () => {
