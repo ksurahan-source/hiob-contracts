@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from hiob_contracts import (
     AresAuthorityArtifactRefV3,
     AresCreateScriptRequestV3,
+    AresCreativeConstraintsV2,
     AresCreateScriptResultV3,
     AresP2ATargetProjectionV3,
     AresRequestScopeV3,
@@ -409,6 +410,57 @@ def test_v3_accepts_five_producer_issued_refs_and_full_scope():
     assert request_content_digest_v3(request).startswith("sha256:")
 
 
+@pytest.mark.parametrize("target_duration_sec", [1, 4, 180])
+def test_creative_constraints_accept_sealed_target_duration_boundaries(
+    target_duration_sec: int,
+):
+    constraints = AresCreativeConstraintsV2.model_validate(
+        {"n_beats": 1, "target_duration_sec": target_duration_sec}
+    )
+
+    assert constraints.target_duration_sec == target_duration_sec
+
+
+@pytest.mark.parametrize("target_duration_sec", [0, 181, True, 4.5, "4"])
+def test_creative_constraints_reject_invalid_target_duration(
+    target_duration_sec: object,
+):
+    with pytest.raises(ValidationError):
+        AresCreativeConstraintsV2.model_validate(
+            {"n_beats": 1, "target_duration_sec": target_duration_sec}
+        )
+
+
+def test_v3_request_and_p2a_digests_bind_target_duration() -> None:
+    baseline = AresCreateScriptRequestV3.model_validate(request_data())
+    body = request_data()
+    body["creative_constraints"]["target_duration_sec"] = 4
+    receipt_body = body["authority"]["accepted_p2a_receipt"]
+    target_input = receipt_body["target_input"]
+    target_input["creative_constraints"]["target_duration_sec"] = 4
+    target_digest = sha256_digest(target_input)
+    receipt_body["target_input_digest"] = target_digest
+    body["authority"]["p2a_ref"]["artifact_digest"] = target_digest
+    body["authority"]["p2a_ref"]["payload_digest"] = target_digest
+    receipt = KarmaEdgeReceipt.model_validate(receipt_body)
+    body["authority"]["p2a_ref"]["receipt_digest"] = karma_receipt_digest_v3(
+        receipt
+    )
+
+    duration_bound = AresCreateScriptRequestV3.model_validate(body)
+
+    assert duration_bound.creative_constraints.target_duration_sec == 4
+    assert (
+        duration_bound.authority.accepted_p2a_receipt.target_input[
+            "creative_constraints"
+        ]["target_duration_sec"]
+        == 4
+    )
+    assert request_content_digest_v3(duration_bound) != request_content_digest_v3(
+        baseline
+    )
+
+
 @pytest.mark.parametrize(
     ("ref_name", "producer"),
     [
@@ -786,13 +838,13 @@ def test_v3_schema_digests_are_stable_and_distinct():
     result_digest = ares_create_script_result_v3_schema_digest()
     # These are also asserted by the TypeScript mirror test.
     assert request_digest == (
-        "sha256:e3043b68c15ecdc9c560912067c8b7c6b7f25cdce3bce6dfb0facf20204be8b6"
+        "sha256:18087f9d1af7646a0dbbbb0a399f65a32a3a72767a26a03520f81e6083de948f"
     )
     assert result_digest == (
         "sha256:72a50c6d3305b158441328e024d630a9cdd0fe3f974d76bce7ab80d9d52c8de0"
     )
     assert ares_p2a_target_projection_v3_schema_digest() == (
-        "sha256:21eb7a2cc977d1aedd61885f90ddbd213809c65a061c04b6fb6793b27817d687"
+        "sha256:3f535adb7c18e0bafd9a48adfb79e3bd4d33236fc711fcf3f6d5583c457b5510"
     )
     assert request_digest != result_digest
 

@@ -211,6 +211,7 @@ export const AresHookDirectiveV2Schema = z
 export const AresCreativeConstraintsV2Schema = z
   .object({
     n_beats: z.number().int().min(1).max(64),
+    target_duration_sec: z.number().int().min(1).max(180).nullable().optional(),
     format_mode: NonEmptyString.nullable().optional(),
     style_mode: NonEmptyString.nullable().optional(),
     vertical_mode: NonEmptyString.nullable().optional(),
@@ -488,6 +489,7 @@ export function aresCreateScriptRequestSchemaDescriptorV2() {
       'goal',
       'human_instruction',
       'n_beats',
+      'target_duration_sec',
       'prior_script_package_digest',
       'required_phrases',
       'style_mode',

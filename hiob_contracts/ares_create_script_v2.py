@@ -232,6 +232,7 @@ class AresCreativeConstraintsV2(BaseModel):
     model_config = _FROZEN_STRICT
 
     n_beats: NonNegativeInt = Field(ge=1, le=64)
+    target_duration_sec: int | None = Field(default=None, ge=1, le=180)
     format_mode: NonBlankStr | None = None
     style_mode: NonBlankStr | None = None
     vertical_mode: NonBlankStr | None = None

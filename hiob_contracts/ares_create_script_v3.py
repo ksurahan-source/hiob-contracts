@@ -288,6 +288,7 @@ def ares_p2a_target_projection_v3_schema_descriptor() -> dict[str, Any]:
         "additionalProperties": False,
         "required": [
             "n_beats",
+            "target_duration_sec",
             "format_mode",
             "style_mode",
             "vertical_mode",
@@ -300,6 +301,12 @@ def ares_p2a_target_projection_v3_schema_descriptor() -> dict[str, Any]:
         ],
         "properties": {
             "n_beats": {"type": "integer", "minimum": 1, "maximum": 64},
+            "target_duration_sec": {
+                "oneOf": [
+                    {"type": "integer", "minimum": 1, "maximum": 180},
+                    {"type": "null"},
+                ]
+            },
             "format_mode": {"oneOf": [nonblank, {"type": "null"}]},
             "style_mode": {"oneOf": [nonblank, {"type": "null"}]},
             "vertical_mode": {"oneOf": [nonblank, {"type": "null"}]},
