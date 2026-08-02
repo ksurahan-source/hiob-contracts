@@ -838,13 +838,13 @@ def test_v3_schema_digests_are_stable_and_distinct():
     result_digest = ares_create_script_result_v3_schema_digest()
     # These are also asserted by the TypeScript mirror test.
     assert request_digest == (
-        "sha256:e3043b68c15ecdc9c560912067c8b7c6b7f25cdce3bce6dfb0facf20204be8b6"
+        "sha256:18087f9d1af7646a0dbbbb0a399f65a32a3a72767a26a03520f81e6083de948f"
     )
     assert result_digest == (
         "sha256:72a50c6d3305b158441328e024d630a9cdd0fe3f974d76bce7ab80d9d52c8de0"
     )
     assert ares_p2a_target_projection_v3_schema_digest() == (
-        "sha256:21eb7a2cc977d1aedd61885f90ddbd213809c65a061c04b6fb6793b27817d687"
+        "sha256:3f535adb7c18e0bafd9a48adfb79e3bd4d33236fc711fcf3f6d5583c457b5510"
     )
     assert request_digest != result_digest
 

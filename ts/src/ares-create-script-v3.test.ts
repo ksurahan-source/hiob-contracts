@@ -118,6 +118,7 @@ function sampleRequest() {
   };
   const creativeConstraints = {
     n_beats: 2,
+    target_duration_sec: null,
     format_mode: null,
     style_mode: null,
     vertical_mode: null,
@@ -671,7 +672,7 @@ test('Python and TS schema shape digests are stable', () => {
   const resultDigest = aresCreateScriptResultV3SchemaDigest();
   assert.equal(
     requestDigest,
-    'sha256:e3043b68c15ecdc9c560912067c8b7c6b7f25cdce3bce6dfb0facf20204be8b6',
+    'sha256:18087f9d1af7646a0dbbbb0a399f65a32a3a72767a26a03520f81e6083de948f',
   );
   assert.equal(
     resultDigest,
@@ -679,7 +680,7 @@ test('Python and TS schema shape digests are stable', () => {
   );
   assert.equal(
     aresP2ATargetProjectionV3SchemaDigest(),
-    'sha256:21eb7a2cc977d1aedd61885f90ddbd213809c65a061c04b6fb6793b27817d687',
+    'sha256:3f535adb7c18e0bafd9a48adfb79e3bd4d33236fc711fcf3f6d5583c457b5510',
   );
   assert.notEqual(requestDigest, resultDigest);
 });

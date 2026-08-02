@@ -348,6 +348,7 @@ const AresHookDirectiveV3InputSchema = z
 const AresCreativeConstraintsV3InputSchema = z
   .object({
     n_beats: z.number().int().min(1).max(64),
+    target_duration_sec: z.number().int().min(1).max(180).nullable().default(null),
     format_mode: NonBlankString.nullable().default(null),
     style_mode: NonBlankString.nullable().default(null),
     vertical_mode: NonBlankString.nullable().default(null),
@@ -525,6 +526,7 @@ export function aresP2ATargetProjectionV3SchemaDescriptor(): Record<string, unkn
     additionalProperties: false,
     required: [
       'n_beats',
+      'target_duration_sec',
       'format_mode',
       'style_mode',
       'vertical_mode',
@@ -537,6 +539,12 @@ export function aresP2ATargetProjectionV3SchemaDescriptor(): Record<string, unkn
     ],
     properties: {
       n_beats: { type: 'integer', minimum: 1, maximum: 64 },
+      target_duration_sec: {
+        oneOf: [
+          { type: 'integer', minimum: 1, maximum: 180 },
+          { type: 'null' },
+        ],
+      },
       format_mode: { oneOf: [nonblank, { type: 'null' }] },
       style_mode: { oneOf: [nonblank, { type: 'null' }] },
       vertical_mode: { oneOf: [nonblank, { type: 'null' }] },
@@ -1147,6 +1155,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'goal',
       'human_instruction',
       'n_beats',
+      'target_duration_sec',
       'prior_script_package_digest',
       'required_phrases',
       'style_mode',
