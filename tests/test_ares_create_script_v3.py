@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from hiob_contracts import (
     AresAuthorityArtifactRefV3,
     AresCreateScriptRequestV3,
+    AresCreativeConstraintsV2,
     AresCreateScriptResultV3,
     AresP2ATargetProjectionV3,
     AresRequestScopeV3,
@@ -407,6 +408,57 @@ def test_v3_accepts_five_producer_issued_refs_and_full_scope():
         ],
     }
     assert request_content_digest_v3(request).startswith("sha256:")
+
+
+@pytest.mark.parametrize("target_duration_sec", [1, 4, 180])
+def test_creative_constraints_accept_sealed_target_duration_boundaries(
+    target_duration_sec: int,
+):
+    constraints = AresCreativeConstraintsV2.model_validate(
+        {"n_beats": 1, "target_duration_sec": target_duration_sec}
+    )
+
+    assert constraints.target_duration_sec == target_duration_sec
+
+
+@pytest.mark.parametrize("target_duration_sec", [0, 181, True, 4.5, "4"])
+def test_creative_constraints_reject_invalid_target_duration(
+    target_duration_sec: object,
+):
+    with pytest.raises(ValidationError):
+        AresCreativeConstraintsV2.model_validate(
+            {"n_beats": 1, "target_duration_sec": target_duration_sec}
+        )
+
+
+def test_v3_request_and_p2a_digests_bind_target_duration() -> None:
+    baseline = AresCreateScriptRequestV3.model_validate(request_data())
+    body = request_data()
+    body["creative_constraints"]["target_duration_sec"] = 4
+    receipt_body = body["authority"]["accepted_p2a_receipt"]
+    target_input = receipt_body["target_input"]
+    target_input["creative_constraints"]["target_duration_sec"] = 4
+    target_digest = sha256_digest(target_input)
+    receipt_body["target_input_digest"] = target_digest
+    body["authority"]["p2a_ref"]["artifact_digest"] = target_digest
+    body["authority"]["p2a_ref"]["payload_digest"] = target_digest
+    receipt = KarmaEdgeReceipt.model_validate(receipt_body)
+    body["authority"]["p2a_ref"]["receipt_digest"] = karma_receipt_digest_v3(
+        receipt
+    )
+
+    duration_bound = AresCreateScriptRequestV3.model_validate(body)
+
+    assert duration_bound.creative_constraints.target_duration_sec == 4
+    assert (
+        duration_bound.authority.accepted_p2a_receipt.target_input[
+            "creative_constraints"
+        ]["target_duration_sec"]
+        == 4
+    )
+    assert request_content_digest_v3(duration_bound) != request_content_digest_v3(
+        baseline
+    )
 
 
 @pytest.mark.parametrize(
