@@ -5,6 +5,7 @@ import test from 'node:test';
 import {
   AresCreateScriptRequestV2Schema,
   AresCreateScriptResultV2Schema,
+  AresCreativeConstraintsV2Schema,
   aresCreateScriptRequestSchemaDigest,
   aresCreateScriptResultSchemaDigest,
 } from './ares-create-script-v2.js';
@@ -90,6 +91,27 @@ test('request schema accepts sealed authority bundle', () => {
   const parsed = AresCreateScriptRequestV2Schema.parse(sampleRequest());
   assert.equal(parsed.contract_version, 'AresCreateScriptRequest.v2');
   assert.equal(parsed.authority.identity_lock_digest, IDENTITY);
+});
+
+test('creative constraints seal optional target duration within 1..180 seconds', () => {
+  for (const targetDurationSec of [1, 4, 180]) {
+    assert.equal(
+      AresCreativeConstraintsV2Schema.parse({
+        n_beats: 1,
+        target_duration_sec: targetDurationSec,
+      }).target_duration_sec,
+      targetDurationSec,
+    );
+  }
+  for (const targetDurationSec of [0, 181, 4.5, '4', true]) {
+    assert.equal(
+      AresCreativeConstraintsV2Schema.safeParse({
+        n_beats: 1,
+        target_duration_sec: targetDurationSec,
+      }).success,
+      false,
+    );
+  }
 });
 
 test('speaker atomically binds face and voice', () => {
