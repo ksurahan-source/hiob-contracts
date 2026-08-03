@@ -109,8 +109,27 @@ function assertJson(value: unknown, path = 'value'): void {
     }
     return;
   }
+  if (
+    value !== null
+    && typeof value === 'object'
+    && Object.getOwnPropertySymbols(value).length > 0
+  ) {
+    throw new Error(`${path} contains a symbol-keyed property`);
+  }
   if (Array.isArray(value)) {
-    value.forEach((item, index) => assertJson(item, `${path}[${index}]`));
+    for (const key of Object.getOwnPropertyNames(value)) {
+      if (key === 'length') continue;
+      const index = Number(key);
+      if (!Number.isInteger(index) || index < 0 || index >= value.length || String(index) !== key) {
+        throw new Error(`${path} contains a non-index array property`);
+      }
+    }
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.prototype.hasOwnProperty.call(value, index)) {
+        throw new Error(`${path} contains a sparse array`);
+      }
+      assertJson(value[index], `${path}[${index}]`);
+    }
     return;
   }
   if (value !== null && typeof value === 'object') {
