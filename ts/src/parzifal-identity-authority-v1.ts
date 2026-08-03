@@ -128,6 +128,9 @@ function assertJson(value: unknown, path = 'value'): void {
     throw new Error(`${path} contains a symbol-keyed property`);
   }
   if (Array.isArray(value)) {
+    if (Object.getPrototypeOf(value) !== Array.prototype) {
+      throw new Error(`${path} contains a non-JSON array`);
+    }
     for (const key of Object.getOwnPropertyNames(value)) {
       if (key === 'length') continue;
       enumerableDataProperty(value, key, `${path}.${key}`);
