@@ -110,6 +110,16 @@ class NonJsonVoiceSpec {
   }
 }
 
+class ForgingArray<T> extends Array<T> {
+  static get [Symbol.species](): ArrayConstructor {
+    return Array;
+  }
+
+  toJSON(): unknown[] {
+    return ['forged'];
+  }
+}
+
 function assertJsonIssue(
   result: { success: boolean; error?: { issues: Array<{ message: string }> } },
   message: string,
@@ -285,6 +295,43 @@ test('Parzifal record rejects symbol keys and sparse JSON document arrays', () =
     ...sparseValue,
     digest: sha256Digest({ placeholder: 'digest' }),
   }), 'sparse array');
+});
+
+test('Parzifal record and material reject Array subclasses before serialization can forge them', () => {
+  const forgedRecordValues = new ForgingArray<string>();
+  forgedRecordValues.push('actual');
+  assert.deepEqual([...forgedRecordValues], ['actual']);
+  assert.deepEqual(forgedRecordValues.map((value) => value), ['actual']);
+  assert.equal(JSON.stringify(forgedRecordValues), '["forged"]');
+
+  const recordValue = recordBody();
+  (recordValue.identity_lock as Record<string, unknown>).values = forgedRecordValues;
+  assert.throws(
+    () => deriveParzifalIdentityAuthorityRecordDigestV1(recordValue),
+    /non-JSON array/,
+  );
+  assertJsonIssue(ParzifalIdentityAuthorityRecordV1Schema.safeParse({
+    ...recordValue,
+    digest: sha256Digest({ placeholder: 'digest' }),
+  }), 'non-JSON array');
+
+  const materialPayload = sealedPayload();
+  const forgedSpeakers = new ForgingArray<Record<string, unknown>>();
+  forgedSpeakers.push(
+    (materialPayload.speakers as Array<Record<string, unknown>>)[0],
+  );
+  materialPayload.speakers = forgedSpeakers;
+  assert.throws(
+    () => deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(materialPayload),
+    /non-JSON array/,
+  );
+  assertJsonIssue(ParzifalIdentityAuthorityMaterialV1Schema.safeParse({
+    artifact_type: 'identity_lock',
+    artifact_digest: materialPayload.identity_lock_digest,
+    payload_digest: sha256Digest({ placeholder: 'digest' }),
+    receipt_id: 'parzifal:identity_lock:receipt-1',
+    sealed_payload: materialPayload,
+  }), 'non-JSON array');
 });
 
 test('Parzifal record rejects hidden and accessor JSON document properties', () => {
