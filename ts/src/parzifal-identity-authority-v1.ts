@@ -1,0 +1,243 @@
+import { z } from 'zod';
+
+import { AresIdentitySealedV2Schema } from './ares-create-script-v2.js';
+import { sha256Digest } from './factory/digest.js';
+
+function normalizeUnicodeScalars(value: string): string {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const low = value.charCodeAt(index + 1);
+      if (!(low >= 0xdc00 && low <= 0xdfff)) {
+        throw new Error('text must contain valid Unicode scalar values');
+      }
+      index += 1;
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      throw new Error('text must contain valid Unicode scalar values');
+    }
+  }
+  return value;
+}
+
+function canonicalText(value: string): string {
+  const normalized = normalizeUnicodeScalars(value).trim();
+  if (!normalized) throw new Error('string must not be blank');
+  return normalized;
+}
+
+function canonicalUtcOffsetTimestamp(value: string): string {
+  const normalized = canonicalText(value);
+  const source = normalized.endsWith('Z')
+    ? `${normalized.slice(0, -1)}+00:00`
+    : normalized;
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?\+00:00$/.exec(source);
+  if (!match) throw new Error('timestamp must be an ISO-8601 UTC value');
+  const parsed = new Date(`${source.slice(0, -6)}Z`);
+  if (Number.isNaN(parsed.valueOf())
+    || parsed.getUTCFullYear() !== Number(match[1])
+    || parsed.getUTCMonth() + 1 !== Number(match[2])
+    || parsed.getUTCDate() !== Number(match[3])
+    || parsed.getUTCHours() !== Number(match[4])
+    || parsed.getUTCMinutes() !== Number(match[5])
+    || parsed.getUTCSeconds() !== Number(match[6])) {
+    throw new Error('timestamp must be a valid calendar value');
+  }
+  return source;
+}
+
+function deepFreeze<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map(deepFreeze)) as T;
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.freeze(Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(
+        ([key, item]) => [key, deepFreeze(item)],
+      ),
+    )) as T;
+  }
+  return value;
+}
+
+function assertJson(value: unknown, path = 'value'): void {
+  if (value === null || typeof value === 'boolean') return;
+  if (typeof value === 'string') {
+    normalizeUnicodeScalars(value);
+    return;
+  }
+  if (typeof value === 'number') {
+    if (!Number.isSafeInteger(value)) {
+      throw new Error(`${path} contains a non-safe-integer number`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => assertJson(item, `${path}[${index}]`));
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      assertJson(item, `${path}.${key}`);
+    }
+    return;
+  }
+  throw new Error(`${path} contains non-JSON value`);
+}
+
+const CanonicalTextSchema = z.string()
+  .superRefine((value, ctx) => {
+    try {
+      canonicalText(value);
+    } catch (error) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(error) });
+    }
+  })
+  .transform(canonicalText);
+const CanonicalUtcOffsetTimestampSchema = z.string()
+  .superRefine((value, ctx) => {
+    try {
+      canonicalUtcOffsetTimestamp(value);
+    } catch (error) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(error) });
+    }
+  })
+  .transform(canonicalUtcOffsetTimestamp);
+const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
+const PositiveVersionSchema = z.number().int().safe().positive();
+const JsonObjectSchema = z.record(z.string(), z.unknown())
+  .superRefine((value, ctx) => {
+    try {
+      assertJson(value);
+    } catch (error) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(error) });
+    }
+  })
+  .transform(deepFreeze);
+
+const RecordBodyShape = {
+  id: CanonicalTextSchema,
+  version: PositiveVersionSchema,
+  workspace_id: CanonicalTextSchema,
+  run_id: CanonicalTextSchema,
+  status: z.enum(['approved', 'sealed']),
+  emitted_at: CanonicalUtcOffsetTimestampSchema,
+  identity_lock: JsonObjectSchema,
+  master_sheet: JsonObjectSchema,
+  cast_sheets: JsonObjectSchema,
+};
+const ParzifalIdentityAuthorityRecordBodyV1Schema = z
+  .object(RecordBodyShape)
+  .strict();
+
+export const ParzifalIdentityRecordRefV1Schema = z
+  .object({
+    id: CanonicalTextSchema,
+    version: PositiveVersionSchema,
+    digest: DigestSchema,
+  })
+  .strict()
+  .transform(deepFreeze);
+
+export type ParzifalIdentityRecordRefV1 = z.infer<
+  typeof ParzifalIdentityRecordRefV1Schema
+>;
+
+export function deriveParzifalIdentityAuthorityRecordDigestV1(
+  value: Record<string, unknown>,
+): string {
+  const body = ParzifalIdentityAuthorityRecordBodyV1Schema.parse({
+    id: value.id,
+    version: value.version,
+    workspace_id: value.workspace_id,
+    run_id: value.run_id,
+    status: value.status,
+    emitted_at: value.emitted_at,
+    identity_lock: value.identity_lock,
+    master_sheet: value.master_sheet,
+    cast_sheets: value.cast_sheets,
+  });
+  return sha256Digest({
+    contract_version: 'ParzifalIdentityAuthorityRecord.v1',
+    ...body,
+  });
+}
+
+export const ParzifalIdentityAuthorityRecordV1Schema = z
+  .object({
+    ...RecordBodyShape,
+    digest: DigestSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.digest !== deriveParzifalIdentityAuthorityRecordDigestV1(value)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'digest does not match Parzifal identity authority record',
+        path: ['digest'],
+      });
+    }
+  })
+  .transform(deepFreeze);
+
+export type ParzifalIdentityAuthorityRecordV1 = z.infer<
+  typeof ParzifalIdentityAuthorityRecordV1Schema
+>;
+
+const ParzifalIdentitySealedPayloadV1Schema = AresIdentitySealedV2Schema
+  .superRefine((value, ctx) => {
+    value.speakers.forEach((speaker, index) => {
+      if (!speaker.face_id || !speaker.voice_id || !speaker.identity_binding_digest) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'sealed_payload speakers must include face_id, voice_id, and identity_binding_digest',
+          path: ['speakers', index],
+        });
+      }
+    });
+  })
+  .transform((value) => deepFreeze({
+    ...value,
+    voice_spec: value.voice_spec ?? null,
+    locale: value.locale ?? 'ko',
+    audience_lock: value.audience_lock ?? null,
+  }));
+
+export function deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(
+  value: Record<string, unknown>,
+): string {
+  return sha256Digest(ParzifalIdentitySealedPayloadV1Schema.parse(value));
+}
+
+export const ParzifalIdentityAuthorityMaterialV1Schema = z
+  .object({
+    artifact_type: z.literal('identity_lock'),
+    artifact_digest: DigestSchema,
+    payload_digest: DigestSchema,
+    receipt_id: CanonicalTextSchema,
+    sealed_payload: ParzifalIdentitySealedPayloadV1Schema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.artifact_digest !== value.sealed_payload.identity_lock_digest) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'artifact_digest must equal sealed identity_lock_digest',
+        path: ['artifact_digest'],
+      });
+    }
+    if (
+      value.payload_digest
+      !== deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(value.sealed_payload)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'payload_digest does not match sealed_payload',
+        path: ['payload_digest'],
+      });
+    }
+  })
+  .transform(deepFreeze);
+
+export type ParzifalIdentityAuthorityMaterialV1 = z.infer<
+  typeof ParzifalIdentityAuthorityMaterialV1Schema
+>;

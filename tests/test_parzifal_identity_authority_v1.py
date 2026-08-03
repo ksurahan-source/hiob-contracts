@@ -118,7 +118,7 @@ def test_identity_record_ref_is_exact_immutable_and_python_ts_digest_stable() ->
     assert parsed.digest == (
         "sha256:db12f62b6d8c3671ad49acc8d1cca60ad4f2ab3b7ec63a6563b68dd1a58f33a3"
     )
-    with pytest.raises(ValidationError):
+    with pytest.raises(TypeError):
         parsed.identity_lock["cast_status"] = "draft"
 
 

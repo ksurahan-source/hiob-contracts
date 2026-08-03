@@ -128,6 +128,18 @@ export {
   deriveParzifalVoiceEnvelopeDigestV1,
 } from './parzifal-voice-envelope-v1.js';
 export type { ParzifalVoiceEnvelopeV1 } from './parzifal-voice-envelope-v1.js';
+export {
+  ParzifalIdentityRecordRefV1Schema,
+  ParzifalIdentityAuthorityRecordV1Schema,
+  ParzifalIdentityAuthorityMaterialV1Schema,
+  deriveParzifalIdentityAuthorityRecordDigestV1,
+  deriveParzifalIdentityAuthorityMaterialPayloadDigestV1,
+} from './parzifal-identity-authority-v1.js';
+export type {
+  ParzifalIdentityRecordRefV1,
+  ParzifalIdentityAuthorityRecordV1,
+  ParzifalIdentityAuthorityMaterialV1,
+} from './parzifal-identity-authority-v1.js';
 export type {
   AresRequestScopeV3,
   AresAuthorityArtifactRefV3,
