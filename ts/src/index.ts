@@ -36,7 +36,7 @@ export {
   createSerialFanInReceiptV1,
   buildBeatCoverageV1,
   buildSerialFanInReceiptV1,
-} from './beat-coverage';
+} from './beat-coverage.js';
 export type {
   BeatLaneTerminalReceiptV1,
   BeatTerminalReceiptV1,
@@ -46,7 +46,7 @@ export type {
   SerialFanInReceiptV1,
   BeatLaneTerminalReceiptV1Input,
   BeatCoverageV1Input,
-} from './beat-coverage';
+} from './beat-coverage.js';
 
 // AudioClip
 export { AudioClipSchema, validateAudioClip } from './audio-clip.js';
