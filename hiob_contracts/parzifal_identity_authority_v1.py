@@ -9,6 +9,7 @@ record reference separately and sends only this material through PlanetOutput.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any, Annotated, Literal, Mapping
 
 from pydantic import (
@@ -41,6 +42,9 @@ _RECORD_FIELDS = (
     "identity_lock",
     "master_sheet",
     "cast_sheets",
+)
+_UTC_OFFSET_TIMESTAMP_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?\+00:00$"
 )
 
 
@@ -77,6 +81,8 @@ def _canonical_text(value: str) -> str:
 def _canonical_utc_offset_timestamp(value: str) -> str:
     normalized = _canonical_text(value)
     source = normalized[:-1] + "+00:00" if normalized.endswith("Z") else normalized
+    if _UTC_OFFSET_TIMESTAMP_RE.fullmatch(source) is None:
+        raise ValueError("timestamp must be an ISO-8601 UTC value")
     try:
         parsed = datetime.fromisoformat(source)
     except ValueError as exc:
