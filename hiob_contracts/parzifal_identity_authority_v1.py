@@ -89,7 +89,12 @@ def _canonical_utc_offset_timestamp(value: str) -> str:
         raise ValueError("timestamp must be an ISO-8601 UTC value") from exc
     if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
         raise ValueError("timestamp must be UTC")
-    return parsed.astimezone(timezone.utc).isoformat()
+    canonical = parsed.astimezone(timezone.utc)
+    fraction = f".{canonical.microsecond:06d}" if canonical.microsecond else ""
+    return (
+        f"{canonical.date().isoformat()}T{canonical.hour:02d}:"
+        f"{canonical.minute:02d}:{canonical.second:02d}{fraction}+00:00"
+    )
 
 
 CanonicalText = Annotated[str, AfterValidator(_canonical_text)]

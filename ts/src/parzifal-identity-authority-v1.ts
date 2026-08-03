@@ -60,7 +60,7 @@ function canonicalUtcOffsetTimestamp(value: string): string {
   const source = normalized.endsWith('Z')
     ? `${normalized.slice(0, -1)}+00:00`
     : normalized;
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?\+00:00$/.exec(source);
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d{1,6})?\+00:00$/.exec(source);
   if (!match) throw new Error('timestamp must be an ISO-8601 UTC value');
   if (Number(match[1]) === 0) {
     throw new Error('timestamp must be a valid calendar value');
@@ -75,7 +75,11 @@ function canonicalUtcOffsetTimestamp(value: string): string {
     || parsed.getUTCSeconds() !== Number(match[6])) {
     throw new Error('timestamp must be a valid calendar value');
   }
-  return source;
+  const fraction = match[7] ?? '';
+  const canonicalFraction = fraction
+    ? `${fraction}${'0'.repeat(7 - fraction.length)}`
+    : '';
+  return `${source.slice(0, 19)}${canonicalFraction}+00:00`;
 }
 
 function deepFreeze<T>(value: T): T {
