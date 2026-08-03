@@ -120,6 +120,33 @@ test('StoryMap preserves nonblank whitespace and rejects stale digest or extras'
   }
 });
 
+test('StoryMap follows Python whitespace, Unicode scalar, and length parity', () => {
+  for (const [customerScene, accepted] of [
+    ['\u0085', false],
+    ['\u001c', false],
+    ['\uFEFF', true],
+  ] as const) {
+    const value = storyMapPayload();
+    value.customer_scene = customerScene;
+    value.story_map_digest = deriveStoryMapDigestV1(value);
+    assert.equal(StoryMapV1Schema.safeParse(value).success, accepted);
+  }
+
+  const boundary = storyMapPayload();
+  boundary.customer_scene = '😀'.repeat(1200);
+  boundary.story_map_digest = deriveStoryMapDigestV1(boundary);
+  assert.equal(StoryMapV1Schema.safeParse(boundary).success, true);
+
+  const malformed = storyMapPayload();
+  malformed.customer_scene = '\ud800';
+  assert.throws(
+    () => deriveStoryMapDigestV1(malformed),
+    /Unicode scalar/,
+  );
+  malformed.story_map_digest = `sha256:${'0'.repeat(64)}`;
+  assert.equal(StoryMapV1Schema.safeParse(malformed).success, false);
+});
+
 test('VariantSet permits only hook, proof order, framing, and CTA variation', () => {
   for (const field of [
     'identity_lock_digest', 'product_truth_digest', 'proof_fact_digest', 'proof_references',

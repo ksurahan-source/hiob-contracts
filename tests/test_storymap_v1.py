@@ -161,6 +161,41 @@ def test_story_map_preserves_nonblank_whitespace_in_its_digest() -> None:
 
 
 @pytest.mark.parametrize(
+    ("customer_scene", "accepted"),
+    [
+        ("\u0085", False),
+        ("\u001c", False),
+        ("\ufeff", True),
+    ],
+)
+def test_story_map_uses_python_nonblank_whitespace_rules(
+    customer_scene: str,
+    accepted: bool,
+) -> None:
+    value = _story_map_payload()
+    value["customer_scene"] = customer_scene
+    value["story_map_digest"] = derive_story_map_digest_v1(value)
+
+    if accepted:
+        assert StoryMapV1.model_validate(value).customer_scene == customer_scene
+    else:
+        with pytest.raises(ValidationError, match="customer_scene"):
+            StoryMapV1.model_validate(value)
+
+
+def test_story_map_uses_unicode_scalars_for_bounds_and_hashing() -> None:
+    boundary = _story_map_payload()
+    boundary["customer_scene"] = "😀" * 1_200
+    boundary["story_map_digest"] = derive_story_map_digest_v1(boundary)
+    assert StoryMapV1.model_validate(boundary).customer_scene == "😀" * 1_200
+
+    malformed = _story_map_payload()
+    malformed["customer_scene"] = "\ud800"
+    with pytest.raises(ValueError, match="unpaired Unicode surrogate"):
+        derive_story_map_digest_v1(malformed)
+
+
+@pytest.mark.parametrize(
     ("field", "value"),
     [
         ("identity_lock_digest", "sha256:" + "1" * 64),
