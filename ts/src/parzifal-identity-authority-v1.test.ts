@@ -110,14 +110,30 @@ class NonJsonVoiceSpec {
   }
 }
 
-function assertNonJsonIssue(result: { success: boolean; error?: { issues: Array<{ message: string }> } }): void {
+function assertJsonIssue(
+  result: { success: boolean; error?: { issues: Array<{ message: string }> } },
+  message: string,
+): void {
   assert.equal(result.success, false);
   if (!result.success) {
     assert.equal(
-      result.error?.issues.some((issue) => issue.message.includes('non-JSON object')),
+      result.error?.issues.some((issue) => issue.message.includes(message)),
       true,
     );
   }
+}
+
+function voiceSpec(): Record<string, unknown> {
+  const value: Record<string, unknown> = {
+    contract_version: 'VoiceSpec.v1',
+    subject_id: 'mom',
+    rhythm: 'steady',
+    vocabulary: [],
+    forbidden_phrases: [],
+    approved_examples: ['one', 'two', 'three'],
+  };
+  value.voice_spec_digest = deriveVoiceSpecDigestV1(value);
+  return value;
 }
 
 test('Parzifal identity record reference and durable record match Python digest parity', () => {
@@ -191,10 +207,10 @@ test('Parzifal record rejects RegExp and class objects but accepts frozen null-p
     (value.identity_lock as Record<string, unknown>).invalid = invalid;
 
     assert.throws(() => deriveParzifalIdentityAuthorityRecordDigestV1(value));
-    assertNonJsonIssue(ParzifalIdentityAuthorityRecordV1Schema.safeParse({
+    assertJsonIssue(ParzifalIdentityAuthorityRecordV1Schema.safeParse({
       ...value,
       digest: sha256Digest({ placeholder: 'digest' }),
-    }));
+    }), 'non-JSON object');
   }
 
   const nullPrototypeDocument = Object.assign(Object.create(null), {
@@ -237,6 +253,38 @@ test('Parzifal fractional timestamps have one Python parity form and digest', ()
       assert.equal(parsed.digest, digest);
     }
   }
+});
+
+test('Parzifal record rejects symbol keys and sparse JSON document arrays', () => {
+  const symbolKey = Symbol('not-json');
+  const symbolValue = recordBody();
+  Object.defineProperty(symbolValue.identity_lock as object, symbolKey, {
+    enumerable: true,
+    value: 'hidden',
+  });
+
+  assert.throws(
+    () => deriveParzifalIdentityAuthorityRecordDigestV1(symbolValue),
+    /symbol-keyed/,
+  );
+  assertJsonIssue(ParzifalIdentityAuthorityRecordV1Schema.safeParse({
+    ...symbolValue,
+    digest: sha256Digest({ placeholder: 'digest' }),
+  }), 'symbol-keyed');
+
+  const sparseValue = recordBody();
+  const sparseArray = new Array<string>(2);
+  sparseArray[1] = 'present';
+  (sparseValue.identity_lock as Record<string, unknown>).sparse = sparseArray;
+
+  assert.throws(
+    () => deriveParzifalIdentityAuthorityRecordDigestV1(sparseValue),
+    /sparse array/,
+  );
+  assertJsonIssue(ParzifalIdentityAuthorityRecordV1Schema.safeParse({
+    ...sparseValue,
+    digest: sha256Digest({ placeholder: 'digest' }),
+  }), 'sparse array');
 });
 
 test('Parzifal authority material is the exact fully sealed Python parity wrapper', () => {
@@ -293,13 +341,13 @@ test('Parzifal material rejects a nested class instance but freezes null-prototy
   classPayload.voice_spec = new NonJsonVoiceSpec();
 
   assert.throws(() => deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(classPayload));
-  assertNonJsonIssue(ParzifalIdentityAuthorityMaterialV1Schema.safeParse({
+  assertJsonIssue(ParzifalIdentityAuthorityMaterialV1Schema.safeParse({
     artifact_type: 'identity_lock',
     artifact_digest: classPayload.identity_lock_digest,
     payload_digest: sha256Digest({ placeholder: 'digest' }),
     receipt_id: 'parzifal:identity_lock:receipt-1',
     sealed_payload: classPayload,
-  }));
+  }), 'non-JSON object');
 
   const nullPrototypePayload = Object.assign(Object.create(null), sealedPayload());
   const parsed = ParzifalIdentityAuthorityMaterialV1Schema.parse({
@@ -313,4 +361,45 @@ test('Parzifal material rejects a nested class instance but freezes null-prototy
   });
 
   assert.equal(Object.isFrozen(parsed.sealed_payload), true);
+});
+
+test('Parzifal material rejects symbol keys and sparse arrays in nested voice spec', () => {
+  const symbolPayload = sealedPayload();
+  const symbolVoiceSpec = voiceSpec();
+  Object.defineProperty(symbolVoiceSpec, Symbol('not-json'), {
+    enumerable: true,
+    value: 'hidden',
+  });
+  symbolPayload.voice_spec = symbolVoiceSpec;
+
+  assert.throws(
+    () => deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(symbolPayload),
+    /symbol-keyed/,
+  );
+  assertJsonIssue(ParzifalIdentityAuthorityMaterialV1Schema.safeParse({
+    artifact_type: 'identity_lock',
+    artifact_digest: symbolPayload.identity_lock_digest,
+    payload_digest: sha256Digest({ placeholder: 'digest' }),
+    receipt_id: 'parzifal:identity_lock:receipt-1',
+    sealed_payload: symbolPayload,
+  }), 'symbol-keyed');
+
+  const sparsePayload = sealedPayload();
+  const sparseVoiceSpec = voiceSpec();
+  const sparseVocabulary = new Array<string>(2);
+  sparseVocabulary[1] = 'present';
+  sparseVoiceSpec.vocabulary = sparseVocabulary;
+  sparsePayload.voice_spec = sparseVoiceSpec;
+
+  assert.throws(
+    () => deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(sparsePayload),
+    /sparse array/,
+  );
+  assertJsonIssue(ParzifalIdentityAuthorityMaterialV1Schema.safeParse({
+    artifact_type: 'identity_lock',
+    artifact_digest: sparsePayload.identity_lock_digest,
+    payload_digest: sha256Digest({ placeholder: 'digest' }),
+    receipt_id: 'parzifal:identity_lock:receipt-1',
+    sealed_payload: sparsePayload,
+  }), 'sparse array');
 });
