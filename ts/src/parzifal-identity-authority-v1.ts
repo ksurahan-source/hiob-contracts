@@ -97,6 +97,17 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+function enumerableDataProperty(value: object, key: string, path: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (!descriptor?.enumerable) {
+    throw new Error(`${path} contains a non-enumerable own string property`);
+  }
+  if (!Object.prototype.hasOwnProperty.call(descriptor, 'value')) {
+    throw new Error(`${path} contains an accessor property`);
+  }
+  return descriptor.value;
+}
+
 function assertJson(value: unknown, path = 'value'): void {
   if (value === null || typeof value === 'boolean') return;
   if (typeof value === 'string') {
@@ -119,6 +130,7 @@ function assertJson(value: unknown, path = 'value'): void {
   if (Array.isArray(value)) {
     for (const key of Object.getOwnPropertyNames(value)) {
       if (key === 'length') continue;
+      enumerableDataProperty(value, key, `${path}.${key}`);
       const index = Number(key);
       if (!Number.isInteger(index) || index < 0 || index >= value.length || String(index) !== key) {
         throw new Error(`${path} contains a non-index array property`);
@@ -128,7 +140,10 @@ function assertJson(value: unknown, path = 'value'): void {
       if (!Object.prototype.hasOwnProperty.call(value, index)) {
         throw new Error(`${path} contains a sparse array`);
       }
-      assertJson(value[index], `${path}[${index}]`);
+      assertJson(
+        enumerableDataProperty(value, String(index), `${path}[${index}]`),
+        `${path}[${index}]`,
+      );
     }
     return;
   }
@@ -137,8 +152,11 @@ function assertJson(value: unknown, path = 'value'): void {
     if (prototype !== Object.prototype && prototype !== null) {
       throw new Error(`${path} contains a non-JSON object`);
     }
-    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      assertJson(item, `${path}.${key}`);
+    for (const key of Object.getOwnPropertyNames(value)) {
+      assertJson(
+        enumerableDataProperty(value, key, `${path}.${key}`),
+        `${path}.${key}`,
+      );
     }
     return;
   }
