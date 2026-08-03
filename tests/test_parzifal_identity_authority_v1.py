@@ -185,6 +185,21 @@ def test_identity_record_digest_rejects_year_zero_before_hashing() -> None:
     ("fraction", "canonical_timestamp", "digest"),
     [
         (
+            ".0",
+            "2026-07-26T01:02:03+00:00",
+            "sha256:db12f62b6d8c3671ad49acc8d1cca60ad4f2ab3b7ec63a6563b68dd1a58f33a3",
+        ),
+        (
+            ".00",
+            "2026-07-26T01:02:03+00:00",
+            "sha256:db12f62b6d8c3671ad49acc8d1cca60ad4f2ab3b7ec63a6563b68dd1a58f33a3",
+        ),
+        (
+            ".000000",
+            "2026-07-26T01:02:03+00:00",
+            "sha256:db12f62b6d8c3671ad49acc8d1cca60ad4f2ab3b7ec63a6563b68dd1a58f33a3",
+        ),
+        (
             ".1",
             "2026-07-26T01:02:03.100000+00:00",
             "sha256:10315ed874540d33dd3ab64998c480658a5e13d5e07e751aeef25de053c9224a",

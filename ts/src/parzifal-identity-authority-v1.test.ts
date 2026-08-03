@@ -156,6 +156,9 @@ test('Parzifal identity record preserves Python canonical BOM text for digest pa
 
 test('Parzifal fractional timestamps have one Python parity form and digest', () => {
   const vectors = [
+    ['.0', '2026-07-26T01:02:03+00:00', 'sha256:db12f62b6d8c3671ad49acc8d1cca60ad4f2ab3b7ec63a6563b68dd1a58f33a3'],
+    ['.00', '2026-07-26T01:02:03+00:00', 'sha256:db12f62b6d8c3671ad49acc8d1cca60ad4f2ab3b7ec63a6563b68dd1a58f33a3'],
+    ['.000000', '2026-07-26T01:02:03+00:00', 'sha256:db12f62b6d8c3671ad49acc8d1cca60ad4f2ab3b7ec63a6563b68dd1a58f33a3'],
     ['.1', '2026-07-26T01:02:03.100000+00:00', 'sha256:10315ed874540d33dd3ab64998c480658a5e13d5e07e751aeef25de053c9224a'],
     ['.12', '2026-07-26T01:02:03.120000+00:00', 'sha256:112cbb6371b10a700db45ffbffa6944372dd8e8395ddf5e200e76b55ea037766'],
     ['.123', '2026-07-26T01:02:03.123000+00:00', 'sha256:082d7d04483c4566832e0678c77fcb8aba6190f95da9ea26d7c9bd0103938703'],
