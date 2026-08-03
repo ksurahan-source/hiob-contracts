@@ -181,6 +181,61 @@ def test_identity_record_digest_rejects_year_zero_before_hashing() -> None:
         derive_parzifal_identity_authority_record_digest_v1(value)
 
 
+@pytest.mark.parametrize(
+    ("fraction", "canonical_timestamp", "digest"),
+    [
+        (
+            ".1",
+            "2026-07-26T01:02:03.100000+00:00",
+            "sha256:10315ed874540d33dd3ab64998c480658a5e13d5e07e751aeef25de053c9224a",
+        ),
+        (
+            ".12",
+            "2026-07-26T01:02:03.120000+00:00",
+            "sha256:112cbb6371b10a700db45ffbffa6944372dd8e8395ddf5e200e76b55ea037766",
+        ),
+        (
+            ".123",
+            "2026-07-26T01:02:03.123000+00:00",
+            "sha256:082d7d04483c4566832e0678c77fcb8aba6190f95da9ea26d7c9bd0103938703",
+        ),
+        (
+            ".1234",
+            "2026-07-26T01:02:03.123400+00:00",
+            "sha256:eae1e99ea7f84294a72482bc5c78c0f887c6414e2ee6da2f2e4acd0f487e0161",
+        ),
+        (
+            ".12345",
+            "2026-07-26T01:02:03.123450+00:00",
+            "sha256:78b7987c6fccb205dd787008f9d88dcf05211eca4c3ed63da436cb2706a49e6c",
+        ),
+        (
+            ".123456",
+            "2026-07-26T01:02:03.123456+00:00",
+            "sha256:7336fb5886675c0257428efdaf677356f2d94ac857018f6df9484a6cfc318a93",
+        ),
+    ],
+)
+@pytest.mark.parametrize("utc_suffix", ["Z", "+00:00"])
+def test_identity_record_fractional_timestamps_have_one_python_ts_form(
+    fraction: str,
+    canonical_timestamp: str,
+    digest: str,
+    utc_suffix: str,
+) -> None:
+    body = _record_body()
+    body["emitted_at"] = f"2026-07-26T01:02:03{fraction}{utc_suffix}"
+    record = {
+        **body,
+        "digest": derive_parzifal_identity_authority_record_digest_v1(body),
+    }
+
+    parsed = ParzifalIdentityAuthorityRecordV1.model_validate(record)
+
+    assert parsed.emitted_at == canonical_timestamp
+    assert parsed.digest == digest
+
+
 def test_identity_authority_material_is_the_exact_fully_sealed_wrapper() -> None:
     material = ParzifalIdentityAuthorityMaterialV1.model_validate(_material())
 

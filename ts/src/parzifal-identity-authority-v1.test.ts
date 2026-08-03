@@ -154,6 +154,31 @@ test('Parzifal identity record preserves Python canonical BOM text for digest pa
   );
 });
 
+test('Parzifal fractional timestamps have one Python parity form and digest', () => {
+  const vectors = [
+    ['.1', '2026-07-26T01:02:03.100000+00:00', 'sha256:10315ed874540d33dd3ab64998c480658a5e13d5e07e751aeef25de053c9224a'],
+    ['.12', '2026-07-26T01:02:03.120000+00:00', 'sha256:112cbb6371b10a700db45ffbffa6944372dd8e8395ddf5e200e76b55ea037766'],
+    ['.123', '2026-07-26T01:02:03.123000+00:00', 'sha256:082d7d04483c4566832e0678c77fcb8aba6190f95da9ea26d7c9bd0103938703'],
+    ['.1234', '2026-07-26T01:02:03.123400+00:00', 'sha256:eae1e99ea7f84294a72482bc5c78c0f887c6414e2ee6da2f2e4acd0f487e0161'],
+    ['.12345', '2026-07-26T01:02:03.123450+00:00', 'sha256:78b7987c6fccb205dd787008f9d88dcf05211eca4c3ed63da436cb2706a49e6c'],
+    ['.123456', '2026-07-26T01:02:03.123456+00:00', 'sha256:7336fb5886675c0257428efdaf677356f2d94ac857018f6df9484a6cfc318a93'],
+  ] as const;
+
+  for (const [fraction, canonicalTimestamp, digest] of vectors) {
+    for (const utcSuffix of ['Z', '+00:00']) {
+      const value = recordBody();
+      value.emitted_at = `2026-07-26T01:02:03${fraction}${utcSuffix}`;
+      const parsed = ParzifalIdentityAuthorityRecordV1Schema.parse({
+        ...value,
+        digest: deriveParzifalIdentityAuthorityRecordDigestV1(value),
+      });
+
+      assert.equal(parsed.emitted_at, canonicalTimestamp);
+      assert.equal(parsed.digest, digest);
+    }
+  }
+});
+
 test('Parzifal authority material is the exact fully sealed Python parity wrapper', () => {
   const parsed = ParzifalIdentityAuthorityMaterialV1Schema.parse(material());
 
