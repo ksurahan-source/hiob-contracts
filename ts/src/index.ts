@@ -149,6 +149,20 @@ export {
 export type {
   AresV3MakeContextV1,
 } from './ares-v3-make-context-v1.js';
+// Story OS: immutable customer truth, one hypothesis, bounded treatments.
+export {
+  StoryMapV1Schema,
+  ExperimentHypothesisV1Schema,
+  VariantSetV1Schema,
+  deriveStoryMapDigestV1,
+  deriveExperimentHypothesisDigestV1,
+  deriveVariantSetDigestV1,
+} from './storymap-v1.js';
+export type {
+  StoryMapV1,
+  ExperimentHypothesisV1,
+  VariantSetV1,
+} from './storymap-v1.js';
 export {
   AresCharacterIdentityProjectionV1Schema,
   AresProvenanceMemoryV1Schema,

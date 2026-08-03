@@ -315,6 +315,14 @@ from .factory import (
     StageExecutionState, EdgeExecutionState,
     SemanticEdge, EDGES, get_edge, is_registered_edge, required_edges,
 )
+from .storymap_v1 import (
+    ExperimentHypothesisV1,
+    StoryMapV1,
+    VariantSetV1,
+    derive_experiment_hypothesis_digest_v1,
+    derive_story_map_digest_v1,
+    derive_variant_set_digest_v1,
+)
 
 __all__ = [
     "ExecutionBackend", "OperationRef", "OperationStatus", "CancelResult",
@@ -322,6 +330,10 @@ __all__ = [
     "ExecutionContractError", "ProviderError", "IdempotencyError",
     "DeadlineExceededError", "UnknownOperationError",
     "OperationStatusType",
+    "StoryMapV1", "ExperimentHypothesisV1", "VariantSetV1",
+    "derive_story_map_digest_v1",
+    "derive_experiment_hypothesis_digest_v1",
+    "derive_variant_set_digest_v1",
     "ArtemisApprovalReceiptV1", "ArtemisApprovalResolverV1",
     "ArtemisClaimV1", "ArtemisCompileRequestV1", "ArtemisCompileResultV1",
     "ArtemisSealRequestV1", "ArtemisSealResultV1",
