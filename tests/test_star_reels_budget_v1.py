@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from hiob_contracts.star_reels_view_v1 import _StarReelsBudgetV1
+from hiob_contracts.star_reels_view_v1 import _StarReelsBudgetMultiBeatV1
 
 
 def _budget(**overrides):
@@ -21,7 +21,7 @@ def _budget(**overrides):
 
 
 def test_star_reels_budget_allows_positive_per_beat_image_and_voice_counts():
-    budget = _StarReelsBudgetV1.model_validate(_budget(image=12, voice=12))
+    budget = _StarReelsBudgetMultiBeatV1.model_validate(_budget(image=12, voice=12))
     assert budget.image == budget.voice == 12
     assert budget.script == budget.render == 1
 
@@ -30,4 +30,4 @@ def test_star_reels_budget_allows_positive_per_beat_image_and_voice_counts():
 @pytest.mark.parametrize("value", [0, -1])
 def test_star_reels_budget_rejects_non_positive_beat_counts(field, value):
     with pytest.raises(Exception):
-        _StarReelsBudgetV1.model_validate(_budget(**{field: value}))
+        _StarReelsBudgetMultiBeatV1.model_validate(_budget(**{field: value}))

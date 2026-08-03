@@ -104,3 +104,9 @@ def test_out_of_range_lane_is_rejected_even_when_count_matches():
         + coverage.lane_receipts[1:],
     )
     assert any("out of range" in error for error in out_of_range.validate())
+
+
+def test_required_lanes_cannot_drop_the_serial_f1_spine():
+    coverage = replace(_coverage(), required_lanes=("evil",))
+    errors = coverage.validate()
+    assert any("required_lanes must include" in error for error in errors)

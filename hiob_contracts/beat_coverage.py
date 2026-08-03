@@ -219,6 +219,9 @@ class BeatCoverageV1:
             errors.append("required_lanes must contain non-blank lane names")
         if len(required) != len(set(required)):
             errors.append("required_lanes contains duplicate lanes")
+        for required_lane in DEFAULT_BEAT_COVERAGE_LANES_V1:
+            if required_lane not in required:
+                errors.append(f"required_lanes must include {required_lane}")
 
         seen: set[tuple[int, str]] = set()
         for receipt in self.lane_receipts:

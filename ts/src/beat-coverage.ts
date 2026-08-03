@@ -106,6 +106,11 @@ export const BeatCoverageV1Schema = z.object({
   if (new Set(coverage.required_lanes).size !== coverage.required_lanes.length) {
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['required_lanes'], message: 'required_lanes contains duplicate lanes' });
   }
+  for (const requiredLane of DEFAULT_BEAT_COVERAGE_LANES_V1) {
+    if (!coverage.required_lanes.includes(requiredLane)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['required_lanes'], message: `required_lanes must include ${requiredLane}` });
+    }
+  }
 
   const seen = new Set<string>();
   for (const receipt of coverage.lane_receipts) {

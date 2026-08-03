@@ -51,6 +51,20 @@ class _StarReelsBudgetV1(BaseModel):
     character_lock: Literal[0]
 
 
+class _StarReelsBudgetMultiBeatV1(BaseModel):
+    """Structural all-beat budget fragment used before the V2 view is sealed."""
+
+    model_config = _STRICT_FROZEN
+
+    script: Literal[1]
+    image: int = Field(ge=1, le=64)
+    voice: int = Field(ge=1, le=64)
+    render: Literal[1]
+    retries: Literal[0]
+    fallbacks: Literal[0]
+    character_lock: Literal[0]
+
+
 class _StarReelsBudgetV2(BaseModel):
     model_config = _STRICT_FROZEN
 
@@ -418,5 +432,6 @@ class StarReelsViewV2(StarReelsViewV1):
 __all__ = [
     "StarReelsViewV1",
     "StarReelsViewV2",
+    "_StarReelsBudgetMultiBeatV1",
     "derive_star_product_lock_review_digest_v1",
 ]
