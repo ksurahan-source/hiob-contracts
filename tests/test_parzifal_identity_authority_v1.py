@@ -149,6 +149,15 @@ def test_identity_record_rejects_document_or_scope_drift_under_old_digest() -> N
         ParzifalIdentityAuthorityRecordV1.model_validate(value)
 
 
+def test_identity_record_rejects_noncanonical_utc_offset_timestamp() -> None:
+    value = _record()
+    value["emitted_at"] = "2026-07-26T01:02:03+0000"
+    value["digest"] = derive_parzifal_identity_authority_record_digest_v1(value)
+
+    with pytest.raises(ValidationError, match="ISO-8601 UTC"):
+        ParzifalIdentityAuthorityRecordV1.model_validate(value)
+
+
 def test_identity_authority_material_is_the_exact_fully_sealed_wrapper() -> None:
     material = ParzifalIdentityAuthorityMaterialV1.model_validate(_material())
 

@@ -129,6 +129,10 @@ test('Parzifal identity record rejects malformed references, drift, and mutable 
   ((drift.cast_sheets as Record<string, unknown>).by_id as Record<string, Record<string, unknown>>)
     .mom.voice_id = 'voice-mom-2';
   assert.equal(ParzifalIdentityAuthorityRecordV1Schema.safeParse(drift).success, false);
+
+  const noncanonicalUtc = record();
+  noncanonicalUtc.emitted_at = '2026-07-26T01:02:03+0000';
+  assert.equal(ParzifalIdentityAuthorityRecordV1Schema.safeParse(noncanonicalUtc).success, false);
 });
 
 test('Parzifal authority material is the exact fully sealed Python parity wrapper', () => {
