@@ -114,6 +114,10 @@ function assertJson(value: unknown, path = 'value'): void {
     return;
   }
   if (value !== null && typeof value === 'object') {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error(`${path} contains a non-JSON object`);
+    }
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
       assertJson(item, `${path}.${key}`);
     }
@@ -142,14 +146,16 @@ const CanonicalUtcOffsetTimestampSchema = z.string()
   .transform(canonicalUtcOffsetTimestamp);
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/);
 const PositiveVersionSchema = z.number().int().safe().positive();
-const JsonObjectSchema = z.record(z.string(), z.unknown())
+const StrictJsonValueSchema = z.unknown()
   .superRefine((value, ctx) => {
     try {
       assertJson(value);
     } catch (error) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(error) });
     }
-  })
+  });
+const JsonObjectSchema = StrictJsonValueSchema
+  .pipe(z.record(z.string(), z.unknown()))
   .transform(deepFreeze);
 
 const RecordBodyShape = {
@@ -163,17 +169,16 @@ const RecordBodyShape = {
   master_sheet: JsonObjectSchema,
   cast_sheets: JsonObjectSchema,
 };
-const ParzifalIdentityAuthorityRecordBodyV1Schema = z
-  .object(RecordBodyShape)
-  .strict();
+const ParzifalIdentityAuthorityRecordBodyV1Schema = StrictJsonValueSchema.pipe(
+  z.object(RecordBodyShape).strict(),
+);
 
-export const ParzifalIdentityRecordRefV1Schema = z
-  .object({
+export const ParzifalIdentityRecordRefV1Schema = StrictJsonValueSchema
+  .pipe(z.object({
     id: CanonicalTextSchema,
     version: PositiveVersionSchema,
     digest: DigestSchema,
-  })
-  .strict()
+  }).strict())
   .transform(deepFreeze);
 
 export type ParzifalIdentityRecordRefV1 = z.infer<
@@ -200,17 +205,24 @@ export function deriveParzifalIdentityAuthorityRecordDigestV1(
   });
 }
 
-export const ParzifalIdentityAuthorityRecordV1Schema = z
-  .object({
+export const ParzifalIdentityAuthorityRecordV1Schema = StrictJsonValueSchema
+  .pipe(z.object({
     ...RecordBodyShape,
     digest: DigestSchema,
-  })
-  .strict()
+  }).strict())
   .superRefine((value, ctx) => {
-    if (value.digest !== deriveParzifalIdentityAuthorityRecordDigestV1(value)) {
+    try {
+      if (value.digest !== deriveParzifalIdentityAuthorityRecordDigestV1(value)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'digest does not match Parzifal identity authority record',
+          path: ['digest'],
+        });
+      }
+    } catch (error) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'digest does not match Parzifal identity authority record',
+        message: String(error),
         path: ['digest'],
       });
     }
@@ -221,7 +233,8 @@ export type ParzifalIdentityAuthorityRecordV1 = z.infer<
   typeof ParzifalIdentityAuthorityRecordV1Schema
 >;
 
-const ParzifalIdentitySealedPayloadV1Schema = AresIdentitySealedV2Schema
+const ParzifalIdentitySealedPayloadV1Schema = StrictJsonValueSchema
+  .pipe(AresIdentitySealedV2Schema)
   .superRefine((value, ctx) => {
     value.speakers.forEach((speaker, index) => {
       if (!speaker.face_id || !speaker.voice_id || !speaker.identity_binding_digest) {
@@ -246,7 +259,7 @@ export function deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(
   return sha256Digest(ParzifalIdentitySealedPayloadV1Schema.parse(value));
 }
 
-export const ParzifalIdentityAuthorityMaterialV1Schema = z
+const ParzifalIdentityAuthorityMaterialBodyV1Schema = z
   .object({
     artifact_type: z.literal('identity_lock'),
     artifact_digest: DigestSchema,
@@ -263,17 +276,28 @@ export const ParzifalIdentityAuthorityMaterialV1Schema = z
         path: ['artifact_digest'],
       });
     }
-    if (
-      value.payload_digest
-      !== deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(value.sealed_payload)
-    ) {
+    try {
+      if (
+        value.payload_digest
+        !== deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(value.sealed_payload)
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'payload_digest does not match sealed_payload',
+          path: ['payload_digest'],
+        });
+      }
+    } catch (error) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'payload_digest does not match sealed_payload',
+        message: String(error),
         path: ['payload_digest'],
       });
     }
-  })
+  });
+
+export const ParzifalIdentityAuthorityMaterialV1Schema = StrictJsonValueSchema
+  .pipe(ParzifalIdentityAuthorityMaterialBodyV1Schema)
   .transform(deepFreeze);
 
 export type ParzifalIdentityAuthorityMaterialV1 = z.infer<
