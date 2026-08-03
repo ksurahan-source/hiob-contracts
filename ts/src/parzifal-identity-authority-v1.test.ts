@@ -136,7 +136,6 @@ test('Parzifal identity record rejects malformed references, drift, and mutable 
 
   const yearZero = record();
   yearZero.emitted_at = '0000-01-01T00:00:00+00:00';
-  yearZero.digest = deriveParzifalIdentityAuthorityRecordDigestV1(yearZero);
   assert.equal(ParzifalIdentityAuthorityRecordV1Schema.safeParse(yearZero).success, false);
 });
 

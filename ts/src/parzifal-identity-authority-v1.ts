@@ -19,8 +19,38 @@ function normalizeUnicodeScalars(value: string): string {
   return value;
 }
 
+function isPythonStripWhitespace(code: number): boolean {
+  // Mirrors Python str.strip()/str.isspace(), deliberately preserving U+FEFF.
+  return (
+    (code >= 0x0009 && code <= 0x000d)
+    || (code >= 0x001c && code <= 0x001f)
+    || code === 0x0020
+    || code === 0x0085
+    || code === 0x00a0
+    || code === 0x1680
+    || (code >= 0x2000 && code <= 0x200a)
+    || code === 0x2028
+    || code === 0x2029
+    || code === 0x202f
+    || code === 0x205f
+    || code === 0x3000
+  );
+}
+
+function pythonStrip(value: string): string {
+  let start = 0;
+  let end = value.length;
+  while (start < end && isPythonStripWhitespace(value.charCodeAt(start))) {
+    start += 1;
+  }
+  while (end > start && isPythonStripWhitespace(value.charCodeAt(end - 1))) {
+    end -= 1;
+  }
+  return value.slice(start, end);
+}
+
 function canonicalText(value: string): string {
-  const normalized = normalizeUnicodeScalars(value).trim();
+  const normalized = pythonStrip(normalizeUnicodeScalars(value));
   if (!normalized) throw new Error('string must not be blank');
   return normalized;
 }
@@ -32,6 +62,9 @@ function canonicalUtcOffsetTimestamp(value: string): string {
     : normalized;
   const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,6})?\+00:00$/.exec(source);
   if (!match) throw new Error('timestamp must be an ISO-8601 UTC value');
+  if (Number(match[1]) === 0) {
+    throw new Error('timestamp must be a valid calendar value');
+  }
   const parsed = new Date(`${source.slice(0, -6)}Z`);
   if (Number.isNaN(parsed.valueOf())
     || parsed.getUTCFullYear() !== Number(match[1])

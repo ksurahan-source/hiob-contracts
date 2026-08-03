@@ -214,12 +214,29 @@ def derive_parzifal_identity_authority_material_payload_digest_v1(
 ) -> str:
     """Digest the exact fully-populated Ares identity payload in the wrapper."""
 
+    sealed = _fully_sealed_identity_payload(value)
+    return sha256_digest(sealed.model_dump(mode="json"))
+
+
+def _fully_sealed_identity_payload(
+    value: Mapping[str, Any] | AresIdentitySealedV2,
+) -> AresIdentitySealedV2:
     sealed = (
         value
         if isinstance(value, AresIdentitySealedV2)
         else AresIdentitySealedV2.model_validate(value)
     )
-    return sha256_digest(sealed.model_dump(mode="json"))
+    for speaker in sealed.speakers:
+        if (
+            speaker.face_id is None
+            or speaker.voice_id is None
+            or speaker.identity_binding_digest is None
+        ):
+            raise ValueError(
+                "sealed_payload speakers must include face_id, voice_id, "
+                "and identity_binding_digest"
+            )
+    return sealed
 
 
 class ParzifalIdentityAuthorityMaterialV1(BaseModel):
@@ -243,17 +260,7 @@ class ParzifalIdentityAuthorityMaterialV1(BaseModel):
     def _require_fully_sealed_speakers(
         cls, value: AresIdentitySealedV2
     ) -> AresIdentitySealedV2:
-        for speaker in value.speakers:
-            if (
-                speaker.face_id is None
-                or speaker.voice_id is None
-                or speaker.identity_binding_digest is None
-            ):
-                raise ValueError(
-                    "sealed_payload speakers must include face_id, voice_id, "
-                    "and identity_binding_digest"
-                )
-        return value
+        return _fully_sealed_identity_payload(value)
 
     @model_validator(mode="after")
     def _bind_material(self) -> "ParzifalIdentityAuthorityMaterialV1":
