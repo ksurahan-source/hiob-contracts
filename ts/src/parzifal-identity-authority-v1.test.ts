@@ -319,6 +319,32 @@ test('Parzifal record rejects hidden and accessor JSON document properties', () 
   }), 'accessor property');
 });
 
+test('Parzifal record helper rejects root accessors before reading a field', () => {
+  const value = recordBody();
+  const id = value.id;
+  let getterCalls = 0;
+  delete value.id;
+  Object.defineProperty(value, 'id', {
+    enumerable: true,
+    get: () => {
+      getterCalls += 1;
+      return id;
+    },
+  });
+  Object.defineProperty(value, 'digest', {
+    enumerable: true,
+    value: sha256Digest({ placeholder: 'digest' }),
+  });
+
+  assert.throws(
+    () => deriveParzifalIdentityAuthorityRecordDigestV1(value),
+    /accessor property/,
+  );
+  assert.equal(getterCalls, 0);
+  assertJsonIssue(ParzifalIdentityAuthorityRecordV1Schema.safeParse(value), 'accessor property');
+  assert.equal(getterCalls, 0);
+});
+
 test('Parzifal authority material is the exact fully sealed Python parity wrapper', () => {
   const parsed = ParzifalIdentityAuthorityMaterialV1Schema.parse(material());
 
