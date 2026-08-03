@@ -75,9 +75,10 @@ function canonicalUtcOffsetTimestamp(value: string): string {
     || parsed.getUTCSeconds() !== Number(match[6])) {
     throw new Error('timestamp must be a valid calendar value');
   }
-  const fraction = match[7] ?? '';
-  const canonicalFraction = fraction
-    ? `${fraction}${'0'.repeat(7 - fraction.length)}`
+  const fractionalDigits = match[7]?.slice(1) ?? '';
+  // Python omits zero microseconds and writes every non-zero value at six digits.
+  const canonicalFraction = /[1-9]/.test(fractionalDigits)
+    ? `.${fractionalDigits.padEnd(6, '0')}`
     : '';
   return `${source.slice(0, 19)}${canonicalFraction}+00:00`;
 }
