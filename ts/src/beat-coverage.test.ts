@@ -44,7 +44,8 @@ function coverage(n = 6) {
 test('six and twelve beat coverage parses and round-trips as serial fan-in', () => {
   for (const n of [6, 12]) {
     const value = coverage(n);
-    assert.equal(BeatCoverageV1Schema.safeParse(value).success, true);
+    const parsed = BeatCoverageV1Schema.safeParse(value);
+    assert.equal(parsed.success, true);
     assert.equal(SerialFanInReceiptV1Schema.safeParse(value).success, true);
   }
 });
@@ -53,6 +54,8 @@ test('coverage digest is deterministic and bound to payload', () => {
   const first = coverage();
   const second = coverage();
   assert.equal(first.coverage_digest, second.coverage_digest);
+  // Python/TypeScript parity vector; lane completion order is canonicalized.
+  assert.equal(first.coverage_digest, 'sha256:7252864e3f9091ff6d3bb3d2a381cfc11ae67f4f88cef2c4f6e90c0067ebd536');
   assert.equal(BeatCoverageV1Schema.safeParse({ ...first, workspace_id: 'other' }).success, false);
 });
 

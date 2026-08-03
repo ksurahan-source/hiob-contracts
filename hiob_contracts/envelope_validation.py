@@ -27,6 +27,8 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "Intake13Q": ("hiob_contracts.janus_brief", "Intake13Q"),
     "BeatPlan": ("hiob_contracts.beat_plan", "BeatPlan"),
     "Beat": ("hiob_contracts.beat_plan", "Beat"),
+    "BeatCoverageV1": ("hiob_contracts.beat_coverage", "BeatCoverageV1"),
+    "SerialFanInReceiptV1": ("hiob_contracts.beat_coverage", "SerialFanInReceiptV1"),
     "MediaArtifact": ("hiob_contracts.media_artifact", "MediaArtifact"),
     "AudioClip": ("hiob_contracts.audio_clip", "AudioClip"),
     "KlingVideo": ("hiob_contracts.klingvideo", "KlingVideo"),

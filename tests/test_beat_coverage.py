@@ -58,6 +58,8 @@ def test_coverage_digest_is_deterministic_and_bound_to_payload():
     first = _coverage()
     second = _coverage()
     assert first.coverage_digest == second.coverage_digest
+    # Python/TypeScript parity vector; lane completion order is canonicalized.
+    assert first.coverage_digest == "sha256:7252864e3f9091ff6d3bb3d2a381cfc11ae67f4f88cef2c4f6e90c0067ebd536"
     assert first.coverage_digest.startswith("sha256:")
     assert replace(first, workspace_id="other-workspace").validate()
 

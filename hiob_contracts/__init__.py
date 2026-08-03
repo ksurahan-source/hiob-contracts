@@ -24,6 +24,22 @@ from .execution_backend import (
 )
 from .janus_brief import Intake13Q, JanusBrief
 from .beat_plan import Beat, BeatPlan, normalize_scene_direction
+from .beat_coverage import (
+    BEAT_COVERAGE_CONTRACT_VERSION_V1,
+    SERIAL_FAN_IN_RECEIPT_CONTRACT_VERSION_V1,
+    BEAT_LANE_TERMINAL_RECEIPT_CONTRACT_VERSION_V1,
+    DEFAULT_BEAT_COVERAGE_LANES_V1,
+    TERMINAL_BEAT_LANE_STATUSES_V1,
+    BeatLaneTerminalReceiptV1,
+    BeatTerminalReceiptV1,
+    SerialFanInLaneReceiptV1,
+    LaneTerminalReceiptV1,
+    BeatCoverageV1,
+    SerialFanInReceiptV1,
+    create_serial_fan_in_receipt_v1,
+    build_beat_coverage_v1,
+    build_serial_fan_in_receipt_v1,
+)
 from .media_artifact import MediaArtifact
 from .audio_clip import AudioClip
 from .klingvideo import KlingVideo
@@ -437,6 +453,16 @@ __all__ = [
     "PlanetIO", "PLANET_IO", "Conformance", "io_for", "needs_new_contract", "dsl_ready",
     "Intake13Q", "JanusBrief",
     "Beat", "BeatPlan", "normalize_scene_direction",
+    "BEAT_COVERAGE_CONTRACT_VERSION_V1",
+    "SERIAL_FAN_IN_RECEIPT_CONTRACT_VERSION_V1",
+    "BEAT_LANE_TERMINAL_RECEIPT_CONTRACT_VERSION_V1",
+    "DEFAULT_BEAT_COVERAGE_LANES_V1",
+    "TERMINAL_BEAT_LANE_STATUSES_V1",
+    "BeatLaneTerminalReceiptV1", "BeatTerminalReceiptV1",
+    "SerialFanInLaneReceiptV1", "LaneTerminalReceiptV1",
+    "BeatCoverageV1", "SerialFanInReceiptV1",
+    "create_serial_fan_in_receipt_v1", "build_beat_coverage_v1",
+    "build_serial_fan_in_receipt_v1",
     "MediaArtifact", "AudioClip",
     "KlingVideo", "Heroine", "HeroineArchetype", "FeedbackSignal", "DefectSignal", "DefectSignalProvider",
      "CompositionSnapshot", "ReelMetric",

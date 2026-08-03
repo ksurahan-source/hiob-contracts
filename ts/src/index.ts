@@ -16,6 +16,38 @@ export type { JanusBrief, Intake13Q } from './janus-brief.js';
 export { BeatPlanSchema, BeatSchema, validateBeatPlan } from './beat-plan.js';
 export type { BeatPlan, Beat } from './beat-plan.js';
 
+// Exact run-level beat coverage / serial fan-in receipt.
+export {
+  BEAT_COVERAGE_CONTRACT_VERSION_V1,
+  SERIAL_FAN_IN_RECEIPT_CONTRACT_VERSION_V1,
+  BEAT_LANE_TERMINAL_RECEIPT_CONTRACT_VERSION_V1,
+  DEFAULT_BEAT_COVERAGE_LANES_V1,
+  TERMINAL_BEAT_LANE_STATUSES_V1,
+  BeatLaneTerminalReceiptV1Schema,
+  BeatCoverageV1Schema,
+  SerialFanInReceiptV1Schema,
+  BeatCoverageSchema,
+  SerialFanInReceiptSchema,
+  beatLaneTerminalReceiptDigestV1,
+  createBeatLaneTerminalReceiptV1,
+  beatCoverageDigestPayloadV1,
+  beatCoverageDigestV1,
+  createBeatCoverageV1,
+  createSerialFanInReceiptV1,
+  buildBeatCoverageV1,
+  buildSerialFanInReceiptV1,
+} from './beat-coverage';
+export type {
+  BeatLaneTerminalReceiptV1,
+  BeatTerminalReceiptV1,
+  SerialFanInLaneReceiptV1,
+  LaneTerminalReceiptV1,
+  BeatCoverageV1,
+  SerialFanInReceiptV1,
+  BeatLaneTerminalReceiptV1Input,
+  BeatCoverageV1Input,
+} from './beat-coverage';
+
 // AudioClip
 export { AudioClipSchema, validateAudioClip } from './audio-clip.js';
 export type { AudioClip } from './audio-clip.js';
