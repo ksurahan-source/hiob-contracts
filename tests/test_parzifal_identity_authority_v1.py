@@ -157,6 +157,30 @@ def test_identity_record_rejects_noncanonical_utc_offset_timestamp() -> None:
         ParzifalIdentityAuthorityRecordV1.model_validate(value)
 
 
+def test_identity_record_preserves_python_canonical_bom_text_for_ts_parity() -> None:
+    body = _record_body()
+    body["id"] = "\ufeffparzifal-identity-1"
+    record = {
+        **body,
+        "digest": derive_parzifal_identity_authority_record_digest_v1(body),
+    }
+
+    parsed = ParzifalIdentityAuthorityRecordV1.model_validate(record)
+
+    assert parsed.id == "\ufeffparzifal-identity-1"
+    assert parsed.digest == (
+        "sha256:4c1f4cb807f8228105dbccab90a87af9742f2b26eb7f5d9d37d92c5245b1aa06"
+    )
+
+
+def test_identity_record_digest_rejects_year_zero_before_hashing() -> None:
+    value = _record_body()
+    value["emitted_at"] = "0000-01-01T00:00:00+00:00"
+
+    with pytest.raises(ValueError, match="ISO-8601 UTC"):
+        derive_parzifal_identity_authority_record_digest_v1(value)
+
+
 def test_identity_authority_material_is_the_exact_fully_sealed_wrapper() -> None:
     material = ParzifalIdentityAuthorityMaterialV1.model_validate(_material())
 
@@ -174,6 +198,16 @@ def test_identity_authority_material_is_the_exact_fully_sealed_wrapper() -> None
     assert material.sealed_payload.voice_spec is None
     assert material.sealed_payload.locale == "ko"
     assert material.sealed_payload.audience_lock is None
+
+
+def test_identity_authority_payload_digest_rejects_an_unsealed_speaker() -> None:
+    sealed_payload = _sealed_payload()
+    sealed_payload["speakers"][0].pop("face_id")
+    sealed_payload["speakers"][0].pop("voice_id")
+    sealed_payload["speakers"][0].pop("identity_binding_digest")
+
+    with pytest.raises(ValueError, match="sealed_payload speakers"):
+        derive_parzifal_identity_authority_material_payload_digest_v1(sealed_payload)
 
 
 @pytest.mark.parametrize(

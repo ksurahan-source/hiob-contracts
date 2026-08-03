@@ -133,6 +133,26 @@ test('Parzifal identity record rejects malformed references, drift, and mutable 
   const noncanonicalUtc = record();
   noncanonicalUtc.emitted_at = '2026-07-26T01:02:03+0000';
   assert.equal(ParzifalIdentityAuthorityRecordV1Schema.safeParse(noncanonicalUtc).success, false);
+
+  const yearZero = record();
+  yearZero.emitted_at = '0000-01-01T00:00:00+00:00';
+  yearZero.digest = deriveParzifalIdentityAuthorityRecordDigestV1(yearZero);
+  assert.equal(ParzifalIdentityAuthorityRecordV1Schema.safeParse(yearZero).success, false);
+});
+
+test('Parzifal identity record preserves Python canonical BOM text for digest parity', () => {
+  const value = recordBody();
+  value.id = '\ufeffparzifal-identity-1';
+  const parsed = ParzifalIdentityAuthorityRecordV1Schema.parse({
+    ...value,
+    digest: deriveParzifalIdentityAuthorityRecordDigestV1(value),
+  });
+
+  assert.equal(parsed.id, '\ufeffparzifal-identity-1');
+  assert.equal(
+    parsed.digest,
+    'sha256:4c1f4cb807f8228105dbccab90a87af9742f2b26eb7f5d9d37d92c5245b1aa06',
+  );
 });
 
 test('Parzifal authority material is the exact fully sealed Python parity wrapper', () => {
@@ -172,4 +192,14 @@ test('Parzifal authority material rejects wrapper and speaker drift', () => {
     mutate(value);
     assert.equal(ParzifalIdentityAuthorityMaterialV1Schema.safeParse(value).success, false);
   }
+});
+
+test('Parzifal identity authority payload digest rejects an unsealed speaker', () => {
+  const value = sealedPayload();
+  const speaker = (value.speakers as Array<Record<string, unknown>>)[0];
+  delete speaker.face_id;
+  delete speaker.voice_id;
+  delete speaker.identity_binding_digest;
+
+  assert.throws(() => deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(value));
 });
