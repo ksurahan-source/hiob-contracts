@@ -287,6 +287,38 @@ test('Parzifal record rejects symbol keys and sparse JSON document arrays', () =
   }), 'sparse array');
 });
 
+test('Parzifal record rejects hidden and accessor JSON document properties', () => {
+  const hiddenValue = recordBody();
+  Object.defineProperty(hiddenValue.identity_lock as object, 'hidden', {
+    enumerable: false,
+    value: 'not-json',
+  });
+
+  assert.throws(
+    () => deriveParzifalIdentityAuthorityRecordDigestV1(hiddenValue),
+    /non-enumerable own string property/,
+  );
+  assertJsonIssue(ParzifalIdentityAuthorityRecordV1Schema.safeParse({
+    ...hiddenValue,
+    digest: sha256Digest({ placeholder: 'digest' }),
+  }), 'non-enumerable own string property');
+
+  const accessorValue = recordBody();
+  Object.defineProperty(accessorValue.identity_lock as object, 'computed', {
+    enumerable: true,
+    get: () => 'not-json',
+  });
+
+  assert.throws(
+    () => deriveParzifalIdentityAuthorityRecordDigestV1(accessorValue),
+    /accessor property/,
+  );
+  assertJsonIssue(ParzifalIdentityAuthorityRecordV1Schema.safeParse({
+    ...accessorValue,
+    digest: sha256Digest({ placeholder: 'digest' }),
+  }), 'accessor property');
+});
+
 test('Parzifal authority material is the exact fully sealed Python parity wrapper', () => {
   const parsed = ParzifalIdentityAuthorityMaterialV1Schema.parse(material());
 
@@ -402,4 +434,47 @@ test('Parzifal material rejects symbol keys and sparse arrays in nested voice sp
     receipt_id: 'parzifal:identity_lock:receipt-1',
     sealed_payload: sparsePayload,
   }), 'sparse array');
+});
+
+test('Parzifal material rejects hidden and accessor properties in nested voice spec', () => {
+  const hiddenPayload = sealedPayload();
+  const hiddenVoiceSpec = voiceSpec();
+  Object.defineProperty(hiddenVoiceSpec, 'hidden', {
+    enumerable: false,
+    value: () => 'not-json',
+  });
+  hiddenPayload.voice_spec = hiddenVoiceSpec;
+
+  assert.throws(
+    () => deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(hiddenPayload),
+    /non-enumerable own string property/,
+  );
+  assertJsonIssue(ParzifalIdentityAuthorityMaterialV1Schema.safeParse({
+    artifact_type: 'identity_lock',
+    artifact_digest: hiddenPayload.identity_lock_digest,
+    payload_digest: sha256Digest({ placeholder: 'digest' }),
+    receipt_id: 'parzifal:identity_lock:receipt-1',
+    sealed_payload: hiddenPayload,
+  }), 'non-enumerable own string property');
+
+  const accessorPayload = sealedPayload();
+  const accessorVoiceSpec = voiceSpec();
+  delete accessorVoiceSpec.rhythm;
+  Object.defineProperty(accessorVoiceSpec, 'rhythm', {
+    enumerable: true,
+    get: () => 'steady',
+  });
+  accessorPayload.voice_spec = accessorVoiceSpec;
+
+  assert.throws(
+    () => deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(accessorPayload),
+    /accessor property/,
+  );
+  assertJsonIssue(ParzifalIdentityAuthorityMaterialV1Schema.safeParse({
+    artifact_type: 'identity_lock',
+    artifact_digest: accessorPayload.identity_lock_digest,
+    payload_digest: sha256Digest({ placeholder: 'digest' }),
+    receipt_id: 'parzifal:identity_lock:receipt-1',
+    sealed_payload: accessorPayload,
+  }), 'accessor property');
 });
