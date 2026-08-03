@@ -225,6 +225,7 @@ export type ParzifalIdentityRecordRefV1 = z.infer<
 export function deriveParzifalIdentityAuthorityRecordDigestV1(
   value: Record<string, unknown>,
 ): string {
+  assertJson(value);
   const body = ParzifalIdentityAuthorityRecordBodyV1Schema.parse({
     id: value.id,
     version: value.version,
