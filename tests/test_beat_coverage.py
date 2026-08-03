@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import replace
 
+import pytest
+
 from hiob_contracts import (
     DEFAULT_BEAT_COVERAGE_LANES_V1,
     BeatCoverageV1,
@@ -110,3 +112,39 @@ def test_required_lanes_cannot_drop_the_serial_f1_spine():
     coverage = replace(_coverage(), required_lanes=("evil",))
     errors = coverage.validate()
     assert any("required_lanes must include" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        None,
+        [],
+        {"unexpected": "key"},
+        {"expected_n_beats": "6"},
+        {"expected_n_beats": True},
+        {"lane_receipts": "not-an-array"},
+    ],
+)
+def test_from_dict_rejects_malformed_unknown_and_coercible_boundaries(payload):
+    valid = _coverage().to_dict()
+    if isinstance(payload, dict):
+        payload = {**valid, **payload}
+
+    with pytest.raises(ValueError):
+        BeatCoverageV1.from_dict(payload)
+
+
+def test_creators_return_valid_values_or_fail_closed():
+    with pytest.raises(ValueError):
+        BeatLaneTerminalReceiptV1.create(
+            run_id=RUN_ID,
+            workspace_id=WORKSPACE_ID,
+            package_digest=PACKAGE_DIGEST,
+            plan_digest=PLAN_DIGEST,
+            beat_index=0,
+            lane="athena",
+            status="failed",
+        )
+
+    with pytest.raises(ValueError):
+        _coverage(17)

@@ -31,3 +31,9 @@ def test_star_reels_budget_allows_positive_per_beat_image_and_voice_counts():
 def test_star_reels_budget_rejects_non_positive_beat_counts(field, value):
     with pytest.raises(Exception):
         _StarReelsBudgetMultiBeatV1.model_validate(_budget(**{field: value}))
+
+
+@pytest.mark.parametrize("image,voice", [(17, 17), (2, 3)])
+def test_star_reels_budget_is_bounded_and_equal_per_beat(image, voice):
+    with pytest.raises(Exception):
+        _StarReelsBudgetMultiBeatV1.model_validate(_budget(image=image, voice=voice))

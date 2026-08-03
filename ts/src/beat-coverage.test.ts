@@ -86,3 +86,34 @@ test('exact indices, duplicate, missing, foreign, failed, and out-of-range lanes
     lane_receipts: [{ ...value.lane_receipts[0], beat_index: 6 }, ...value.lane_receipts.slice(1)],
   }).success, false);
 });
+
+test('strict boundaries reject malformed, unknown, and coercible coverage values without crashing', () => {
+  const value = coverage();
+  for (const candidate of [
+    null,
+    [],
+    coverage(17),
+    { ...value, expected_n_beats: '6' },
+    { ...value, unexpected: 'key' },
+    { ...value, lane_receipts: 'not-an-array' },
+  ]) {
+    assert.doesNotThrow(() => BeatCoverageV1Schema.safeParse(candidate));
+    assert.equal(BeatCoverageV1Schema.safeParse(candidate).success, false);
+  }
+});
+
+test('constructors return valid coverage or fail closed', () => {
+  assert.throws(() => createBeatLaneTerminalReceiptV1({
+    run_id: RUN_ID,
+    workspace_id: WORKSPACE_ID,
+    package_digest: PACKAGE_DIGEST,
+    plan_digest: PLAN_DIGEST,
+    beat_index: 0,
+    lane: 'athena',
+    status: 'failed',
+  }));
+  assert.throws(() => createBeatCoverageV1({
+    ...coverage(17),
+    unexpected: 'key',
+  } as never));
+});
