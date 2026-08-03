@@ -10,6 +10,7 @@ import {
 } from './parzifal-identity-authority-v1.js';
 import { deriveCharacterIdentityBindingDigestV1 } from './character-identity-v1.js';
 import { sha256Digest } from './factory/digest.js';
+import { deriveVoiceSpecDigestV1 } from './voice-spec-v1.js';
 
 function recordBody(): Record<string, unknown> {
   return {
@@ -89,6 +90,36 @@ function material(): Record<string, unknown> {
   };
 }
 
+class NonJsonDocument {
+  value = 'not-json';
+}
+
+class NonJsonVoiceSpec {
+  contract_version: 'VoiceSpec.v1' = 'VoiceSpec.v1';
+  subject_id = 'mom';
+  rhythm = 'steady';
+  vocabulary: string[] = [];
+  forbidden_phrases: string[] = [];
+  approved_examples = ['one', 'two', 'three'];
+  voice_spec_digest: string;
+
+  constructor() {
+    this.voice_spec_digest = deriveVoiceSpecDigestV1(
+      this as unknown as Record<string, unknown>,
+    );
+  }
+}
+
+function assertNonJsonIssue(result: { success: boolean; error?: { issues: Array<{ message: string }> } }): void {
+  assert.equal(result.success, false);
+  if (!result.success) {
+    assert.equal(
+      result.error?.issues.some((issue) => issue.message.includes('non-JSON object')),
+      true,
+    );
+  }
+}
+
 test('Parzifal identity record reference and durable record match Python digest parity', () => {
   const value = record();
   const ref = ParzifalIdentityRecordRefV1Schema.parse({
@@ -152,6 +183,32 @@ test('Parzifal identity record preserves Python canonical BOM text for digest pa
     parsed.digest,
     'sha256:4c1f4cb807f8228105dbccab90a87af9742f2b26eb7f5d9d37d92c5245b1aa06',
   );
+});
+
+test('Parzifal record rejects RegExp and class objects but accepts frozen null-prototype JSON', () => {
+  for (const invalid of [/not-json/, new NonJsonDocument()]) {
+    const value = recordBody();
+    (value.identity_lock as Record<string, unknown>).invalid = invalid;
+
+    assert.throws(() => deriveParzifalIdentityAuthorityRecordDigestV1(value));
+    assertNonJsonIssue(ParzifalIdentityAuthorityRecordV1Schema.safeParse({
+      ...value,
+      digest: sha256Digest({ placeholder: 'digest' }),
+    }));
+  }
+
+  const nullPrototypeDocument = Object.assign(Object.create(null), {
+    nested: Object.assign(Object.create(null), { source: 'parzifal' }),
+  });
+  const value = recordBody();
+  value.identity_lock = nullPrototypeDocument;
+  const parsed = ParzifalIdentityAuthorityRecordV1Schema.parse({
+    ...value,
+    digest: deriveParzifalIdentityAuthorityRecordDigestV1(value),
+  });
+
+  assert.equal(Object.isFrozen(parsed.identity_lock), true);
+  assert.equal(Object.isFrozen((parsed.identity_lock as Record<string, unknown>).nested), true);
 });
 
 test('Parzifal fractional timestamps have one Python parity form and digest', () => {
@@ -229,4 +286,31 @@ test('Parzifal identity authority payload digest rejects an unsealed speaker', (
   delete speaker.identity_binding_digest;
 
   assert.throws(() => deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(value));
+});
+
+test('Parzifal material rejects a nested class instance but freezes null-prototype JSON', () => {
+  const classPayload = sealedPayload();
+  classPayload.voice_spec = new NonJsonVoiceSpec();
+
+  assert.throws(() => deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(classPayload));
+  assertNonJsonIssue(ParzifalIdentityAuthorityMaterialV1Schema.safeParse({
+    artifact_type: 'identity_lock',
+    artifact_digest: classPayload.identity_lock_digest,
+    payload_digest: sha256Digest({ placeholder: 'digest' }),
+    receipt_id: 'parzifal:identity_lock:receipt-1',
+    sealed_payload: classPayload,
+  }));
+
+  const nullPrototypePayload = Object.assign(Object.create(null), sealedPayload());
+  const parsed = ParzifalIdentityAuthorityMaterialV1Schema.parse({
+    artifact_type: 'identity_lock',
+    artifact_digest: nullPrototypePayload.identity_lock_digest,
+    payload_digest: deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(
+      nullPrototypePayload,
+    ),
+    receipt_id: 'parzifal:identity_lock:receipt-1',
+    sealed_payload: nullPrototypePayload,
+  });
+
+  assert.equal(Object.isFrozen(parsed.sealed_payload), true);
 });

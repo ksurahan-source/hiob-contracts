@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 
 import pytest
 from pydantic import ValidationError
@@ -102,6 +103,10 @@ def _material() -> dict:
     }
 
 
+class _NonJsonObject:
+    value = "not-json"
+
+
 def test_identity_record_ref_is_exact_immutable_and_python_ts_digest_stable() -> None:
     record = _record()
     ref = ParzifalIdentityRecordRefV1.model_validate(
@@ -179,6 +184,19 @@ def test_identity_record_digest_rejects_year_zero_before_hashing() -> None:
 
     with pytest.raises(ValueError, match="ISO-8601 UTC"):
         derive_parzifal_identity_authority_record_digest_v1(value)
+
+
+@pytest.mark.parametrize("invalid", [re.compile("not-json"), _NonJsonObject()])
+def test_identity_record_rejects_nested_non_json_objects(invalid: object) -> None:
+    body = _record_body()
+    body["identity_lock"]["invalid"] = invalid
+
+    with pytest.raises(ValueError, match="non-JSON"):
+        derive_parzifal_identity_authority_record_digest_v1(body)
+    with pytest.raises(ValidationError, match="non-JSON"):
+        ParzifalIdentityAuthorityRecordV1.model_validate(
+            {**body, "digest": sha256_digest({"placeholder": "digest"})}
+        )
 
 
 @pytest.mark.parametrize(
@@ -278,6 +296,14 @@ def test_identity_authority_payload_digest_rejects_an_unsealed_speaker() -> None
 
     with pytest.raises(ValueError, match="sealed_payload speakers"):
         derive_parzifal_identity_authority_material_payload_digest_v1(sealed_payload)
+
+
+def test_identity_authority_material_rejects_nested_non_json_object() -> None:
+    value = _material()
+    value["sealed_payload"]["voice_spec"] = _NonJsonObject()
+
+    with pytest.raises(ValidationError):
+        ParzifalIdentityAuthorityMaterialV1.model_validate(value)
 
 
 @pytest.mark.parametrize(
