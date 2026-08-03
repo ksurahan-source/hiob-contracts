@@ -89,10 +89,16 @@ test('exact indices, duplicate, missing, foreign, failed, and out-of-range lanes
 
 test('strict boundaries reject malformed, unknown, and coercible coverage values without crashing', () => {
   const value = coverage();
+  const oversized = {
+    ...value,
+    expected_n_beats: 17,
+    expected_beat_indices: Array.from({ length: 17 }, (_, index) => index),
+    lane_receipts: lanes(17),
+  };
   for (const candidate of [
     null,
     [],
-    coverage(17),
+    oversized,
     { ...value, expected_n_beats: '6' },
     { ...value, unexpected: 'key' },
     { ...value, lane_receipts: 'not-an-array' },
@@ -116,4 +122,23 @@ test('constructors return valid coverage or fail closed', () => {
     ...coverage(17),
     unexpected: 'key',
   } as never));
+});
+
+test('lane constructor preserves nonblank whitespace for Python digest parity', () => {
+  const padded = createBeatLaneTerminalReceiptV1({
+    run_id: ' run-padded ',
+    workspace_id: ' workspace-padded ',
+    package_digest: sha256Digest({ package: 'padded' }),
+    plan_digest: sha256Digest({ plan: 'padded' }),
+    beat_index: 0,
+    lane: ' athena ',
+    output_digest: sha256Digest({ output: 'padded' }),
+  });
+
+  assert.equal(padded.run_id, ' run-padded ');
+  assert.equal(padded.lane, ' athena ');
+  assert.equal(
+    padded.receipt_digest,
+    'sha256:65b1c484bebdb3d57f1dfc733748a8dd4cef862a9b374736a6c41395307c4d6a',
+  );
 });

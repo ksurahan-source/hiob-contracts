@@ -57,12 +57,18 @@ class _StarReelsBudgetMultiBeatV1(BaseModel):
     model_config = _STRICT_FROZEN
 
     script: Literal[1]
-    image: int = Field(ge=1, le=64)
-    voice: int = Field(ge=1, le=64)
+    image: int = Field(ge=1, le=16)
+    voice: int = Field(ge=1, le=16)
     render: Literal[1]
     retries: Literal[0]
     fallbacks: Literal[0]
     character_lock: Literal[0]
+
+    @model_validator(mode="after")
+    def _bind_per_beat_lanes(self) -> "_StarReelsBudgetMultiBeatV1":
+        if self.image != self.voice:
+            raise ValueError("all-beat paid lanes must have equal image and voice counts")
+        return self
 
 
 class _StarReelsBudgetV2(BaseModel):

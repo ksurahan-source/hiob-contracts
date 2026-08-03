@@ -148,3 +148,21 @@ def test_creators_return_valid_values_or_fail_closed():
 
     with pytest.raises(ValueError):
         _coverage(17)
+
+
+def test_lane_constructor_preserves_nonblank_whitespace_in_digest_payload():
+    receipt = BeatLaneTerminalReceiptV1.create(
+        run_id=" run-padded ",
+        workspace_id=" workspace-padded ",
+        package_digest=sha256_digest({"package": "padded"}),
+        plan_digest=sha256_digest({"plan": "padded"}),
+        beat_index=0,
+        lane=" athena ",
+        output_digest=sha256_digest({"output": "padded"}),
+    )
+
+    assert receipt.run_id == " run-padded "
+    assert receipt.lane == " athena "
+    assert receipt.receipt_digest == (
+        "sha256:65b1c484bebdb3d57f1dfc733748a8dd4cef862a9b374736a6c41395307c4d6a"
+    )

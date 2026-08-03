@@ -9,6 +9,7 @@ import { sha256Digest } from './factory/digest.js';
 export const BEAT_COVERAGE_CONTRACT_VERSION_V1 = 'BeatCoverage.v1' as const;
 export const SERIAL_FAN_IN_RECEIPT_CONTRACT_VERSION_V1 = 'SerialFanInReceipt.v1' as const;
 export const BEAT_LANE_TERMINAL_RECEIPT_CONTRACT_VERSION_V1 = 'BeatLaneTerminalReceipt.v1' as const;
+export const MAX_BEAT_COVERAGE_BEATS_V1 = 16;
 export const DEFAULT_BEAT_COVERAGE_LANES_V1 = ['athena', 'orpheus_vo', 'atropos'] as const;
 export const TERMINAL_BEAT_LANE_STATUSES_V1 = [
   'succeeded',
@@ -19,8 +20,11 @@ export const TERMINAL_BEAT_LANE_STATUSES_V1 = [
 ] as const;
 
 const DigestSchema = z.string().regex(/^sha256:[0-9a-f]{64}$/, 'digest must be sha256:<64 lowercase hex>');
-const NonBlankString = z.string().trim().min(1, 'string must not be blank');
-const PositiveInteger = z.number().int().positive().safe();
+const NonBlankString = z.string().refine(
+  (value) => value.trim().length > 0,
+  'string must not be blank',
+);
+const PositiveInteger = z.number().int().positive().max(MAX_BEAT_COVERAGE_BEATS_V1).safe();
 
 export const BeatLaneTerminalReceiptV1Schema = z.object({
   run_id: NonBlankString,
@@ -30,7 +34,7 @@ export const BeatLaneTerminalReceiptV1Schema = z.object({
   beat_index: z.number().int().nonnegative().safe(),
   lane: NonBlankString,
   status: z.enum(TERMINAL_BEAT_LANE_STATUSES_V1).default('succeeded'),
-  output_digest: DigestSchema.nullable().optional(),
+  output_digest: DigestSchema.nullable().default(null),
   receipt_digest: DigestSchema,
   contract_version: z.literal(BEAT_LANE_TERMINAL_RECEIPT_CONTRACT_VERSION_V1)
     .default(BEAT_LANE_TERMINAL_RECEIPT_CONTRACT_VERSION_V1),
@@ -55,6 +59,19 @@ export type BeatLaneTerminalReceiptV1Input = Pick<
   'run_id' | 'workspace_id' | 'package_digest' | 'plan_digest' | 'beat_index' | 'lane'
 > & Partial<Pick<BeatLaneTerminalReceiptV1, 'status' | 'output_digest' | 'contract_version' | 'receipt_digest'>>;
 
+const BeatLaneTerminalReceiptV1InputSchema = z.object({
+  run_id: NonBlankString,
+  workspace_id: NonBlankString,
+  package_digest: DigestSchema,
+  plan_digest: DigestSchema,
+  beat_index: z.number().int().nonnegative().safe(),
+  lane: NonBlankString,
+  status: z.enum(TERMINAL_BEAT_LANE_STATUSES_V1).optional(),
+  output_digest: DigestSchema.nullable().optional(),
+  receipt_digest: DigestSchema.optional(),
+  contract_version: z.literal(BEAT_LANE_TERMINAL_RECEIPT_CONTRACT_VERSION_V1).optional(),
+}).strict();
+
 export function beatLaneTerminalReceiptDigestV1(
   receipt: Omit<BeatLaneTerminalReceiptV1, 'receipt_digest'>,
 ): string {
@@ -64,17 +81,18 @@ export function beatLaneTerminalReceiptDigestV1(
 export function createBeatLaneTerminalReceiptV1(
   input: BeatLaneTerminalReceiptV1Input,
 ): BeatLaneTerminalReceiptV1 {
-  const { receipt_digest: _ignoredReceiptDigest, ...withoutReceiptDigest } = input;
+  const parsedInput = BeatLaneTerminalReceiptV1InputSchema.parse(input);
+  const { receipt_digest: _ignoredReceiptDigest, ...withoutReceiptDigest } = parsedInput;
   const payload = {
     ...withoutReceiptDigest,
-    status: input.status ?? 'succeeded',
-    output_digest: input.output_digest ?? null,
-    contract_version: input.contract_version ?? BEAT_LANE_TERMINAL_RECEIPT_CONTRACT_VERSION_V1,
+    status: parsedInput.status ?? 'succeeded',
+    output_digest: parsedInput.output_digest ?? null,
+    contract_version: parsedInput.contract_version ?? BEAT_LANE_TERMINAL_RECEIPT_CONTRACT_VERSION_V1,
   } as Omit<BeatLaneTerminalReceiptV1, 'receipt_digest'>;
-  return {
+  return BeatLaneTerminalReceiptV1Schema.parse({
     ...payload,
     receipt_digest: sha256Digest(payload),
-  };
+  });
 }
 
 const CoverageContractVersionSchema = z.union([
@@ -165,6 +183,19 @@ export type BeatCoverageV1Input = Pick<
 > & Partial<Pick<BeatCoverageV1, 'required_lanes' | 'contract_version' | 'coverage_digest'>>
   & { lane_receipts: BeatLaneTerminalReceiptV1Input[] };
 
+const BeatCoverageV1InputSchema = z.object({
+  run_id: NonBlankString,
+  workspace_id: NonBlankString,
+  package_digest: DigestSchema,
+  plan_digest: DigestSchema,
+  expected_n_beats: PositiveInteger,
+  expected_beat_indices: z.array(z.number().int().nonnegative().safe()),
+  lane_receipts: z.array(BeatLaneTerminalReceiptV1InputSchema),
+  required_lanes: z.array(NonBlankString).optional(),
+  coverage_digest: DigestSchema.optional(),
+  contract_version: CoverageContractVersionSchema.optional(),
+}).strict();
+
 export function beatCoverageDigestPayloadV1(
   coverage: Omit<BeatCoverageV1, 'coverage_digest'>,
 ): Omit<BeatCoverageV1, 'coverage_digest'> {
@@ -185,7 +216,8 @@ export function beatCoverageDigestV1(
 }
 
 export function createBeatCoverageV1(input: BeatCoverageV1Input): BeatCoverageV1 {
-  const lane_receipts = input.lane_receipts.map((receipt) => {
+  const parsedInput = BeatCoverageV1InputSchema.parse(input);
+  const lane_receipts = parsedInput.lane_receipts.map((receipt) => {
     const payload = {
       ...receipt,
       status: receipt.status ?? 'succeeded',
@@ -197,17 +229,17 @@ export function createBeatCoverageV1(input: BeatCoverageV1Input): BeatCoverageV1
     coverage_digest: _ignoredCoverageDigest,
     lane_receipts: _ignoredLaneReceipts,
     ...withoutCoverageDigest
-  } = input;
+  } = parsedInput;
   const payload = {
     ...withoutCoverageDigest,
     lane_receipts,
-    required_lanes: input.required_lanes ?? [...DEFAULT_BEAT_COVERAGE_LANES_V1],
-    contract_version: input.contract_version ?? BEAT_COVERAGE_CONTRACT_VERSION_V1,
+    required_lanes: parsedInput.required_lanes ?? [...DEFAULT_BEAT_COVERAGE_LANES_V1],
+    contract_version: parsedInput.contract_version ?? BEAT_COVERAGE_CONTRACT_VERSION_V1,
   } as Omit<BeatCoverageV1, 'coverage_digest'>;
-  return {
+  return BeatCoverageV1Schema.parse({
     ...payload,
     coverage_digest: beatCoverageDigestV1(payload),
-  };
+  });
 }
 
 export const SerialFanInReceiptV1Schema = BeatCoverageV1Schema;
