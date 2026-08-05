@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from hiob_contracts import (
     AresCreateStoryRequestV4,
+    AresStoryHookDirectiveV4,
     UGC_STORY_SLOT_SEQUENCE_V4,
     INFO_SHORT_SLOT_SEQUENCE_V4,
     ares_create_story_request_v4_schema_descriptor,
@@ -81,6 +82,14 @@ def _narrative_brief(mode: str, stages: tuple[str, ...]) -> dict:
     return {**unsigned, "story_brief_digest": sha256_digest(unsigned)}
 
 
+def _hook_directive() -> dict:
+    unsigned = {
+        "contract_version": "AresStoryHookDirective.v4",
+        "hook_line": "피부가 급할 때, 이 순서부터 바꿨어요.",
+    }
+    return {**unsigned, "directive_digest": sha256_digest(unsigned)}
+
+
 def _authority_ref(
     *,
     producer: str,
@@ -119,6 +128,7 @@ def story_request_data(
         )
     evidence = _evidence_bundle()
     narrative = _narrative_brief(mode, stages)
+    hook = _hook_directive()
     return {
         "contract_version": "AresCreateStoryRequest.v4",
         "scope": {
@@ -155,12 +165,13 @@ def story_request_data(
             "metis_hook_directive_ref": _authority_ref(
                 producer="metis",
                 artifact_type="hook_directive",
-                artifact_digest=METIS_DIGEST,
-                payload_digest=sha256_digest({"metis": "hook-directive-projection"}),
+                artifact_digest=hook["directive_digest"],
+                payload_digest=sha256_digest(hook),
             ),
         },
         "evidence_bundle": evidence,
         "narrative_brief": narrative,
+        "hook_directive": hook,
     }
 
 
@@ -192,6 +203,25 @@ def test_information_short_accepts_exact_12_slot_arc():
     )
 
     assert tuple(beat.arc_stage for beat in request.narrative_brief.beats) == INFO_SHORT_SLOT_SEQUENCE_V4
+
+
+def test_story_contract_seals_the_exact_metis_hook_line_for_ares_adapter():
+    request = AresCreateStoryRequestV4.model_validate(story_request_data())
+
+    assert isinstance(request.hook_directive, AresStoryHookDirectiveV4)
+    assert request.hook_directive.hook_line == "피부가 급할 때, 이 순서부터 바꿨어요."
+
+    tampered = story_request_data()
+    tampered["hook_directive"]["hook_line"] = "Ares가 새로 만든 훅"
+    unsigned = {
+        key: value
+        for key, value in tampered["hook_directive"].items()
+        if key != "directive_digest"
+    }
+    tampered["hook_directive"]["directive_digest"] = sha256_digest(unsigned)
+
+    with pytest.raises(ValidationError, match="metis_hook_directive_ref"):
+        AresCreateStoryRequestV4.model_validate(tampered)
 
 
 @pytest.mark.parametrize(
