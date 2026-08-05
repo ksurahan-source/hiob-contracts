@@ -248,6 +248,17 @@ from .story_producer_seal_v4 import (
     StoryProducerStagedRefV4,
     StoryProducerSealCandidateV4,
 )
+from .janus_story_product_record_v4 import (
+    CatalogSnapshotRefV4,
+    JanusStoryProductRecordRefV4,
+    JanusStoryProductRecordV4,
+    JanusStoryProductScopeV4,
+    StudioIntakeReceiptRefV4,
+    ThumbnailContentBindingRefV4,
+    VerifiedSourceMaterialReceiptRefV4,
+    assert_janus_story_product_record_ref_matches_v4,
+    janus_story_product_record_digest_v4,
+)
 from .ares_v3_make_context_v1 import (
     AresV3MakeContextV1,
     derive_ares_v3_make_context_digest_v1,
@@ -445,6 +456,12 @@ __all__ = [
     "story_producer_accepted_authority_projection_v4_schema_descriptor",
     "StoryProducerSealScopeV4", "StoryProducerSealPayloadV4",
     "StoryProducerStagedRefV4", "StoryProducerSealCandidateV4",
+    "CatalogSnapshotRefV4", "JanusStoryProductRecordRefV4",
+    "JanusStoryProductRecordV4", "JanusStoryProductScopeV4",
+    "StudioIntakeReceiptRefV4", "ThumbnailContentBindingRefV4",
+    "VerifiedSourceMaterialReceiptRefV4",
+    "assert_janus_story_product_record_ref_matches_v4",
+    "janus_story_product_record_digest_v4",
 
     "canonical_contract_json_v1", "canonical_contract_digest_v1",
     "derive_ares_g1_subject_digest_v1",
