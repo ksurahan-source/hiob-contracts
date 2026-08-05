@@ -16,12 +16,11 @@ import hiob_contracts
 from hiob_contracts import (
     INFO_SHORT_SLOT_SEQUENCE_V4,
     STORY_PRODUCER_ARTIFACT_PAIRS_V4,
-    AresStoryAuthorityRefV4,
-    StoryProducerAcceptedAuthorityProjectionV4,
+    STORY_PRODUCER_ACCEPTED_AUTHORITY_FIELD_NAMES_V4,
     StoryProducerSealCandidateV4,
     canonical_story_producer_payload_digest_v4,
     sha256_digest,
-    story_authority_ref_receipt_digest_v4,
+    story_producer_accepted_authority_projection_v4_schema_descriptor,
     story_producer_seal_payload_digest_v4,
     story_producer_staged_ref_digest_v4,
 )
@@ -112,18 +111,6 @@ def _staged_upstream_digests(producer: str) -> list[str]:
     raise AssertionError(f"unexpected producer: {producer}")
 
 
-def _accepted_upstream_digests(producer: str) -> list[str]:
-    if producer == "janus":
-        return []
-    if producer == "karma":
-        return [sha256_digest({"janus": "accepted-output"})]
-    if producer == "parzifal":
-        return [sha256_digest({"karma": "accepted-output"})]
-    if producer in {"artemis", "metis"}:
-        return [sha256_digest({"star-db": f"{producer}-trusted-output"})]
-    raise AssertionError(f"unexpected producer: {producer}")
-
-
 def _rebind_candidate(data: dict) -> None:
     payload = data["payload"]
     payload["canonical_payload_digest"] = canonical_story_producer_payload_digest_v4(
@@ -187,33 +174,6 @@ def staged_candidate_data(producer: str, artifact_type: str) -> dict:
     }
     _rebind_candidate(data)
     return data
-
-
-def accepted_authority_data(producer: str, artifact_type: str) -> dict:
-    sealed_payload, artifact_digest = _artifact_payload(producer, artifact_type)
-    source_output_digest = sha256_digest(
-        {"producer": producer, "artifact_type": artifact_type, "accepted-output": 1}
-    )
-    authority_ref = {
-        "producer": producer,
-        "artifact_type": artifact_type,
-        "artifact_digest": artifact_digest,
-        "source_output_digest": source_output_digest,
-        "payload_digest": sha256_digest(sealed_payload),
-        "receipt_id": f"star-db-{producer}-{artifact_type}-authority-v4",
-        "workspace_id": WORKSPACE_ID,
-        "run_id": RUN_ID,
-    }
-    authority_ref["receipt_digest"] = story_authority_ref_receipt_digest_v4(
-        **authority_ref
-    )
-    return {
-        "authority_ref": authority_ref,
-        "sealed_payload": sealed_payload,
-        "issuer": f"{producer}.authority",
-        "status": "accepted",
-        "upstream_output_digests": _accepted_upstream_digests(producer),
-    }
 
 
 @pytest.mark.parametrize(("producer", "artifact_type"), STORY_PRODUCER_ARTIFACT_PAIRS_V4)
@@ -349,63 +309,25 @@ def test_staged_candidate_cannot_yield_or_masquerade_as_accepted_ares_authority(
 
     assert not hasattr(hiob_contracts, "story_producer_seal_to_ares_authority_ref_v4")
     assert not hasattr(hiob_contracts, "StoryProducerSealLedgerRecordV4")
-    assert StoryProducerAcceptedAuthorityProjectionV4.model_validate is not None
-    with pytest.raises(ValidationError):
-        StoryProducerAcceptedAuthorityProjectionV4.model_validate(
-            candidate.model_dump(mode="json")
-        )
+    assert not hasattr(hiob_contracts, "StoryProducerAcceptedAuthorityProjectionV4")
+    assert candidate.model_dump(mode="json")["staged_ref"]["status"] == "sealed"
 
 
-@pytest.mark.parametrize(("producer", "artifact_type"), STORY_PRODUCER_ARTIFACT_PAIRS_V4)
-def test_star_db_accepted_projection_has_exact_resolver_shape_and_existing_ares_ref(
-    producer: str, artifact_type: str
-):
-    projection = StoryProducerAcceptedAuthorityProjectionV4.model_validate(
-        accepted_authority_data(producer, artifact_type)
-    )
+def test_star_db_accepted_authority_is_only_a_nonconstructible_exact_field_descriptor():
+    descriptor = story_producer_accepted_authority_projection_v4_schema_descriptor()
 
-    assert isinstance(projection.authority_ref, AresStoryAuthorityRefV4)
-    assert projection.authority_ref.producer == producer
-    assert projection.issuer == f"{producer}.authority"
-    assert projection.status == "accepted"
-    assert set(projection.model_dump(mode="json")) == {
+    assert STORY_PRODUCER_ACCEPTED_AUTHORITY_FIELD_NAMES_V4 == (
         "authority_ref",
         "sealed_payload",
         "issuer",
         "status",
         "upstream_output_digests",
+    )
+    assert descriptor == {
+        "owner": "star_db_rpc",
+        "accepted_authority": "external_only",
+        "fields": list(STORY_PRODUCER_ACCEPTED_AUTHORITY_FIELD_NAMES_V4),
+        "issuer": "<producer>.authority",
+        "status": "accepted",
+        "consumer": "ares_strict_request_parser",
     }
-    with pytest.raises(TypeError):
-        projection.sealed_payload["tampered"] = True
-
-
-@pytest.mark.parametrize(
-    "mutation",
-    [
-        pytest.param(lambda data: data.update({"issuer": "janus"}), id="stage-issuer"),
-        pytest.param(lambda data: data.update({"status": "sealed"}), id="stage-status"),
-        pytest.param(lambda data: data.update({"verified": True}), id="verified-extra"),
-        pytest.param(
-            lambda data: data.update(
-                {"trusted_run_output_digest": sha256_digest({"trusted": True})}
-            ),
-            id="trusted-input-extra",
-        ),
-        pytest.param(
-            lambda data: data["sealed_payload"].update({"verified": True}),
-            id="nested-verified",
-        ),
-        pytest.param(
-            lambda data: data.update({"upstream_output_digests": []}),
-            id="non-root-missing-lineage",
-        ),
-    ],
-)
-def test_db_accepted_projection_rejects_stage_claims_and_misbound_authority(
-    mutation,
-):
-    data = accepted_authority_data("karma", "story_brief")
-    mutation(data)
-
-    with pytest.raises(ValidationError):
-        StoryProducerAcceptedAuthorityProjectionV4.model_validate(data)
