@@ -45,6 +45,7 @@ def _record(**updates: object) -> dict:
         "record_id": "janus-story-product-v4-1",
         "version": 1,
         "evidence_status": "approved",
+        "recorded_at": "2026-08-06T01:02:03+00:00",
         **SCOPE,
         "studio_intake_receipt_ref": _evidence_ref(
             "StudioIntakeReceipt", "studio-intake-v4-1"
@@ -70,6 +71,7 @@ def test_v4_record_is_frozen_and_contains_only_approved_scoped_evidence_refs() -
     record = JanusStoryProductRecordV4.model_validate(_record())
 
     assert record.evidence_status == "approved"
+    assert record.recorded_at.isoformat() == "2026-08-06T01:02:03+00:00"
     assert record.record_digest == janus_story_product_record_digest_v4(record)
     assert record.studio_intake_receipt_ref.workspace_id == record.workspace_id
     assert record.catalog_snapshot_ref.listing_id == record.listing_id
@@ -77,6 +79,24 @@ def test_v4_record_is_frozen_and_contains_only_approved_scoped_evidence_refs() -
     assert record.verified_source_material_receipt_ref.run_id == record.run_id
     with pytest.raises(ValidationError):
         record.evidence_status = "unapproved"
+
+
+def test_v4_recorded_at_is_digest_bound_and_canonicalized_to_utc() -> None:
+    base = _record()
+    same_instant = {
+        **base,
+        "recorded_at": "2026-08-06T10:02:03+09:00",
+    }
+    same_instant["record_digest"] = janus_story_product_record_digest_v4(same_instant)
+
+    assert same_instant["record_digest"] == base["record_digest"]
+
+    changed_time = {
+        **base,
+        "recorded_at": "2026-08-06T01:02:04+00:00",
+    }
+    with pytest.raises(ValidationError, match="record_digest"):
+        JanusStoryProductRecordV4.model_validate(changed_time)
 
 
 def test_v4_record_ref_binds_exact_scope_version_and_record_digest() -> None:

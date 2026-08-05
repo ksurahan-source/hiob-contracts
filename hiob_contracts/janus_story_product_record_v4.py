@@ -9,9 +9,17 @@ V4 product-truth candidate; Star remains the accepted-authority owner.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import timezone
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    Field,
+    TypeAdapter,
+    field_validator,
+    model_validator,
+)
 
 from .ares_script_revision_v1 import (
     DigestStr,
@@ -65,6 +73,7 @@ _RECORD_DIGEST_FIELDS = (
     "record_id",
     "version",
     "evidence_status",
+    "recorded_at",
     "workspace_id",
     "run_id",
     "brand_slug",
@@ -75,6 +84,7 @@ _RECORD_DIGEST_FIELDS = (
     "thumbnail_content_binding_ref",
     "verified_source_material_receipt_ref",
 )
+_AWARE_DATETIME = TypeAdapter(AwareDatetime)
 _RECORD_REF_MATCH_FIELDS = (
     "record_id",
     "version",
@@ -103,6 +113,8 @@ def janus_story_product_record_digest_v4(
         payload = {field: data[field] for field in _RECORD_DIGEST_FIELDS}
     except KeyError as exc:
         raise ValueError("V4 product record digest subject is incomplete") from exc
+    recorded_at = _AWARE_DATETIME.validate_python(payload["recorded_at"])
+    payload["recorded_at"] = recorded_at.astimezone(timezone.utc).isoformat()
     return canonical_contract_digest_v1(payload)
 
 
@@ -119,11 +131,17 @@ class JanusStoryProductRecordV4(JanusStoryProductScopeV4):
     record_id: NonBlankStr
     version: int = Field(ge=1)
     evidence_status: Literal["approved"]
+    recorded_at: AwareDatetime
     studio_intake_receipt_ref: StudioIntakeReceiptRefV4
     catalog_snapshot_ref: CatalogSnapshotRefV4
     thumbnail_content_binding_ref: ThumbnailContentBindingRefV4
     verified_source_material_receipt_ref: VerifiedSourceMaterialReceiptRefV4
     record_digest: DigestStr
+
+    @field_validator("recorded_at", mode="before")
+    @classmethod
+    def _parse_recorded_at(cls, value: Any) -> AwareDatetime:
+        return _AWARE_DATETIME.validate_python(value)
 
     @model_validator(mode="after")
     def _bind_scope_and_digest(self) -> "JanusStoryProductRecordV4":
