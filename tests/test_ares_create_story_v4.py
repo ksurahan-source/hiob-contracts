@@ -28,7 +28,6 @@ RUN_ID = "run-story-v4"
 JANUS_DIGEST = sha256_digest({"janus": "product-truth"})
 PARZIFAL_DIGEST = sha256_digest({"parzifal": "identity-lock"})
 ARTEMIS_DIGEST = sha256_digest({"artemis": "evidence-bundle"})
-METIS_DIGEST = sha256_digest({"metis": "hook-directive"})
 
 
 def _story_beats(stages: tuple[str, ...]) -> list[dict]:
