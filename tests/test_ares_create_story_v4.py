@@ -7,8 +7,6 @@ one-beat or raw-13Q shortcut before any model/provider work can begin.
 
 from __future__ import annotations
 
-from copy import deepcopy
-
 import pytest
 from pydantic import ValidationError
 
@@ -16,6 +14,9 @@ from hiob_contracts import (
     AresCreateStoryRequestV4,
     UGC_STORY_SLOT_SEQUENCE_V4,
     INFO_SHORT_SLOT_SEQUENCE_V4,
+    ares_create_story_request_v4_schema_descriptor,
+    ares_create_story_request_v4_schema_digest,
+    request_content_digest_v4,
     sha256_digest,
     story_authority_ref_receipt_digest_v4,
 )
@@ -209,6 +210,16 @@ def test_story_contract_rejects_one_beat_and_wrong_mode_cardinality(
         )
 
 
+def test_story_contract_rejects_out_of_order_slot_even_with_16_beats():
+    body = story_request_data()
+    body["narrative_brief"]["beats"][1]["arc_stage"] = "tension"
+    body["narrative_brief"]["beats"][1]["story_function"] = "tension"
+    _rebind_narrative(body)
+
+    with pytest.raises(ValidationError, match="arc_stage must be scene"):
+        AresCreateStoryRequestV4.model_validate(body)
+
+
 def test_proof_stage_requires_artemis_evidence_anchor_and_claim():
     body = story_request_data()
     proof = next(
@@ -219,6 +230,18 @@ def test_proof_stage_requires_artemis_evidence_anchor_and_claim():
 
     with pytest.raises(ValidationError, match="Artemis evidence anchor"):
         AresCreateStoryRequestV4.model_validate(body)
+
+    missing_claim = story_request_data()
+    proof = next(
+        beat
+        for beat in missing_claim["narrative_brief"]["beats"]
+        if beat["story_function"] == "proof"
+    )
+    proof["used_claim_ids"] = []
+    _rebind_narrative(missing_claim)
+
+    with pytest.raises(ValidationError, match="used_claim_id"):
+        AresCreateStoryRequestV4.model_validate(missing_claim)
 
 
 def test_objection_stage_requires_karma_objection_anchor():
@@ -250,6 +273,20 @@ def test_story_contract_rejects_raw_13q_and_wrong_upstream_owner():
         AresCreateStoryRequestV4.model_validate(wrong_owner)
 
 
+def test_story_contract_rejects_raw_beat_count_and_evidence_payload_drift():
+    raw_count = story_request_data()
+    raw_count["n_beats"] = 1
+
+    with pytest.raises(ValidationError):
+        AresCreateStoryRequestV4.model_validate(raw_count)
+
+    evidence_drift = story_request_data()
+    evidence_drift["evidence_bundle"]["anchors"][0]["statement"] = "변조된 증거"
+
+    with pytest.raises(ValidationError, match="payload_digest"):
+        AresCreateStoryRequestV4.model_validate(evidence_drift)
+
+
 def test_story_contract_freezes_nested_authority_and_narrative_models():
     request = AresCreateStoryRequestV4.model_validate(story_request_data())
 
@@ -257,3 +294,14 @@ def test_story_contract_freezes_nested_authority_and_narrative_models():
         request.authority.janus_product_truth_ref.artifact_digest = JANUS_DIGEST
     with pytest.raises(ValidationError):
         request.narrative_brief.beats[0].scene_intent = "변조"
+
+
+def test_schema_descriptor_and_request_digest_publish_v4_shape():
+    request = AresCreateStoryRequestV4.model_validate(story_request_data())
+    descriptor = ares_create_story_request_v4_schema_descriptor()
+
+    assert descriptor["modes"]["ugc_story"] == list(UGC_STORY_SLOT_SEQUENCE_V4)
+    assert descriptor["modes"]["info_short"] == list(INFO_SHORT_SLOT_SEQUENCE_V4)
+    assert "raw_13q=forbidden" in descriptor["invariants"]
+    assert ares_create_story_request_v4_schema_digest().startswith("sha256:")
+    assert request_content_digest_v4(request).startswith("sha256:")
