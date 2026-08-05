@@ -133,7 +133,9 @@ def _rebind_candidate(data: dict) -> None:
         "payload_digest",
     ):
         ref[field] = deepcopy(payload[field])
-    unsigned_ref = {key: value for key, value in ref.items() if key != "candidate_digest"}
+    unsigned_ref = {
+        key: value for key, value in ref.items() if key != "candidate_digest"
+    }
     ref["candidate_digest"] = story_producer_staged_ref_digest_v4(unsigned_ref)
 
 
@@ -176,7 +178,9 @@ def staged_candidate_data(producer: str, artifact_type: str) -> dict:
     return data
 
 
-@pytest.mark.parametrize(("producer", "artifact_type"), STORY_PRODUCER_ARTIFACT_PAIRS_V4)
+@pytest.mark.parametrize(
+    ("producer", "artifact_type"), STORY_PRODUCER_ARTIFACT_PAIRS_V4
+)
 def test_each_allowed_producer_can_only_stage_frozen_candidate_material(
     producer: str, artifact_type: str
 ):
@@ -223,11 +227,11 @@ def test_staged_candidate_has_exact_pre_db_lineage_cardinality(
     "mutation",
     [
         pytest.param(
-            lambda data: data["payload"].update({"artifact_type": "story_brief"}),
+            lambda data: data["payload"].update({"artifact_type": "product_truth"}),
             id="wrong-producer-type-pair",
         ),
         pytest.param(
-            lambda data: data["staged_ref"].update({"issuer": "karma"}),
+            lambda data: data["staged_ref"].update({"issuer": "janus"}),
             id="wrong-issuer",
         ),
         pytest.param(
@@ -247,18 +251,12 @@ def test_staged_candidate_has_exact_pre_db_lineage_cardinality(
             id="trusted-run-digest-is-not-a-producer-input",
         ),
         pytest.param(
-            lambda data: data["payload"].update(
-                {"source_output_digest": "sha256:BAD"}
-            ),
+            lambda data: data["payload"].update({"source_output_digest": "sha256:BAD"}),
             id="malformed-digest",
         ),
         pytest.param(
             lambda data: data["payload"].update(
-                {
-                    "upstream_output_digests": [
-                        data["payload"]["source_output_digest"]
-                    ]
-                }
+                {"upstream_output_digests": [data["payload"]["source_output_digest"]]}
             ),
             id="self-referential-lineage",
         ),
