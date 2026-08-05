@@ -227,6 +227,31 @@ class AresStoryEvidenceBundleV4(BaseModel):
         return self
 
 
+class AresStoryHookDirectiveV4(BaseModel):
+    """The exact Metis hook line that the Ares adapter must consume verbatim.
+
+    This is intentionally a typed source input rather than a candidate-output
+    field: V4 has no generated script artifact yet, so no later consumer can
+    mistake an Ares-invented hook for the Metis-selected one.
+    """
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["AresStoryHookDirective.v4"]
+    hook_line: NonBlankStr
+    directive_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_canonical_hook_line(self) -> "AresStoryHookDirectiveV4":
+        if self.directive_digest != canonical_contract_digest_v1(
+            self, exclude={"directive_digest"}
+        ):
+            raise ValueError(
+                "directive_digest must bind the canonical Ares V4 Metis hook line"
+            )
+        return self
+
+
 class AresKarmaObjectionAnchorV4(BaseModel):
     """A Karma-reconciled customer objection Ares must address, not invent."""
 
@@ -322,6 +347,7 @@ class AresCreateStoryRequestV4(BaseModel):
     authority: AresStoryAuthorityBundleV4
     evidence_bundle: AresStoryEvidenceBundleV4
     narrative_brief: AresStoryNarrativeBriefV4
+    hook_directive: AresStoryHookDirectiveV4
 
     @model_validator(mode="after")
     def _bind_authority_scope_anchors_and_payloads(
@@ -362,6 +388,18 @@ class AresCreateStoryRequestV4(BaseModel):
         ):
             raise ValueError(
                 "karma_story_brief_ref.payload_digest must bind narrative brief"
+            )
+
+        hook_ref = self.authority.metis_hook_directive_ref
+        if hook_ref.artifact_digest != self.hook_directive.directive_digest:
+            raise ValueError(
+                "metis_hook_directive_ref.artifact_digest must match hook directive"
+            )
+        if hook_ref.payload_digest != sha256_digest(
+            self.hook_directive.model_dump(mode="json")
+        ):
+            raise ValueError(
+                "metis_hook_directive_ref.payload_digest must bind hook directive"
             )
 
         evidence_anchor_ids = {
@@ -412,6 +450,7 @@ def ares_create_story_request_v4_schema_descriptor() -> dict[str, Any]:
         "authority_ref_fields": sorted(AresStoryAuthorityRefV4.model_fields),
         "evidence_bundle_fields": sorted(AresStoryEvidenceBundleV4.model_fields),
         "evidence_anchor_fields": sorted(AresStoryEvidenceAnchorV4.model_fields),
+        "hook_directive_fields": sorted(AresStoryHookDirectiveV4.model_fields),
         "narrative_brief_fields": sorted(AresStoryNarrativeBriefV4.model_fields),
         "story_beat_fields": sorted(AresStoryBeatV4.model_fields),
         "objection_anchor_fields": sorted(AresKarmaObjectionAnchorV4.model_fields),
@@ -420,6 +459,7 @@ def ares_create_story_request_v4_schema_descriptor() -> dict[str, Any]:
             "one_beat=forbidden",
             "proof=artemis_evidence_anchor+claim",
             "objection=karma_objection_anchor",
+            "hook=metis_hook_directive",
             "all_five_upstream_refs=scope_bound+receipt_bound",
         ],
     }
@@ -447,6 +487,7 @@ __all__ = [
     "AresStoryAuthorityBundleV4",
     "AresStoryEvidenceAnchorV4",
     "AresStoryEvidenceBundleV4",
+    "AresStoryHookDirectiveV4",
     "AresKarmaObjectionAnchorV4",
     "AresStoryBeatV4",
     "AresStoryNarrativeBriefV4",
