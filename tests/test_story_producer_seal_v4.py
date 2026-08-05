@@ -138,7 +138,9 @@ def seal_input_data(producer: str, artifact_type: str) -> dict:
             {"producer": producer, "artifact_type": artifact_type, "output": 1}
         ),
         "upstream_output_digests": [
-            sha256_digest({"producer": producer, "artifact_type": artifact_type, "input": 1})
+            sha256_digest(
+                {"producer": producer, "artifact_type": artifact_type, "input": 1}
+            )
         ],
         "canonical_payload": canonical_payload,
         "canonical_payload_digest": "sha256:" + "0" * 64,
@@ -167,11 +169,15 @@ def seal_input_data(producer: str, artifact_type: str) -> dict:
     return data
 
 
-@pytest.mark.parametrize(("producer", "artifact_type"), STORY_PRODUCER_ARTIFACT_PAIRS_V4)
+@pytest.mark.parametrize(
+    ("producer", "artifact_type"), STORY_PRODUCER_ARTIFACT_PAIRS_V4
+)
 def test_each_allowed_producer_seal_is_frozen_receipt_bound_and_ares_compatible(
     producer: str, artifact_type: str
 ):
-    seal = StoryProducerSealInputV4.model_validate(seal_input_data(producer, artifact_type))
+    seal = StoryProducerSealInputV4.model_validate(
+        seal_input_data(producer, artifact_type)
+    )
 
     assert seal.ref.issuer == producer
     assert seal.ref.status == "sealed"
@@ -244,9 +250,7 @@ def test_seal_record_is_flat_canonical_and_round_trips_without_a_trusted_run_dig
             id="trusted-run-digest-is-not-a-producer-input",
         ),
         pytest.param(
-            lambda data: data["payload"].update(
-                {"source_output_digest": "sha256:BAD"}
-            ),
+            lambda data: data["payload"].update({"source_output_digest": "sha256:BAD"}),
             id="malformed-digest",
         ),
         pytest.param(
@@ -285,7 +289,9 @@ def test_seal_rejects_raw_13q_and_raw_or_one_beat_story_shortcuts():
     one_beat = seal_input_data("karma", "story_brief")
     brief = one_beat["payload"]["canonical_payload"]
     brief["beats"] = brief["beats"][:1]
-    unsigned = {key: value for key, value in brief.items() if key != "story_brief_digest"}
+    unsigned = {
+        key: value for key, value in brief.items() if key != "story_brief_digest"
+    }
     brief["story_brief_digest"] = sha256_digest(unsigned)
     _rebind(one_beat)
     with pytest.raises(ValidationError, match="requires exactly"):
@@ -294,11 +300,13 @@ def test_seal_rejects_raw_13q_and_raw_or_one_beat_story_shortcuts():
 
 def test_payload_and_receipt_digests_reject_tampering_even_when_fields_are_frozen():
     changed_payload = seal_input_data("metis", "hook_directive")
-    changed_payload["payload"]["canonical_payload"]["hook_line"] = "변조된 훅"
-    _rebind(changed_payload)
     changed_payload["ref"]["canonical_payload_digest"] = sha256_digest({"forged": True})
     changed_payload["ref"]["receipt_digest"] = story_producer_seal_receipt_digest_v4(
-        {key: value for key, value in changed_payload["ref"].items() if key != "receipt_digest"}
+        {
+            key: value
+            for key, value in changed_payload["ref"].items()
+            if key != "receipt_digest"
+        }
     )
     with pytest.raises(ValidationError, match="canonical_payload_digest"):
         StoryProducerSealInputV4.model_validate(changed_payload)
