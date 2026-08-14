@@ -568,7 +568,7 @@ def test_v3_progress_and_failure_attempts_cannot_exceed_paid_authority_mask() ->
         "script": 0,
         "image": 0,
         "video": 8,
-        "voice": 16,
+        "voice": 0,
         "render": 1,
     }
     progress = ReelsFactoryProgressReceiptV3.model_validate(
