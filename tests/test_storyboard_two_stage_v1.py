@@ -29,6 +29,7 @@ from hiob_contracts import (
     StoryboardDraftV1,
     StoryboardExecutionManifestV1,
     StoryboardImageArtifactRefV1,
+    StoryboardImageProviderReceiptV1,
     StoryboardImageSetReceiptV1,
     StoryboardSceneV1,
     StoryboardSceneVideoRequestV1,
@@ -95,6 +96,18 @@ class _ApprovalResolverV2:
         self.call_count += 1
         self.last_identity = identity
         return self.current
+
+
+class _PaidOperationEvidenceResolverV2:
+    def __init__(self, verified: bool = True) -> None:
+        self.verified = verified
+        self.last_identity: dict[str, Any] | None = None
+        self.call_count = 0
+
+    def is_verified_completed_operation(self, **identity: Any) -> bool:
+        self.call_count += 1
+        self.last_identity = identity
+        return self.verified
 
 
 def _sealed(
@@ -435,6 +448,8 @@ def _image_set(
         "factory_revision": 7,
         "plan_digest": PLAN_DIGEST,
         "paid_budget_authority_digest": DRAFT_AUTHORITY_DIGEST,
+        "paid_source_beat_indices": list(range(16)),
+        "previous_image_set_receipt_digest": None,
         "expected_image_count": 16,
         "images": selected_images,
         "provider_receipts": selected_receipts,
@@ -907,6 +922,12 @@ def _image_set_for_paid_receipt(
             for receipt in receipts
         ],
         paid_budget_authority_digest=authority.authority_digest,
+        paid_source_beat_indices=list(authority.image_source_beat_indices),
+        previous_image_set_receipt_digest=(
+            previous_image_set.receipt_digest
+            if previous_image_set is not None
+            else None
+        ),
     )
 
 
@@ -972,6 +993,7 @@ def _phase_a_completion(
         "paid_budget_authority_digest": authority.authority_digest,
         "paid_source_beat_indices": selected,
         "input_storyboard_draft": input_draft,
+        "input_image_set_receipt": input_image_set,
         "paid_image_provider_receipt_digests": paid_digests,
         "output_image_set_receipt": output_image_set,
         "output_storyboard_draft": output_draft,
@@ -1380,7 +1402,7 @@ def test_image_ref_is_url_free_strict_frozen_and_digest_bound() -> None:
     image = StoryboardImageArtifactRefV1.model_validate(_image(0))
 
     assert image.source_beat_index == 0
-    assert image.storage_key.endswith("storyboard/00.webp")
+    assert image.storage_key == _image_provider_request(0)["expected_storage_key"]
     assert "url" not in StoryboardImageArtifactRefV1.model_fields
     assert image.artifact_digest == derive_storyboard_image_artifact_digest_v1(image)
     with pytest.raises((ValidationError, TypeError)):
@@ -1517,7 +1539,7 @@ def test_image_provider_request_requires_fresh_profile_resolved_authority() -> N
 
     assert resolver.call_count == 2
     assert request.operation_key == (
-        f"reels:{WORKSPACE_ID}:{RUN_ID}:{PLAN_DIGEST}:"
+        f"reels:{WORKSPACE_ID}:{RUN_ID}:{plan_revision.revision_digest}:"
         f"{request.generation_nonce}:image:0"
     )
     assert request.expected_artifact_id == (
@@ -2089,7 +2111,7 @@ def test_draft_revision_requires_parent_and_current_image_set_binding() -> None:
             parent_draft_digest=sha256_digest({"parent": "unexpected"}),
         )
 
-    alien_set = _image_set(plan_digest=sha256_digest({"plan": "alien"}))
+    alien_set = _image_set(receipt_id="storyboard-image-set-alien")
     assert not draft.binds_image_set(alien_set)
 
 
@@ -3763,6 +3785,259 @@ def test_phase_a_image_execution_identity_preimages_are_stable_and_acyclic() -> 
         )
         != request["execution_request_digest"]
     )
+
+
+def _historical_paid_operation_evidence(
+    *,
+    resolution: FactoryPaidBudgetResolutionV2,
+    receipt: StoryboardImageProviderReceiptV1 | StoryboardSceneVideoReceiptV1,
+) -> dict[str, Any]:
+    if isinstance(receipt, StoryboardImageProviderReceiptV1):
+        operation = "image"
+        source_index = receipt.request.source_beat_index
+        operation_key = receipt.request.operation_key
+        provider_operation_id = receipt.provider_task_id
+    else:
+        operation = "video"
+        source_index = receipt.request.scene_sequence_index
+        operation_key = hiob_contracts.derive_storyboard_scene_video_operation_key_v1(
+            receipt.request
+        )
+        provider_operation_id = receipt.provider_job_id
+    output_digest = hiob_contracts.derive_factory_paid_operation_claim_output_digest_v2(
+        receipt
+    )
+    body: dict[str, Any] = {
+        "contract_version": "FactoryPaidOperationHistoricalEvidence.v2",
+        "evidence_id": f"historical-{operation}-{source_index:02d}",
+        "workspace_id": receipt.request.workspace_id,
+        "run_id": receipt.request.run_id,
+        "factory_revision": receipt.request.factory_revision,
+        "purpose": resolution.paid_budget_authority.purpose,
+        "operation": operation,
+        "source_index": source_index,
+        "resolution": resolution,
+        "paid_budget_authority_digest": (
+            resolution.paid_budget_authority.authority_digest
+        ),
+        "cost_profile_digest": resolution.cost_profile.profile_digest,
+        "pricing_policy_revision": resolution.cost_profile.pricing_policy_revision,
+        "provider": receipt.request.provider,
+        "model": receipt.request.model,
+        "operation_key": operation_key,
+        "execution_request_digest": receipt.request.execution_request_digest,
+        "provider_operation_id": provider_operation_id,
+        "provider_binding_receipt_digest": sha256_digest(
+            {"provider_binding": operation_key}
+        ),
+        "provider_result_receipt_id": f"leaf-result-{operation}-{source_index:02d}",
+        "provider_result_receipt_digest": sha256_digest(
+            {"leaf_result_receipt": operation_key}
+        ),
+        "provider_result_output_digest": output_digest,
+        "provider_result_recorded_at_utc": "2026-08-14T06:20:00Z",
+        "completed_claim_output_digest": output_digest,
+        "claim_status": "completed",
+        "reserved_at_utc": "2026-08-14T06:00:00Z",
+        "completed_at_utc": "2026-08-14T06:21:00Z",
+    }
+    body["evidence_digest"] = (
+        hiob_contracts.derive_factory_paid_operation_historical_evidence_digest_v2(body)
+    )
+    return body
+
+
+def _verified_historical_evidence(
+    *,
+    resolution: FactoryPaidBudgetResolutionV2,
+    receipt: StoryboardImageProviderReceiptV1 | StoryboardSceneVideoReceiptV1,
+    resolver: _PaidOperationEvidenceResolverV2 | None = None,
+) -> Any:
+    return hiob_contracts.FactoryPaidOperationHistoricalEvidenceV2.from_verified(
+        _historical_paid_operation_evidence(
+            resolution=resolution,
+            receipt=receipt,
+        ),
+        resolver=resolver or _PaidOperationEvidenceResolverV2(),
+    )
+
+
+def test_initial_image_set_rejects_one_current_and_fifteen_alien_authorities() -> None:
+    current_receipt = _paid_approval_receipt_v2("storyboard_draft")
+    alien_receipt = _paid_approval_receipt_v2(
+        "storyboard_draft",
+        approver_account_id="alien-account",
+    )
+    current = _image_set_for_paid_receipt(current_receipt)
+    alien = _image_set_for_paid_receipt(alien_receipt)
+    payload = current.model_dump(mode="json")
+    payload["images"][1:] = [
+        image.model_dump(mode="json") for image in alien.images[1:]
+    ]
+    payload["provider_receipts"][1:] = [
+        receipt.model_dump(mode="json") for receipt in alien.provider_receipts[1:]
+    ]
+    payload["receipt_digest"] = derive_storyboard_image_set_receipt_digest_v1(payload)
+
+    with pytest.raises(ValidationError, match="all 16|current authority"):
+        StoryboardImageSetReceiptV1.model_validate(payload)
+
+
+def test_historical_image_evidence_is_reconciliation_only_and_binds_completion() -> (
+    None
+):
+    completion = _phase_a_completion()
+    resolution = _paid_resolution_v2(completion.paid_budget_approval_receipt)
+    resolver = _PaidOperationEvidenceResolverV2()
+    proofs = tuple(
+        _verified_historical_evidence(
+            resolution=resolution,
+            receipt=receipt,
+            resolver=resolver,
+        )
+        for receipt in completion.output_image_set_receipt.provider_receipts
+    )
+
+    assert resolver.call_count == 16
+    with pytest.raises(TypeError, match="VerifiedStoryboardImageProviderRequestV1"):
+        hiob_contracts.require_verified_storyboard_image_provider_request_v1(proofs[0])
+    reconciled = (
+        hiob_contracts.StoryboardImageProviderReceiptV1.from_historical_evidence(
+            completion.output_image_set_receipt.provider_receipts[0],
+            request=completion.output_image_set_receipt.provider_receipts[0].request,
+            evidence=proofs[0],
+        )
+    )
+    assert reconciled == completion.output_image_set_receipt.provider_receipts[0]
+    assert completion.binds_paid_operations(resolution, proofs)
+    summary = hiob_contracts.StoryboardPhaseACompletionSummaryV1.from_completion(
+        completion,
+        authority=resolution,
+        operation_proofs=proofs,
+    )
+    assert summary.binds(completion, authority=resolution, operation_proofs=proofs)
+
+    rejected = _PaidOperationEvidenceResolverV2(verified=False)
+    with pytest.raises(ValueError, match="historical|completed operation"):
+        hiob_contracts.FactoryPaidOperationHistoricalEvidenceV2.from_verified(
+            _historical_paid_operation_evidence(
+                resolution=resolution,
+                receipt=completion.output_image_set_receipt.provider_receipts[0],
+            ),
+            resolver=rejected,
+        )
+
+
+def test_historical_scene_evidence_binds_terminal_chain_without_provider_authority() -> (
+    None
+):
+    image_set = _image_set()
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+    )
+    resolution = _paid_resolution_v2(paid_receipt)
+    authority = resolution.paid_budget_authority
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    scene_set = _scene_video_set(manifest, authority)
+    proofs = tuple(
+        _verified_historical_evidence(
+            resolution=resolution,
+            receipt=receipt,
+        )
+        for receipt in scene_set.scene_video_receipts
+    )
+    fan_in = _scene_fan_in(manifest, authority, scene_set)
+    factory = ReelsFactoryReceiptV3.model_validate(
+        _factory_receipt_v3(manifest, authority, scene_set, fan_in)
+    )
+
+    with pytest.raises(TypeError, match="VerifiedStoryboardSceneVideoRequestV1"):
+        require_verified_storyboard_scene_video_request_v1(proofs[0])
+    assert (
+        StoryboardSceneVideoReceiptV1.from_reconciled_claim(
+            scene_set.scene_video_receipts[0],
+            request=scene_set.scene_video_receipts[0].request,
+            reconciliation=proofs[0],
+        )
+        == scene_set.scene_video_receipts[0]
+    )
+    assert scene_set.binds(manifest, resolution, proofs)
+    assert fan_in.binds(manifest, resolution, proofs)
+    assert factory.binds_chain(
+        fan_in,
+        scene_set,
+        manifest=manifest,
+        authority=resolution,
+        verified_requests=proofs,
+    )
+
+
+def test_v3_ready_summaries_redact_server_only_provider_and_storage_proofs() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    verified = _verified_paid_authority_v2(paid_receipt)
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    scene_set = _scene_video_set(manifest, authority)
+    requests = _verified_scene_video_requests(manifest, verified)
+    fan_in = _scene_fan_in(manifest, authority, scene_set)
+    factory = ReelsFactoryReceiptV3.model_validate(
+        _factory_receipt_v3(manifest, authority, scene_set, fan_in)
+    )
+    scene_summary = hiob_contracts.StoryboardSceneVideoSetSummaryV1.from_receipt(
+        scene_set,
+        manifest=manifest,
+        authority=verified,
+        operation_proofs=requests,
+    )
+    factory_summary = hiob_contracts.ReelsFactoryCompletionSummaryV3.from_receipt(
+        factory,
+        scene_video_set_summary=scene_summary,
+        manifest=manifest,
+        authority=verified,
+        operation_proofs=requests,
+    )
+
+    public_json = json.dumps(
+        {
+            "scene_set": scene_summary.model_dump(mode="json"),
+            "factory": factory_summary.model_dump(mode="json"),
+        }
+    )
+    for forbidden in (
+        "provider_job_id",
+        "storage_key",
+        "anchor_image",
+        "prompt_override",
+        "audio_artifacts",
+        "provider_result",
+    ):
+        assert forbidden not in public_json
+    assert factory_summary.output_url == factory.output_url
+    assert factory_summary.output_sha256 == factory.output_sha256
+    assert len(scene_summary.beat_projections) == 16
 
 
 def test_canonical_digest_vector_is_stable_across_db_and_runtime_ports() -> None:
