@@ -3883,6 +3883,45 @@ def test_initial_image_set_rejects_one_current_and_fifteen_alien_authorities() -
         StoryboardImageSetReceiptV1.model_validate(payload)
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://cdn.example/reference.webp",
+        "https://signed.example/reference.webp?token=secret",
+        "http://public.example/reference.webp",
+    ],
+)
+def test_storyboard_image_frame_plan_rejects_persisted_reference_urls(url: str) -> None:
+    frame_plan = _image_frame_plan(0)
+    frame_plan["ordered_refs"] = [
+        {
+            "role": "product",
+            "required": True,
+            "snapshot": {
+                "owner": "artemis",
+                "workspace_id": WORKSPACE_ID,
+                "master_id": "product-master",
+                "version": 1,
+                "approval_status": "approved",
+                "storage_key": "approved/product/reference.webp",
+                "content_digest": sha256_digest({"approved": "product"}),
+                "ref_kind": "product",
+                "subject_id": "product-subject",
+                "label": "Approved product",
+                "url": url,
+                "source_run_id": None,
+            },
+        }
+    ]
+    frame_plan["plan_digest"] = canonical_contract_digest_v1(
+        frame_plan,
+        exclude={"plan_digest"},
+    )
+
+    with pytest.raises(ValidationError, match="url"):
+        hiob_contracts.StoryboardImageFramePlanV1.model_validate(frame_plan)
+
+
 def test_historical_image_evidence_is_reconciliation_only_and_binds_completion() -> (
     None
 ):
