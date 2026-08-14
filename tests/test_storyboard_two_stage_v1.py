@@ -4079,6 +4079,63 @@ def test_v3_ready_summaries_redact_server_only_provider_and_storage_proofs() -> 
     assert len(scene_summary.beat_projections) == 16
 
 
+def test_scene_fan_in_binds_exact_sixteen_approved_beat_captions() -> None:
+    image_set = _image_set()
+    draft = _draft(
+        image_set,
+        cards=_cards(image_set, list(reversed(range(16)))),
+    )
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    fan_in = _scene_fan_in(
+        manifest,
+        authority,
+        _scene_video_set(manifest, authority),
+    )
+
+    assert all(
+        isinstance(caption, hiob_contracts.StoryboardBeatCaptionV1)
+        for caption in fan_in.captions
+    )
+    assert [caption.sequence_index for caption in fan_in.captions] == list(range(16))
+    assert [caption.source_beat_index for caption in fan_in.captions] == [
+        card.source_beat_index for card in manifest.cards
+    ]
+    assert [caption.text_content for caption in fan_in.captions] == [
+        card.beat_text for card in manifest.cards
+    ]
+    assert fan_in.caption_set_digest == (
+        hiob_contracts.derive_storyboard_caption_set_digest_v1(fan_in.captions)
+    )
+
+    drift = fan_in.model_dump(mode="json")
+    drift["captions"][0]["text_content"] = "unapproved caption"
+    drift["captions"][0]["caption_digest"] = (
+        hiob_contracts.derive_storyboard_beat_caption_digest_v1(drift["captions"][0])
+    )
+    drift["caption_set_digest"] = (
+        hiob_contracts.derive_storyboard_caption_set_digest_v1(drift["captions"])
+    )
+    drift["manifest_digest"] = derive_storyboard_scene_fan_in_manifest_digest_v1(drift)
+    tampered = StoryboardSceneFanInManifestV1.model_validate(drift)
+    verified = _verified_paid_authority_v2(paid_receipt)
+    requests = _verified_scene_video_requests(manifest, verified)
+    assert not tampered.binds(manifest, verified, requests)
+
+
 def test_canonical_digest_vector_is_stable_across_db_and_runtime_ports() -> None:
     image_set = _image_set()
     draft = _draft(image_set)
