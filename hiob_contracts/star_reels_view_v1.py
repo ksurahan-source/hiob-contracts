@@ -13,9 +13,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .ares_script_revision_v1 import (
     AresApprovalReceiptV1,
+    AresBeatPlanRevisionV1,
+    AresScriptRevisionV1,
     DigestStr,
     NonBlankStr,
+    NonNegativeInt,
+    UtcTimestamp,
     UuidStr,
+    _parse_utc,
     canonical_contract_digest_v1,
 )
 from .all_beat_video import BeatArtifactSetReceiptV1, ReelsFactoryReceiptV2
@@ -33,10 +38,12 @@ from .storyboard_two_stage_v1 import (
     FactoryPaidBudgetApprovalReceiptV2,
     FactoryPaidBudgetAuthorityV2,
     FactoryPaidBudgetPurposeV2,
+    ReelsFactoryCompletionSummaryV3,
     ReelsFactoryFailureReceiptV3,
     ReelsFactoryProgressReceiptV3,
-    ReelsFactoryReceiptV3,
-    StoryboardSceneVideoSetReceiptV1,
+    StoryboardDraftV1,
+    StoryboardImageSetReceiptV1,
+    StoryboardSceneVideoSetSummaryV1,
     factory_paid_call_cardinality_v2,
 )
 
@@ -233,13 +240,14 @@ class _StarReelsViewReceiptsV3(BaseModel):
     factory: (
         ReelsFactoryProgressReceiptV3
         | ReelsFactoryFailureReceiptV3
-        | ReelsFactoryReceiptV3
+        | ReelsFactoryCompletionSummaryV3
         | None
     )
     script_approval: AresApprovalReceiptV1 | None
     plan_approval: AresApprovalReceiptV1 | None
     paid_budget_approval_receipt: FactoryPaidBudgetApprovalReceiptV2 | None
     paid_budget_authority: FactoryPaidBudgetAuthorityV2 | None
+    storyboard_phase_a_completion_summary: StoryboardPhaseACompletionSummaryV1 | None
 
 
 def derive_star_product_lock_review_digest_v1(
@@ -462,6 +470,349 @@ class FactoryStoryboardCarrierV1(BaseModel):
         return self
 
 
+def derive_factory_storyboard_carrier_digest_v1(
+    value: FactoryStoryboardCarrierV1 | dict[str, Any],
+) -> str:
+    payload = (
+        value.model_dump(mode="json") if isinstance(value, BaseModel) else dict(value)
+    )
+    return canonical_contract_digest_v1(
+        {
+            "purpose": "factory-storyboard-carrier.v1",
+            "carrier": payload,
+        }
+    )
+
+
+def derive_storyboard_phase_a_completion_receipt_digest_v1(
+    value: BaseModel | dict[str, Any],
+) -> str:
+    return canonical_contract_digest_v1(value, exclude={"receipt_digest"})
+
+
+def derive_storyboard_phase_a_completion_summary_digest_v1(
+    value: BaseModel | dict[str, Any],
+) -> str:
+    return canonical_contract_digest_v1(value, exclude={"summary_digest"})
+
+
+class StoryboardPhaseACompletionReceiptV1(BaseModel):
+    """Server-only proof of the complete paid still phase and draft output."""
+
+    model_config = _STRICT_FROZEN
+
+    contract_version: Literal["StoryboardPhaseACompletionReceipt.v1"]
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    purpose: Literal["storyboard_draft", "storyboard_regen"]
+    plan_digest: DigestStr
+    ares_script_revision_digest: DigestStr
+    ares_beat_plan_revision_digest: DigestStr
+    ares_script_revision: AresScriptRevisionV1
+    ares_beat_plan_revision: AresBeatPlanRevisionV1
+    paid_budget_approval_receipt: FactoryPaidBudgetApprovalReceiptV2
+    paid_budget_authority: FactoryPaidBudgetAuthorityV2
+    paid_budget_authority_digest: DigestStr
+    paid_source_beat_indices: tuple[int, ...] = Field(min_length=1, max_length=16)
+    input_storyboard_draft: StoryboardDraftV1 | None
+    input_image_set_receipt: StoryboardImageSetReceiptV1 | None
+    paid_image_provider_receipt_digests: tuple[DigestStr, ...] = Field(
+        min_length=1,
+        max_length=16,
+    )
+    output_image_set_receipt: StoryboardImageSetReceiptV1
+    output_storyboard_draft: StoryboardDraftV1
+    output_storyboard_carrier: FactoryStoryboardCarrierV1
+    completed_at_utc: UtcTimestamp
+    receipt_digest: DigestStr
+
+    @field_validator(
+        "paid_source_beat_indices",
+        "paid_image_provider_receipt_digests",
+        mode="before",
+    )
+    @classmethod
+    def _tuple_fields(cls, value: Any) -> Any:
+        return tuple(value) if isinstance(value, list) else value
+
+    @model_validator(mode="after")
+    def _bind_completion(self) -> "StoryboardPhaseACompletionReceiptV1":
+        approval = self.paid_budget_approval_receipt
+        authority = self.paid_budget_authority
+        image_set = self.output_image_set_receipt
+        draft = self.output_storyboard_draft
+        script_revision = self.ares_script_revision
+        plan_revision = self.ares_beat_plan_revision
+        if (
+            not approval.structurally_binds(authority)
+            or authority.purpose != self.purpose
+            or authority.workspace_id != self.workspace_id
+            or authority.run_id != self.run_id
+            or authority.factory_revision != self.factory_revision
+            or authority.authority_digest != self.paid_budget_authority_digest
+            or tuple(authority.image_source_beat_indices)
+            != self.paid_source_beat_indices
+            or self.ares_beat_plan_revision_digest != self.plan_digest
+            or script_revision.revision_digest != self.ares_script_revision_digest
+            or plan_revision.revision_digest != self.plan_digest
+            or not plan_revision.binds_script_revision(script_revision)
+            or script_revision.workspace_id != self.workspace_id
+            or script_revision.run_id != self.run_id
+            or script_revision.factory_revision != self.factory_revision
+            or len(plan_revision.beat_plan.beats) != 16
+        ):
+            raise ValueError("Phase-A paid authority does not bind completion scope")
+        if self.purpose == "storyboard_draft":
+            if (
+                authority.plan_digest is not None
+                or self.input_storyboard_draft is not None
+                or self.input_image_set_receipt is not None
+                or self.paid_source_beat_indices != tuple(range(16))
+                or draft.revision != 1
+                or draft.parent_draft_digest is not None
+            ):
+                raise ValueError("storyboard_draft completion requires initial output")
+        else:
+            previous = self.input_storyboard_draft
+            previous_image_set = self.input_image_set_receipt
+            if (
+                previous is None
+                or previous_image_set is None
+                or not previous.binds_image_set(previous_image_set)
+                or authority.plan_digest != self.plan_digest
+                or authority.storyboard_draft_digest != previous.draft_digest
+                or not draft.is_valid_successor_of(
+                    previous,
+                    replacement_image_set=image_set,
+                )
+            ):
+                raise ValueError("storyboard_regen input does not bind valid successor")
+            previous_by_source = {
+                card.source_beat_index: card for card in previous.cards
+            }
+            current_by_source = {card.source_beat_index: card for card in draft.cards}
+            paid_sources = set(self.paid_source_beat_indices)
+            for source in range(16):
+                before = previous_by_source[source]
+                after = current_by_source[source]
+                before_data = before.model_dump(mode="json")
+                after_data = after.model_dump(mode="json")
+                for mutable_digest_field in ("card_digest",):
+                    before_data.pop(mutable_digest_field)
+                    after_data.pop(mutable_digest_field)
+                if source in paid_sources:
+                    before_data.pop("selected_artifact")
+                    after_data.pop("selected_artifact")
+                if before_data != after_data or (
+                    source not in paid_sources
+                    and before.selected_artifact != after.selected_artifact
+                ):
+                    raise ValueError("regen changed an unpaid storyboard card")
+        if (
+            image_set.workspace_id != self.workspace_id
+            or image_set.run_id != self.run_id
+            or image_set.factory_revision != self.factory_revision
+            or image_set.plan_digest != self.plan_digest
+            or image_set.paid_budget_authority_digest != authority.authority_digest
+            or image_set.paid_source_beat_indices != self.paid_source_beat_indices
+            or not draft.binds_image_set(image_set)
+        ):
+            raise ValueError("Phase-A output image set does not bind output draft")
+        requests = [receipt.request for receipt in image_set.provider_receipts]
+        if any(
+            request.ares_script_revision_digest != self.ares_script_revision_digest
+            or request.ares_beat_plan_revision_digest != self.plan_digest
+            for request in requests
+        ):
+            raise ValueError("Phase-A image request revision evidence drifted")
+        card_by_source = {card.source_beat_index: card for card in draft.cards}
+        for source_index, beat in enumerate(plan_revision.beat_plan.beats):
+            card = card_by_source[source_index]
+            if (
+                card.voice_text != beat.text
+                or card.caption_text != beat.caption
+                or card.voice_text
+                != script_revision.script_package.voice_script[source_index].text
+                or card.caption_text
+                != script_revision.script_package.caption_script[source_index].text
+            ):
+                raise ValueError("storyboard card text does not match Ares revisions")
+        paid_receipts = [
+            image_set.provider_receipts[index]
+            for index in self.paid_source_beat_indices
+        ]
+        if tuple(
+            receipt.receipt_digest for receipt in paid_receipts
+        ) != self.paid_image_provider_receipt_digests or any(
+            receipt.request.paid_budget_authority_digest != authority.authority_digest
+            or receipt.request.purpose != self.purpose
+            for receipt in paid_receipts
+        ):
+            raise ValueError("paid source receipts do not match Phase-A authority")
+        expected_carrier = FactoryStoryboardCarrierV1(
+            contract_version="FactoryStoryboardCarrier.v1",
+            storyboard_revision=draft.revision,
+            storyboard_digest=draft.draft_digest,
+            image_set_receipt_digest=image_set.receipt_digest,
+            approval_receipt_digest=None,
+            execution_manifest_digest=None,
+        )
+        if self.output_storyboard_carrier != expected_carrier:
+            raise ValueError(
+                "output storyboard carrier does not bind output storyboard"
+            )
+        if self.purpose == "storyboard_draft" and any(
+            request.paid_budget_authority_digest != authority.authority_digest
+            for request in requests
+        ):
+            raise ValueError("initial completion contains an alien image authority")
+        if self.purpose == "storyboard_regen":
+            previous = self.input_storyboard_draft
+            previous_image_set = self.input_image_set_receipt
+            assert previous is not None
+            assert previous_image_set is not None
+            if image_set.previous_image_set_receipt_digest != (
+                previous_image_set.receipt_digest
+            ):
+                raise ValueError("regen image set does not bind prior sealed image set")
+            images_by_source = {
+                image.source_beat_index: image for image in image_set.images
+            }
+            previous_by_source = {
+                card.source_beat_index: card for card in previous.cards
+            }
+            prior_receipts = {
+                receipt.request.source_beat_index: receipt
+                for receipt in previous_image_set.provider_receipts
+            }
+            output_receipts = {
+                receipt.request.source_beat_index: receipt
+                for receipt in image_set.provider_receipts
+            }
+            for source in set(range(16)) - set(self.paid_source_beat_indices):
+                image = images_by_source[source]
+                if (
+                    previous_by_source[source].selected_artifact.artifact_id
+                    != image.artifact_id
+                    or previous_by_source[source].selected_artifact.artifact_digest
+                    != image.artifact_digest
+                    or output_receipts[source] != prior_receipts[source]
+                ):
+                    raise ValueError("regen replaced an unpaid image artifact")
+        if _parse_utc(self.completed_at_utc) < _parse_utc(image_set.completed_at_utc):
+            raise ValueError("completed_at_utc precedes output image set completion")
+        if self.receipt_digest != (
+            derive_storyboard_phase_a_completion_receipt_digest_v1(self)
+        ):
+            raise ValueError("receipt_digest does not match Phase-A completion")
+        return self
+
+    def binds_paid_operations(
+        self,
+        authority: object,
+        operation_proofs: tuple[object, ...],
+    ) -> bool:
+        return self.output_image_set_receipt.binds_paid_operations(
+            authority,
+            operation_proofs,
+            previous_image_set=self.input_image_set_receipt,
+        )
+
+
+class StoryboardPhaseACompletionSummaryV1(BaseModel):
+    """Browser-safe digest projection of the server-only Phase-A proof."""
+
+    model_config = _STRICT_FROZEN
+
+    contract_version: Literal["StoryboardPhaseACompletionSummary.v1"]
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    purpose: Literal["storyboard_draft", "storyboard_regen"]
+    plan_digest: DigestStr
+    paid_budget_authority_digest: DigestStr
+    max_total_cost_microunits: int = Field(gt=0)
+    currency: Literal["USD"]
+    output_storyboard_revision: int = Field(ge=1)
+    output_storyboard_digest: DigestStr
+    output_image_set_receipt_digest: DigestStr
+    output_storyboard_carrier_digest: DigestStr
+    image_count: Literal[16]
+    completed_at_utc: UtcTimestamp
+    completion_receipt_digest: DigestStr
+    summary_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_summary_digest(self) -> "StoryboardPhaseACompletionSummaryV1":
+        if self.summary_digest != (
+            derive_storyboard_phase_a_completion_summary_digest_v1(self)
+        ):
+            raise ValueError("summary_digest does not match Phase-A summary")
+        return self
+
+    @classmethod
+    def from_completion(
+        cls,
+        completion: StoryboardPhaseACompletionReceiptV1,
+        *,
+        authority: object,
+        operation_proofs: tuple[object, ...],
+    ) -> "StoryboardPhaseACompletionSummaryV1":
+        if not completion.binds_paid_operations(authority, operation_proofs):
+            raise ValueError(
+                "Phase-A summary requires verified live or historical operation proof"
+            )
+        body: dict[str, Any] = {
+            "contract_version": "StoryboardPhaseACompletionSummary.v1",
+            "workspace_id": completion.workspace_id,
+            "run_id": completion.run_id,
+            "factory_revision": completion.factory_revision,
+            "purpose": completion.purpose,
+            "plan_digest": completion.plan_digest,
+            "paid_budget_authority_digest": (completion.paid_budget_authority_digest),
+            "max_total_cost_microunits": (
+                completion.paid_budget_authority.max_total_cost_microunits
+            ),
+            "currency": completion.paid_budget_authority.currency,
+            "output_storyboard_revision": (completion.output_storyboard_draft.revision),
+            "output_storyboard_digest": (
+                completion.output_storyboard_draft.draft_digest
+            ),
+            "output_image_set_receipt_digest": (
+                completion.output_image_set_receipt.receipt_digest
+            ),
+            "output_storyboard_carrier_digest": (
+                derive_factory_storyboard_carrier_digest_v1(
+                    completion.output_storyboard_carrier
+                )
+            ),
+            "image_count": 16,
+            "completed_at_utc": completion.completed_at_utc,
+            "completion_receipt_digest": completion.receipt_digest,
+        }
+        body["summary_digest"] = derive_storyboard_phase_a_completion_summary_digest_v1(
+            body
+        )
+        return cls.model_validate(body)
+
+    def binds(
+        self,
+        completion: StoryboardPhaseACompletionReceiptV1,
+        *,
+        authority: object,
+        operation_proofs: tuple[object, ...],
+    ) -> bool:
+        return self == self.from_completion(
+            completion,
+            authority=authority,
+            operation_proofs=operation_proofs,
+        )
+
+
+_StarReelsViewReceiptsV3.model_rebuild()
+
+
 _STAR_REELS_PURPOSE_LABELS_V3 = {
     "storyboard_draft": "스토리보드 이미지 16장",
     "storyboard_regen": "선택 이미지 재생성",
@@ -491,7 +842,7 @@ class StarReelsBudgetV3(BaseModel):
     all_beat_count: Literal[16]
     storyboard_scene_count: int | None = Field(ge=1, le=16)
     paid_budget_authority_digest: DigestStr | None
-    storyboard_scene_video_set_receipt: StoryboardSceneVideoSetReceiptV1 | None
+    storyboard_scene_video_set_summary: StoryboardSceneVideoSetSummaryV1 | None
 
     @model_validator(mode="after")
     def _bind_purpose_label_and_paid_call_mask(self) -> "StarReelsBudgetV3":
@@ -516,16 +867,16 @@ class StarReelsBudgetV3(BaseModel):
         }
         if observed != expected:
             raise ValueError("paid call mask does not match purpose")
-        scene_video_set = self.storyboard_scene_video_set_receipt
+        scene_video_set = self.storyboard_scene_video_set_summary
         if self.purpose != "final_production" and scene_video_set is not None:
-            raise ValueError("storyboard budget cannot carry scene video receipt")
+            raise ValueError("storyboard budget cannot carry scene video summary")
         if scene_video_set is not None and (
             self.paid_budget_authority_digest is None
             or scene_video_set.storyboard_scene_count != self.storyboard_scene_count
             or scene_video_set.final_production_authority_digest
             != self.paid_budget_authority_digest
         ):
-            raise ValueError("scene video receipt does not match final paid budget")
+            raise ValueError("scene video summary does not match final paid budget")
         return self
 
 
@@ -592,6 +943,7 @@ class StarReelsViewV3(BaseModel):
             self._bind_production_budget_gate()
         else:
             self._bind_two_stage_run()
+        self._bind_phase_a_completion_summary()
         self._bind_paid_budget_evidence()
         self._bind_factory_receipt_provider_state()
         return self
@@ -767,9 +1119,9 @@ class StarReelsViewV3(BaseModel):
             raise ValueError("active state requires progress receipt")
         if self.status == "ready" and not isinstance(
             self.receipts.factory,
-            ReelsFactoryReceiptV3,
+            ReelsFactoryCompletionSummaryV3,
         ):
-            raise ValueError("ready state requires final factory receipt")
+            raise ValueError("ready state requires final factory summary")
 
     def _bind_paid_budget_evidence(self) -> None:
         approval = self.receipts.paid_budget_approval_receipt
@@ -813,11 +1165,13 @@ class StarReelsViewV3(BaseModel):
             raise ValueError("paid authority does not bind the current view budget")
 
         pointer = self.storyboard
-        if authority.purpose == "storyboard_regen" and (
-            pointer is None
-            or authority.storyboard_draft_digest != pointer.storyboard_digest
-        ):
-            raise ValueError("regen authority does not bind current storyboard")
+        if authority.purpose == "storyboard_regen":
+            if pointer is None:
+                raise ValueError("regen authority requires current storyboard")
+            if self.status == "storyboard_generating" and (
+                authority.storyboard_draft_digest != pointer.storyboard_digest
+            ):
+                raise ValueError("regen authority does not bind current storyboard")
         if authority.purpose == "final_production" and (
             pointer is None
             or authority.storyboard_draft_digest != pointer.storyboard_digest
@@ -844,7 +1198,7 @@ class StarReelsViewV3(BaseModel):
                 raise ValueError(
                     "factory receipt execution manifest does not match storyboard"
                 )
-        elif isinstance(factory, ReelsFactoryReceiptV3):
+        elif isinstance(factory, ReelsFactoryCompletionSummaryV3):
             if (
                 authority.purpose != "final_production"
                 or pointer is None
@@ -858,6 +1212,54 @@ class StarReelsViewV3(BaseModel):
             ):
                 raise ValueError("factory success does not bind final paid authority")
 
+    def _bind_phase_a_completion_summary(self) -> None:
+        summary = self.receipts.storyboard_phase_a_completion_summary
+        if self.section in {
+            "LockGate",
+            "ScriptReview",
+            "PlanReview",
+        } or self.status == ("storyboard_generating"):
+            if summary is not None:
+                raise ValueError(
+                    "pre-completion state cannot carry Phase-A completion summary"
+                )
+            return
+        if summary is None:
+            raise ValueError("post-Phase-A state requires Phase-A completion summary")
+        pointer = self.storyboard
+        if pointer is None:
+            raise ValueError("Phase-A completion summary requires storyboard pointer")
+        if (
+            summary.output_image_set_receipt_digest != pointer.image_set_receipt_digest
+            or pointer.storyboard_revision < summary.output_storyboard_revision
+        ):
+            raise ValueError("Phase-A completion does not bind storyboard lineage")
+        if pointer.storyboard_revision == summary.output_storyboard_revision and (
+            pointer.storyboard_digest != summary.output_storyboard_digest
+        ):
+            raise ValueError("Phase-A completion does not bind current storyboard")
+        if self.section == "StoryboardReview":
+            authority = self.receipts.paid_budget_authority
+            if (
+                summary.purpose != self.budget.purpose
+                or authority is None
+                or summary.paid_budget_authority_digest != authority.authority_digest
+            ):
+                raise ValueError("Phase-A completion does not bind image authority")
+            if pointer.storyboard_revision == summary.output_storyboard_revision:
+                unapproved_pointer = FactoryStoryboardCarrierV1(
+                    contract_version="FactoryStoryboardCarrier.v1",
+                    storyboard_revision=pointer.storyboard_revision,
+                    storyboard_digest=pointer.storyboard_digest,
+                    image_set_receipt_digest=pointer.image_set_receipt_digest,
+                    approval_receipt_digest=None,
+                    execution_manifest_digest=None,
+                )
+                if summary.output_storyboard_carrier_digest != (
+                    derive_factory_storyboard_carrier_digest_v1(unapproved_pointer)
+                ):
+                    raise ValueError("Phase-A completion carrier digest drifted")
+
     def _bind_factory_receipt_provider_state(self) -> None:
         factory = self.receipts.factory
         if isinstance(factory, ReelsFactoryFailureReceiptV3):
@@ -868,21 +1270,24 @@ class StarReelsViewV3(BaseModel):
                 if sum(factory.provider_attempts.model_dump().values()) > 0
                 else "none"
             )
-        elif isinstance(factory, ReelsFactoryReceiptV3):
+        elif isinstance(factory, ReelsFactoryCompletionSummaryV3):
             expected_provider_call = "confirmed"
-            scene_video_set = self.budget.storyboard_scene_video_set_receipt
+            scene_video_set = self.budget.storyboard_scene_video_set_summary
             pointer = self.storyboard
             if (
                 scene_video_set is None
                 or pointer is None
-                or not factory.binds_scene_video_set(scene_video_set)
+                or factory.storyboard_scene_video_set_receipt_digest
+                != scene_video_set.scene_video_set_receipt_digest
+                or factory.storyboard_scene_video_set_summary_digest
+                != scene_video_set.summary_digest
                 or factory.paid_budget_authority_digest
                 != self.budget.paid_budget_authority_digest
                 or factory.storyboard_execution_manifest_digest
                 != pointer.execution_manifest_digest
             ):
                 raise ValueError(
-                    "sealed scene video budget does not match ready receipt"
+                    "sealed scene video budget does not match ready summary"
                 )
         else:
             expected_provider_call = None
@@ -895,10 +1300,15 @@ class StarReelsViewV3(BaseModel):
 
 __all__ = [
     "FactoryStoryboardCarrierV1",
+    "StoryboardPhaseACompletionReceiptV1",
+    "StoryboardPhaseACompletionSummaryV1",
     "StarReelsBudgetV3",
     "StarReelsViewV1",
     "StarReelsViewV2",
     "StarReelsViewV3",
     "_StarReelsBudgetMultiBeatV1",
+    "derive_factory_storyboard_carrier_digest_v1",
+    "derive_storyboard_phase_a_completion_receipt_digest_v1",
+    "derive_storyboard_phase_a_completion_summary_digest_v1",
     "derive_star_product_lock_review_digest_v1",
 ]

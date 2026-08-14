@@ -101,6 +101,10 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "hiob_contracts.storyboard_two_stage_v1",
         "FactoryPaidBudgetResolutionV2",
     ),
+    "FactoryPaidOperationHistoricalEvidenceV2": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "FactoryPaidOperationHistoricalEvidenceV2",
+    ),
     "FactoryCostProfile": (
         "hiob_contracts.storyboard_two_stage_v1",
         "FactoryCostProfileV1",
@@ -117,9 +121,29 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "hiob_contracts.storyboard_two_stage_v1",
         "StoryboardImageArtifactRefV1",
     ),
+    "AthenaFramePlanReceipt": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "AthenaFramePlanReceiptV1",
+    ),
+    "StoryboardImageProviderRequest": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardImageProviderRequestV1",
+    ),
+    "StoryboardImageProviderReceipt": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardImageProviderReceiptV1",
+    ),
     "StoryboardImageSetReceipt": (
         "hiob_contracts.storyboard_two_stage_v1",
         "StoryboardImageSetReceiptV1",
+    ),
+    "StoryboardPhaseACompletionReceipt": (
+        "hiob_contracts.star_reels_view_v1",
+        "StoryboardPhaseACompletionReceiptV1",
+    ),
+    "StoryboardPhaseACompletionSummary": (
+        "hiob_contracts.star_reels_view_v1",
+        "StoryboardPhaseACompletionSummaryV1",
     ),
     "StoryboardScene": (
         "hiob_contracts.storyboard_two_stage_v1",
@@ -137,6 +161,14 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "hiob_contracts.storyboard_two_stage_v1",
         "StoryboardSceneVideoSetReceiptV1",
     ),
+    "StoryboardSceneVideoSetSummary": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardSceneVideoSetSummaryV1",
+    ),
+    "StoryboardBeatCaption": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardBeatCaptionV1",
+    ),
     "StoryboardSceneFanInManifest": (
         "hiob_contracts.storyboard_two_stage_v1",
         "StoryboardSceneFanInManifestV1",
@@ -144,6 +176,10 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "ReelsFactoryReceiptV3": (
         "hiob_contracts.storyboard_two_stage_v1",
         "ReelsFactoryReceiptV3",
+    ),
+    "ReelsFactoryCompletionSummaryV3": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "ReelsFactoryCompletionSummaryV3",
     ),
     "StoryboardDraft": (
         "hiob_contracts.storyboard_two_stage_v1",

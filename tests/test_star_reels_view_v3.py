@@ -71,7 +71,7 @@ def _budget(purpose: str) -> dict[str, object]:
         "all_beat_count": 16,
         "storyboard_scene_count": (8 if purpose == "final_production" else None),
         "paid_budget_authority_digest": None,
-        "storyboard_scene_video_set_receipt": None,
+        "storyboard_scene_video_set_summary": None,
     }
 
 
@@ -176,10 +176,11 @@ def _completion_summary(
     carrier: dict[str, object] | None = None,
 ) -> dict[str, object]:
     output = carrier if carrier is not None else _carrier(approved=False)
+    phase_a_authority = _paid_pair(purpose)[1]
     phase_a_authority_digest = (
         authority_digest
         if authority_digest is not None
-        else _paid_pair(purpose)[1].authority_digest
+        else phase_a_authority.authority_digest
     )
     body: dict[str, object] = {
         "contract_version": "StoryboardPhaseACompletionSummary.v1",
@@ -189,6 +190,8 @@ def _completion_summary(
         "purpose": purpose,
         "plan_digest": DIGEST_C,
         "paid_budget_authority_digest": phase_a_authority_digest,
+        "max_total_cost_microunits": phase_a_authority.max_total_cost_microunits,
+        "currency": "USD",
         "output_storyboard_revision": output["storyboard_revision"],
         "output_storyboard_digest": output["storyboard_digest"],
         "output_image_set_receipt_digest": output["image_set_receipt_digest"],

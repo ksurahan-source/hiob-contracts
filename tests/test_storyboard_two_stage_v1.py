@@ -123,13 +123,32 @@ def _sealed(
 
 def _ares_revision_pair(
     *,
-    text_prefix: str = "immutable beat text",
+    text_prefix: str | None = None,
 ) -> tuple[Any, Any]:
     script_revision_id = "00000000-0000-4000-8000-000000000010"
     plan_revision_id = "00000000-0000-4000-8000-000000000011"
     candidate_id = "00000000-0000-4000-8000-000000000012"
-    segments = [
-        {"beat_index": index, "text": f"{text_prefix} {index}"} for index in range(16)
+    voice_segments = [
+        {
+            "beat_index": index,
+            "text": (
+                f"{text_prefix} voice {index}"
+                if text_prefix is not None
+                else f"immutable voice text {index}"
+            ),
+        }
+        for index in range(16)
+    ]
+    caption_segments = [
+        {
+            "beat_index": index,
+            "text": (
+                f"{text_prefix} caption {index}"
+                if text_prefix is not None
+                else f"on-screen caption {index}"
+            ),
+        }
+        for index in range(16)
     ]
     package_body: dict[str, Any] = {
         "contract_version": "AresScriptPackage.v1",
@@ -139,8 +158,8 @@ def _ares_revision_pair(
         "candidate_id": candidate_id,
         "factory_revision": 7,
         "master_sales_script": {"title": "sixteen beat storyboard"},
-        "voice_script": segments,
-        "caption_script": segments,
+        "voice_script": voice_segments,
+        "caption_script": caption_segments,
         "pronunciation_overrides": {},
     }
     package_body["package_digest"] = canonical_contract_digest_v1(package_body)
@@ -166,8 +185,8 @@ def _ares_revision_pair(
         "beats": [
             {
                 "beat_index": index,
-                "text": f"{text_prefix} {index}",
-                "caption": f"{text_prefix} {index}",
+                "text": voice_segments[index]["text"],
+                "caption": caption_segments[index]["text"],
                 "scene_direction": {
                     "shot": "MCU",
                     "subject": "approved subject",
@@ -469,17 +488,23 @@ def _card(
     sequence_index: int,
     *,
     image: StoryboardImageArtifactRefV1,
+    plan_digest: str = PLAN_DIGEST,
     **changes: Any,
 ) -> dict[str, Any]:
-    beat_text = f"immutable beat text {source_beat_index}"
+    voice_text = f"immutable voice text {source_beat_index}"
+    caption_text = f"on-screen caption {source_beat_index}"
     body: dict[str, Any] = {
         "contract_version": "StoryboardCard.v1",
         "source_beat_index": source_beat_index,
         "sequence_index": sequence_index,
         "scene_id": f"scene-{source_beat_index // 2:02d}",
-        "beat_text": beat_text,
+        "voice_text": voice_text,
+        "caption_text": caption_text,
         "beat_identity_digest": derive_storyboard_beat_identity_digest_v1(
-            PLAN_DIGEST, source_beat_index, beat_text
+            plan_digest,
+            source_beat_index,
+            voice_text,
+            caption_text,
         ),
         "prompt_override": None,
         "crop_mode": "cover",
@@ -506,7 +531,12 @@ def _cards(
     source_order = order if order is not None else list(range(16))
     images = {image.source_beat_index: image for image in image_set.images}
     return [
-        _card(source, sequence, image=images[source])
+        _card(
+            source,
+            sequence,
+            image=images[source],
+            plan_digest=image_set.plan_digest,
+        )
         for sequence, source in enumerate(source_order)
     ]
 
@@ -525,7 +555,7 @@ def _draft(
         "workspace_id": WORKSPACE_ID,
         "run_id": RUN_ID,
         "factory_revision": 7,
-        "plan_digest": PLAN_DIGEST,
+        "plan_digest": image_set.plan_digest,
         "image_set_receipt_digest": image_set.receipt_digest,
         "revision": revision,
         "parent_draft_digest": parent_draft_digest,
@@ -551,7 +581,7 @@ def _approval(
         "workspace_id": WORKSPACE_ID,
         "run_id": RUN_ID,
         "factory_revision": 7,
-        "plan_digest": PLAN_DIGEST,
+        "plan_digest": draft.plan_digest,
         "draft_id": draft.draft_id,
         "draft_revision": draft.revision,
         "storyboard_draft_digest": draft.draft_digest,
@@ -742,6 +772,7 @@ def _authority_bound_to_receipt(
 ) -> dict[str, Any]:
     body = _authority(
         receipt.purpose,
+        plan_digest=receipt.plan_digest,
         image_source_beat_indices=list(receipt.image_source_beat_indices),
         storyboard_draft_digest=receipt.storyboard_draft_digest,
         storyboard_approval_receipt_digest=(receipt.storyboard_approval_receipt_digest),
@@ -890,6 +921,10 @@ def _image_set_for_paid_receipt(
     paid_receipt: FactoryPaidBudgetApprovalReceiptV2,
     *,
     previous_image_set: StoryboardImageSetReceiptV1 | None = None,
+    plan_digest: str = PLAN_DIGEST,
+    ares_script_revision_digest: str = ARES_SCRIPT_REVISION_DIGEST,
+    ares_beat_plan_revision_digest: str = ARES_BEAT_PLAN_REVISION_DIGEST,
+    athena_frame_plan_receipt_digest: str | None = None,
 ) -> StoryboardImageSetReceiptV1:
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(paid_receipt)
@@ -910,6 +945,10 @@ def _image_set_for_paid_receipt(
             purpose=authority.purpose,
             paid_budget_authority_digest=authority.authority_digest,
             authority_idempotency_key=authority.idempotency_key,
+            plan_digest=plan_digest,
+            ares_script_revision_digest=ares_script_revision_digest,
+            ares_beat_plan_revision_digest=ares_beat_plan_revision_digest,
+            athena_frame_plan_receipt_digest=athena_frame_plan_receipt_digest,
         )
         receipts.append(_image_provider_receipt(request, source_beat_index))
     images = [_image_from_provider_receipt(receipt) for receipt in receipts]
@@ -928,6 +967,7 @@ def _image_set_for_paid_receipt(
             if previous_image_set is not None
             else None
         ),
+        plan_digest=plan_digest,
     )
 
 
@@ -953,12 +993,17 @@ def _phase_a_completion(
     input_draft: StoryboardDraftV1 | None = None,
     input_image_set: StoryboardImageSetReceiptV1 | None = None,
 ) -> Any:
+    script_revision, plan_revision = _ares_revision_pair()
+    athena_receipt = _athena_frame_plan_receipt(script_revision, plan_revision)
     selected = list(range(16)) if purpose == "storyboard_draft" else [0]
     paid_receipt = _paid_approval_receipt_v2(
         purpose,
         image_source_beat_indices=selected,
         **(
-            {"storyboard_draft_digest": input_draft.draft_digest}
+            {
+                "plan_digest": input_draft.plan_digest,
+                "storyboard_draft_digest": input_draft.draft_digest,
+            }
             if input_draft is not None
             else {}
         ),
@@ -969,6 +1014,10 @@ def _phase_a_completion(
     output_image_set = _image_set_for_paid_receipt(
         paid_receipt,
         previous_image_set=input_image_set,
+        plan_digest=plan_revision.revision_digest,
+        ares_script_revision_digest=script_revision.revision_digest,
+        ares_beat_plan_revision_digest=plan_revision.revision_digest,
+        athena_frame_plan_receipt_digest=athena_receipt["receipt_digest"],
     )
     output_draft = _draft(
         output_image_set,
@@ -985,9 +1034,11 @@ def _phase_a_completion(
         "run_id": RUN_ID,
         "factory_revision": 7,
         "purpose": purpose,
-        "plan_digest": PLAN_DIGEST,
-        "ares_script_revision_digest": ARES_SCRIPT_REVISION_DIGEST,
-        "ares_beat_plan_revision_digest": ARES_BEAT_PLAN_REVISION_DIGEST,
+        "plan_digest": plan_revision.revision_digest,
+        "ares_script_revision_digest": script_revision.revision_digest,
+        "ares_beat_plan_revision_digest": plan_revision.revision_digest,
+        "ares_script_revision": script_revision,
+        "ares_beat_plan_revision": plan_revision,
         "paid_budget_approval_receipt": paid_receipt,
         "paid_budget_authority": authority,
         "paid_budget_authority_digest": authority.authority_digest,
@@ -1019,7 +1070,7 @@ def _manifest(
         "workspace_id": WORKSPACE_ID,
         "run_id": RUN_ID,
         "factory_revision": 7,
-        "plan_digest": PLAN_DIGEST,
+        "plan_digest": draft.plan_digest,
         "draft_id": draft.draft_id,
         "draft_revision": draft.revision,
         "storyboard_draft_digest": draft.draft_digest,
@@ -1245,7 +1296,7 @@ def _scene_video_set(
         "workspace_id": WORKSPACE_ID,
         "run_id": RUN_ID,
         "factory_revision": 7,
-        "plan_digest": PLAN_DIGEST,
+        "plan_digest": manifest.plan_digest,
         "storyboard_execution_manifest_digest": manifest.manifest_digest,
         "final_production_authority_digest": final_authority.authority_digest,
         "storyboard_scene_count": len(manifest.scenes),
@@ -1303,7 +1354,7 @@ def _scene_fan_in(
             "contract_version": "StoryboardBeatCaption.v1",
             "source_beat_index": card.source_beat_index,
             "sequence_index": card.sequence_index,
-            "text_content": card.beat_text,
+            "text_content": card.caption_text,
             "duration_ms": 4_000,
         }
         caption["caption_digest"] = (
@@ -1315,7 +1366,7 @@ def _scene_fan_in(
         "workspace_id": WORKSPACE_ID,
         "run_id": RUN_ID,
         "factory_revision": 7,
-        "plan_digest": PLAN_DIGEST,
+        "plan_digest": manifest.plan_digest,
         "paid_budget_authority_digest": final_authority.authority_digest,
         "storyboard_execution_manifest_digest": manifest.manifest_digest,
         "storyboard_scene_video_set_receipt": scene_video_set,
@@ -1397,7 +1448,7 @@ def _factory_receipt_v3(
         "workspace_id": WORKSPACE_ID,
         "run_id": RUN_ID,
         "factory_revision": 7,
-        "plan_digest": PLAN_DIGEST,
+        "plan_digest": manifest.plan_digest,
         "paid_budget_authority_digest": final_authority.authority_digest,
         "storyboard_execution_manifest_digest": manifest.manifest_digest,
         "storyboard_scene_video_set_receipt_digest": scene_video_set.receipt_digest,
@@ -2051,15 +2102,25 @@ def test_draft_separates_immutable_source_identity_from_editor_sequence() -> Non
     assert revised.cards[0].scene_id == draft.cards[15].scene_id
 
 
-def test_successor_rejects_immutable_beat_retarget() -> None:
+@pytest.mark.parametrize("field", ["voice_text", "caption_text"])
+def test_successor_rejects_one_sided_immutable_beat_retarget(field: str) -> None:
     image_set = _image_set()
     original = _draft(image_set)
     cards = _cards(image_set)
-    changed_text = "retargeted beat text"
+    voice_text = "immutable voice text 0"
+    caption_text = "on-screen caption 0"
+    if field == "voice_text":
+        voice_text = "retargeted voice text"
+    else:
+        caption_text = "retargeted caption text"
     changes = {
-        "beat_text": changed_text,
+        "voice_text": voice_text,
+        "caption_text": caption_text,
         "beat_identity_digest": derive_storyboard_beat_identity_digest_v1(
-            PLAN_DIGEST, 0, changed_text
+            PLAN_DIGEST,
+            0,
+            voice_text,
+            caption_text,
         ),
     }
     cards[0] = _card(0, 0, image=image_set.images[0], **changes)
@@ -2168,13 +2229,15 @@ def test_beat_identity_uses_hosted_db_purpose_envelope() -> None:
     assert derive_storyboard_beat_identity_digest_v1(
         PLAN_DIGEST,
         3,
-        "immutable beat text 3",
+        "immutable voice text 3",
+        "on-screen caption 3",
     ) == canonical_contract_digest_v1(
         {
             "purpose": "storyboard-beat-identity.v1",
             "plan_digest": PLAN_DIGEST,
             "source_beat_index": 3,
-            "beat_text": "immutable beat text 3",
+            "voice_text": "immutable voice text 3",
+            "caption_text": "on-screen caption 3",
         }
     )
 
@@ -3310,7 +3373,6 @@ def test_scene_video_set_rejects_repeat_or_video_alias_tampering() -> None:
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(paid_receipt)
     )
-    verified = _verified_paid_authority_v2(paid_receipt)
     manifest = _manifest(
         draft,
         image_set,
@@ -3637,6 +3699,7 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
     approval = _approval(draft, image_set)
     paid_receipt = _paid_approval_receipt_v2(
         "final_production",
+        plan_digest=draft.plan_digest,
         storyboard_draft_digest=draft.draft_digest,
         storyboard_approval_receipt_digest=approval.receipt_digest,
     )
@@ -4036,6 +4099,65 @@ def test_historical_image_evidence_is_reconciliation_only_and_binds_completion()
             resolver=rejected,
         )
 
+    first_receipt = completion.output_image_set_receipt.provider_receipts[0]
+    null_external_id = _historical_paid_operation_evidence(
+        resolution=resolution,
+        receipt=first_receipt,
+    )
+    null_external_id["provider_operation_id"] = None
+    null_external_id["evidence_digest"] = (
+        hiob_contracts.derive_factory_paid_operation_historical_evidence_digest_v2(
+            null_external_id
+        )
+    )
+    with pytest.raises(ValidationError, match="provider_operation_id"):
+        hiob_contracts.FactoryPaidOperationHistoricalEvidenceV2.model_validate(
+            null_external_id
+        )
+
+    track_swap = _historical_paid_operation_evidence(
+        resolution=resolution,
+        receipt=first_receipt,
+    )
+    track_swap["operation"] = "video"
+    track_swap["evidence_digest"] = (
+        hiob_contracts.derive_factory_paid_operation_historical_evidence_digest_v2(
+            track_swap
+        )
+    )
+    with pytest.raises(
+        ValidationError,
+        match="historical evidence|paid resolution|paid scope|video.*scope",
+    ):
+        hiob_contracts.FactoryPaidOperationHistoricalEvidenceV2.model_validate(
+            track_swap
+        )
+
+    cross_claim = _historical_paid_operation_evidence(
+        resolution=resolution,
+        receipt=first_receipt,
+    )
+    cross_claim["provider_operation_id"] = (
+        completion.output_image_set_receipt.provider_receipts[1].provider_task_id
+    )
+    cross_claim["evidence_digest"] = (
+        hiob_contracts.derive_factory_paid_operation_historical_evidence_digest_v2(
+            cross_claim
+        )
+    )
+    cross_capability = (
+        hiob_contracts.FactoryPaidOperationHistoricalEvidenceV2.from_verified(
+            cross_claim,
+            resolver=_PaidOperationEvidenceResolverV2(),
+        )
+    )
+    with pytest.raises(ValueError, match="historical evidence"):
+        hiob_contracts.StoryboardImageProviderReceiptV1.from_historical_evidence(
+            first_receipt,
+            request=first_receipt.request,
+            evidence=cross_capability,
+        )
+
 
 def test_historical_scene_evidence_binds_terminal_chain_without_provider_authority() -> (
     None
@@ -4185,7 +4307,7 @@ def test_scene_fan_in_binds_exact_sixteen_approved_beat_captions() -> None:
         card.source_beat_index for card in manifest.cards
     ]
     assert [caption.text_content for caption in fan_in.captions] == [
-        card.beat_text for card in manifest.cards
+        card.caption_text for card in manifest.cards
     ]
     assert fan_in.caption_set_digest == (
         hiob_contracts.derive_storyboard_caption_set_digest_v1(fan_in.captions)
@@ -4208,8 +4330,7 @@ def test_scene_fan_in_binds_exact_sixteen_approved_beat_captions() -> None:
 
 def test_storyboard_card_separates_immutable_voice_and_caption_truth() -> None:
     image_set = _image_set()
-    payload = _card(0, 0, image=image_set.images[0]).model_dump(mode="json")
-    payload.pop("beat_text")
+    payload = _card(0, 0, image=image_set.images[0])
     payload["voice_text"] = "spoken dialogue for voice"
     payload["caption_text"] = "short on-screen caption"
     payload["beat_identity_digest"] = derive_storyboard_beat_identity_digest_v1(
@@ -4223,7 +4344,7 @@ def test_storyboard_card_separates_immutable_voice_and_caption_truth() -> None:
     card = hiob_contracts.StoryboardCardV1.model_validate(payload)
 
     assert card.voice_text != card.caption_text
-    assert "beat_text" not in card.model_fields
+    assert "beat_text" not in hiob_contracts.StoryboardCardV1.model_fields
     assert card.beat_identity_digest == derive_storyboard_beat_identity_digest_v1(
         PLAN_DIGEST,
         card.source_beat_index,
@@ -4262,39 +4383,43 @@ def test_canonical_digest_vector_is_stable_across_db_and_runtime_ports() -> None
 
     assert (
         image_set.receipt_digest
-        == "sha256:7ea540078dca90d90a33ef05c521c4dc3e1912775493a6bd6a60c80bff0940a6"
+        == "sha256:06e7d5e9c48fb0d2ea6888687ee81060a956de0afbac2d3e2bdd28531052a10d"
     )
     assert (
         draft.draft_digest
-        == "sha256:75467b94a2cb8ec8a163f875c3bfd4df3cbac1c3e9607f2f56cf1ac7ae28fba8"
+        == "sha256:2b90fa5e1c9c3a421a5c5f3c3139f97384b576d8dc1680e781db002b600c2cc2"
     )
     assert (
         approval.receipt_digest
-        == "sha256:6742980902ac7679df57e7054761ab386d6a53c0968a64be937d20ad858f0e4d"
+        == "sha256:ac1646e616f5b2b6d45c3dabd0f6cb358b6a64ebfc27564306d8e200f704779f"
     )
     assert (
         paid_receipt.approval_subject_digest
-        == "sha256:bc272e590ad0e06bf571ef15981d9719b96c57c568248a6c141ee1baeb4bfa2b"
+        == "sha256:6e0e3ae9d76c5334aa7609fe220e687eeaa0a69b28000eded5f6158166b66d6a"
     )
     assert (
         paid_receipt.receipt_digest
-        == "sha256:bd5bf0484ec54d3eaca6f80d270345d26b72315f9f6ebe972ecd4a9c8a5032cf"
+        == "sha256:553bfb3f67b73fd2ab97c83bd36798a4cb83523622739102c7af7f9c5164cf79"
     )
     assert (
         authority.idempotency_key
-        == "sha256:b9cf4c7cd70dab409203bda63db47e5cb518dd3b0e2659abe3ed1412ae191a38"
+        == "sha256:1dd7dfb3d7f596aaf85b3300b6c4eefd0cc91aa76eb999d784836b38475e4553"
     )
     assert (
         authority.authority_digest
-        == "sha256:568e8623cae6ba693ecfbf7fc4e1059b4eba1a78f0c5cff9f442692ed2975ade"
+        == "sha256:a2e9368f3e78a48cbec22f964a5edd3be3e43caa564516b2f8dc1214b70e99cf"
     )
     assert (
         manifest.manifest_digest
-        == "sha256:c825f1bcfb0b114322c1026e67a4697cb54abe60adf4e9bcc42f2f3b4627b6b3"
+        == "sha256:2678b9873cea91be74e2b8e6b467acfff84e1a6ea2be63f43c5fd5cb326dac74"
     )
     assert (
         manifest.scenes[0].scene_digest
-        == "sha256:e03ac098953cddea4e179f40874a788c5d5a58c0b8d5b24c35f13ebe82f6acb7"
+        == "sha256:c300e9511088338da511ddc58d583730ec99736a8d10262cdc39173862dc2ed9"
+    )
+    assert (
+        draft.cards[0].beat_identity_digest
+        == "sha256:55662c1fdb37d355915a24b888be45c08023ae493b4ffae1df1947904dc2cb58"
     )
 
 

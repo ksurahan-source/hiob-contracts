@@ -14,12 +14,15 @@ from __future__ import annotations
 
 from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal, Mapping, Protocol
+from uuid import NAMESPACE_URL, uuid5
 from weakref import WeakKeyDictionary
 
 from pydantic import (
     AfterValidator,
     BaseModel,
     Field,
+    JsonValue,
+    StrictBool,
     StringConstraints,
     field_validator,
     model_validator,
@@ -32,6 +35,8 @@ from .all_beat_video import (
     _assert_https_url,
 )
 from .ares_script_revision_v1 import (
+    AresBeatPlanRevisionV1,
+    AresScriptRevisionV1,
     DigestStr,
     NonBlankStr,
     NonNegativeInt,
@@ -44,6 +49,12 @@ from .ares_script_revision_v1 import (
 
 
 STORYBOARD_IMAGE_ARTIFACT_REF_VERSION_V1 = "StoryboardImageArtifactRef.v1"
+ATHENA_FRAME_PLAN_RECEIPT_VERSION_V1 = "AthenaFramePlanReceipt.v1"
+STORYBOARD_IMAGE_PROVIDER_REQUEST_VERSION_V1 = "StoryboardImageProviderRequest.v1"
+STORYBOARD_IMAGE_PROVIDER_RECEIPT_VERSION_V1 = "StoryboardImageProviderReceipt.v1"
+FACTORY_PAID_OPERATION_HISTORICAL_EVIDENCE_VERSION_V2 = (
+    "FactoryPaidOperationHistoricalEvidence.v2"
+)
 STORYBOARD_IMAGE_SET_RECEIPT_VERSION_V1 = "StoryboardImageSetReceipt.v1"
 STORYBOARD_CARD_VERSION_V1 = "StoryboardCard.v1"
 STORYBOARD_SCENE_VERSION_V1 = "StoryboardScene.v1"
@@ -53,9 +64,15 @@ STORYBOARD_BEAT_SCENE_VIDEO_PROJECTION_VERSION_V1 = (
     "StoryboardBeatSceneVideoProjection.v1"
 )
 STORYBOARD_SCENE_VIDEO_SET_RECEIPT_VERSION_V1 = "StoryboardSceneVideoSetReceipt.v1"
+STORYBOARD_SCENE_VIDEO_SET_SUMMARY_VERSION_V1 = "StoryboardSceneVideoSetSummary.v1"
+STORYBOARD_BEAT_SCENE_PROJECTION_SUMMARY_VERSION_V1 = (
+    "StoryboardBeatSceneProjectionSummary.v1"
+)
+STORYBOARD_BEAT_CAPTION_VERSION_V1 = "StoryboardBeatCaption.v1"
 STORYBOARD_SCENE_FAN_IN_MANIFEST_VERSION_V1 = "StoryboardSceneFanInManifest.v1"
 STORYBOARD_SCENE_VIDEO_REQUEST_VERSION_V1 = "StoryboardSceneVideoRequest.v1"
 REELS_FACTORY_RECEIPT_VERSION_V3 = "ReelsFactoryReceipt.v3"
+REELS_FACTORY_COMPLETION_SUMMARY_VERSION_V3 = "ReelsFactoryCompletionSummary.v3"
 REELS_FACTORY_PROGRESS_RECEIPT_VERSION_V3 = "ReelsFactoryProgressReceipt.v3"
 REELS_FACTORY_FAILURE_RECEIPT_VERSION_V3 = "ReelsFactoryFailureReceipt.v3"
 FACTORY_COST_PROFILE_VERSION_V1 = "FactoryCostProfile.v1"
@@ -67,6 +84,12 @@ FACTORY_PAID_BUDGET_APPROVAL_RECEIPT_VERSION_V2 = "FactoryPaidBudgetApprovalRece
 
 STORYBOARD_CONTRACT_VERSIONS_V1 = {
     "image_artifact_ref": STORYBOARD_IMAGE_ARTIFACT_REF_VERSION_V1,
+    "athena_frame_plan_receipt": ATHENA_FRAME_PLAN_RECEIPT_VERSION_V1,
+    "image_provider_request": STORYBOARD_IMAGE_PROVIDER_REQUEST_VERSION_V1,
+    "image_provider_receipt": STORYBOARD_IMAGE_PROVIDER_RECEIPT_VERSION_V1,
+    "paid_operation_historical_evidence": (
+        FACTORY_PAID_OPERATION_HISTORICAL_EVIDENCE_VERSION_V2
+    ),
     "image_set_receipt": STORYBOARD_IMAGE_SET_RECEIPT_VERSION_V1,
     "card": STORYBOARD_CARD_VERSION_V1,
     "scene": STORYBOARD_SCENE_VERSION_V1,
@@ -74,9 +97,15 @@ STORYBOARD_CONTRACT_VERSIONS_V1 = {
     "scene_video_receipt": STORYBOARD_SCENE_VIDEO_RECEIPT_VERSION_V1,
     "beat_scene_video_projection": (STORYBOARD_BEAT_SCENE_VIDEO_PROJECTION_VERSION_V1),
     "scene_video_set_receipt": STORYBOARD_SCENE_VIDEO_SET_RECEIPT_VERSION_V1,
+    "scene_video_set_summary": STORYBOARD_SCENE_VIDEO_SET_SUMMARY_VERSION_V1,
+    "beat_scene_projection_summary": (
+        STORYBOARD_BEAT_SCENE_PROJECTION_SUMMARY_VERSION_V1
+    ),
+    "beat_caption": STORYBOARD_BEAT_CAPTION_VERSION_V1,
     "scene_fan_in_manifest": STORYBOARD_SCENE_FAN_IN_MANIFEST_VERSION_V1,
     "scene_video_request": STORYBOARD_SCENE_VIDEO_REQUEST_VERSION_V1,
     "reels_factory_receipt": REELS_FACTORY_RECEIPT_VERSION_V3,
+    "reels_factory_completion_summary": REELS_FACTORY_COMPLETION_SUMMARY_VERSION_V3,
     "reels_factory_progress_receipt": REELS_FACTORY_PROGRESS_RECEIPT_VERSION_V3,
     "reels_factory_failure_receipt": REELS_FACTORY_FAILURE_RECEIPT_VERSION_V3,
     "factory_cost_profile": FACTORY_COST_PROFILE_VERSION_V1,
@@ -118,11 +147,12 @@ ArtifactId = Annotated[
     StringConstraints(max_length=240),
     AfterValidator(_non_blank_limited),
 ]
-BeatText = Annotated[
+VoiceText = Annotated[
     str,
     StringConstraints(max_length=2_000),
     AfterValidator(_non_blank_limited),
 ]
+CaptionText = Annotated[str, StringConstraints(max_length=2_000)]
 PromptOverride = Annotated[
     str,
     StringConstraints(max_length=4_000),
@@ -155,6 +185,169 @@ def _derive_digest(
     return canonical_contract_digest_v1(value, exclude={digest_field})
 
 
+def derive_storyboard_image_generation_nonce_v1(
+    *,
+    authority_idempotency_key: str,
+    purpose: FactoryPaidBudgetPurposeV2,
+    source_beat_index: int,
+) -> str:
+    """Return the sole deterministic image nonce for one paid authority slot."""
+
+    if purpose not in {"storyboard_draft", "storyboard_regen"}:
+        raise ValueError("image generation nonce requires a storyboard image purpose")
+    if type(source_beat_index) is not int or not 0 <= source_beat_index < 16:
+        raise ValueError("source_beat_index must be an integer in 0..15")
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            (
+                "hiob:storyboard-image-generation.v1:"
+                f"{authority_idempotency_key}:{purpose}:image:{source_beat_index}"
+            ),
+        )
+    )
+
+
+def derive_storyboard_image_operation_key_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    data = _as_json_dict(value)
+    return (
+        f"reels:{data['workspace_id']}:{data['run_id']}:{data['plan_digest']}:"
+        f"{data['generation_nonce']}:image:{data['source_beat_index']}"
+    )
+
+
+def derive_storyboard_image_provider_request_digest_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    data = _as_json_dict(value)
+    return canonical_contract_digest_v1(
+        {
+            "purpose": "storyboard-image-provider-request.v1",
+            "contract_version": data["contract_version"],
+            "workspace_id": data["workspace_id"],
+            "run_id": data["run_id"],
+            "factory_revision": data["factory_revision"],
+            "budget_purpose": data["purpose"],
+            "plan_digest": data["plan_digest"],
+            "ares_script_revision_digest": data["ares_script_revision_digest"],
+            "ares_beat_plan_revision_digest": data["ares_beat_plan_revision_digest"],
+            "paid_budget_authority_digest": data["paid_budget_authority_digest"],
+            "source_beat_index": data["source_beat_index"],
+            "frame_plan": data["frame_plan"],
+            "athena_frame_plan_receipt_digest": data[
+                "athena_frame_plan_receipt_digest"
+            ],
+            "provider": data["provider"],
+            "model": data["model"],
+            "cost_profile_digest": data["cost_profile_digest"],
+            "pricing_policy_revision": data["pricing_policy_revision"],
+            "generation_nonce": data["generation_nonce"],
+            "operation_key": data["operation_key"],
+        }
+    )
+
+
+def derive_storyboard_image_expected_artifact_id_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    data = _as_json_dict(value)
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            (
+                "hiob:storyboard-image-artifact.v1:"
+                f"{data['operation_key']}:{data['request_digest']}"
+            ),
+        )
+    )
+
+
+def derive_storyboard_image_expected_storage_key_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    data = _as_json_dict(value)
+    return (
+        f"workspaces/{data['workspace_id']}/runs/{data['run_id']}/"
+        f"storyboard/images/{data['source_beat_index']:02d}/"
+        f"{data['expected_artifact_id']}"
+    )
+
+
+def derive_storyboard_image_provider_execution_request_digest_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    data = _as_json_dict(value)
+    return canonical_contract_digest_v1(
+        {
+            "purpose": "storyboard-image-provider-execution-request.v1",
+            "contract_version": data["contract_version"],
+            "workspace_id": data["workspace_id"],
+            "run_id": data["run_id"],
+            "factory_revision": data["factory_revision"],
+            "budget_purpose": data["purpose"],
+            "plan_digest": data["plan_digest"],
+            "ares_script_revision_digest": data["ares_script_revision_digest"],
+            "ares_beat_plan_revision_digest": data["ares_beat_plan_revision_digest"],
+            "paid_budget_authority_digest": data["paid_budget_authority_digest"],
+            "source_beat_index": data["source_beat_index"],
+            "frame_plan": data["frame_plan"],
+            "athena_frame_plan_receipt_digest": data[
+                "athena_frame_plan_receipt_digest"
+            ],
+            "provider": data["provider"],
+            "model": data["model"],
+            "cost_profile_digest": data["cost_profile_digest"],
+            "pricing_policy_revision": data["pricing_policy_revision"],
+            "generation_nonce": data["generation_nonce"],
+            "operation_key": data["operation_key"],
+            "request_digest": data["request_digest"],
+            "expected_artifact_id": data["expected_artifact_id"],
+            "expected_storage_key": data["expected_storage_key"],
+        }
+    )
+
+
+def derive_storyboard_image_provider_idempotency_key_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    data = _as_json_dict(value)
+    return canonical_contract_digest_v1(
+        {
+            "purpose": "storyboard-image-provider-idempotency.v1",
+            "operation_key": data["operation_key"],
+            "execution_request_digest": data["execution_request_digest"],
+        }
+    )
+
+
+def derive_storyboard_image_provider_receipt_digest_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return _derive_digest(value, "receipt_digest")
+
+
+def derive_factory_paid_operation_claim_output_digest_v2(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    """Seal the full typed provider result stored by a completed operation claim."""
+
+    return canonical_contract_digest_v1(_as_json_dict(value))
+
+
+def derive_factory_paid_operation_historical_evidence_digest_v2(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return _derive_digest(value, "evidence_digest")
+
+
+def derive_athena_frame_plan_receipt_digest_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return _derive_digest(value, "receipt_digest")
+
+
 def derive_storyboard_image_artifact_digest_v1(
     value: Mapping[str, Any] | BaseModel,
 ) -> str:
@@ -176,14 +369,16 @@ def derive_storyboard_image_set_receipt_digest_v1(
 def derive_storyboard_beat_identity_digest_v1(
     plan_digest: str,
     source_beat_index: int,
-    beat_text: str,
+    voice_text: str,
+    caption_text: str,
 ) -> str:
     return canonical_contract_digest_v1(
         {
             "purpose": "storyboard-beat-identity.v1",
             "plan_digest": plan_digest,
             "source_beat_index": source_beat_index,
-            "beat_text": beat_text,
+            "voice_text": voice_text,
+            "caption_text": caption_text,
         }
     )
 
@@ -208,6 +403,20 @@ def derive_storyboard_scene_video_artifact_digest_v1(
     if not isinstance(digest, str):
         raise ValueError("sha256 is required to derive video artifact_digest")
     return digest
+
+
+def derive_storyboard_scene_video_operation_key_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    """Match Star's immutable paid operation key for one scene ordinal."""
+
+    data = _as_json_dict(value)
+    plan_nonce = str(data["plan_digest"]).removeprefix("sha256:")
+    return (
+        f"reels:{data['workspace_id']}:{data['run_id']}:"
+        f"{data['factory_revision']}:{plan_nonce}:video:"
+        f"{data['scene_sequence_index']}"
+    )
 
 
 def derive_storyboard_scene_video_request_digest_v1(
@@ -410,6 +619,34 @@ def derive_storyboard_scene_video_set_receipt_digest_v1(
     return _derive_digest(value, "receipt_digest")
 
 
+def derive_storyboard_scene_video_set_summary_digest_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return _derive_digest(value, "summary_digest")
+
+
+def derive_storyboard_beat_caption_digest_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return _derive_digest(value, "caption_digest")
+
+
+def derive_storyboard_caption_set_digest_v1(
+    value: tuple[BaseModel, ...] | list[BaseModel] | list[Mapping[str, Any]],
+) -> str:
+    captions = [
+        item.model_dump(mode="json") if isinstance(item, BaseModel) else dict(item)
+        for item in value
+    ]
+    return canonical_contract_digest_v1({"captions": captions})
+
+
+def derive_storyboard_beat_scene_projection_summary_digest_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return _derive_digest(value, "projection_digest")
+
+
 def derive_storyboard_scene_fan_in_manifest_digest_v1(
     value: Mapping[str, Any] | BaseModel,
 ) -> str:
@@ -420,6 +657,12 @@ def derive_reels_factory_receipt_digest_v3(
     value: Mapping[str, Any] | BaseModel,
 ) -> str:
     return _derive_digest(value, "receipt_digest")
+
+
+def derive_reels_factory_completion_summary_digest_v3(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return _derive_digest(value, "summary_digest")
 
 
 def derive_storyboard_draft_digest_v1(
@@ -550,6 +793,39 @@ class FactoryPaidBudgetApprovalResolverV2(Protocol):
     ) -> bool: ...
 
 
+class FactoryPaidOperationEvidenceResolverV2(Protocol):
+    """Server-only proof that one historical paid claim completed durably."""
+
+    def is_verified_completed_operation(
+        self,
+        *,
+        evidence_id: str,
+        evidence_digest: str,
+        workspace_id: str,
+        run_id: str,
+        factory_revision: int,
+        purpose: str,
+        operation: str,
+        source_index: int | None,
+        paid_budget_authority_digest: str,
+        cost_profile_digest: str,
+        pricing_policy_revision: int,
+        provider: str,
+        model: str,
+        operation_key: str,
+        execution_request_digest: str,
+        provider_operation_id: str,
+        provider_binding_receipt_digest: str,
+        provider_result_receipt_id: str,
+        provider_result_receipt_digest: str,
+        provider_result_output_digest: str,
+        provider_result_recorded_at_utc: str,
+        completed_claim_output_digest: str,
+        reserved_at_utc: str,
+        completed_at_utc: str,
+    ) -> bool: ...
+
+
 def _assert_storage_key(value: str) -> None:
     lowered = value.lower()
     if (
@@ -575,6 +851,450 @@ def _assert_opaque_artifact_id(value: str) -> None:
         ("http://", "https://", "data:", "file:")
     ):
         raise ValueError("artifact_id must be opaque, not a URL")
+
+
+class StoryboardImageReferenceSnapshotV1(BaseModel):
+    """Strict lossless projection of one approved BeatFramePlanV1 reference."""
+
+    model_config = _FROZEN_STRICT
+
+    owner: Literal["parzifal", "artemis"]
+    workspace_id: NonBlankStr
+    master_id: NonBlankStr
+    version: RevisionInt
+    approval_status: Literal["approved"]
+    storage_key: NonBlankStr
+    content_digest: DigestStr
+    ref_kind: Literal["character", "product", "evidence"]
+    subject_id: NonBlankStr
+    label: NonBlankStr
+    url: Literal[None]
+    source_run_id: str | None
+
+    @field_validator("storage_key")
+    @classmethod
+    def _credential_free_storage_key(cls, value: str) -> str:
+        _assert_storage_key(value)
+        return value
+
+    @model_validator(mode="after")
+    def _bind_reference_owner(self) -> "StoryboardImageReferenceSnapshotV1":
+        if self.ref_kind == "character" and self.owner != "parzifal":
+            raise ValueError("character references must be owned by parzifal")
+        if self.ref_kind in {"product", "evidence"} and self.owner != "artemis":
+            raise ValueError("product/evidence references must be owned by artemis")
+        return self
+
+
+class StoryboardImagePlannedReferenceV1(BaseModel):
+    """Strict provider-order reference projection from BeatFramePlanV1."""
+
+    model_config = _FROZEN_STRICT
+
+    role: Literal["lead", "co_star", "product", "evidence"]
+    required: StrictBool
+    snapshot: StoryboardImageReferenceSnapshotV1
+
+
+class StoryboardImageFramePlanV1(BaseModel):
+    """Byte-equivalent, strict Pydantic projection of BeatFramePlanV1."""
+
+    model_config = _FROZEN_STRICT
+
+    run_id: NonBlankStr
+    workspace_id: NonBlankStr
+    beat_index: StoryboardBeatIndex
+    shot_list_digest: DigestStr
+    render_mode: Literal[
+        "persona_talk",
+        "duet",
+        "hands_demo",
+        "product_solo",
+        "social_proof",
+        "scene_no_person",
+        "situation_pov",
+        "before_after",
+    ]
+    ordered_refs: tuple[StoryboardImagePlannedReferenceV1, ...] = Field(max_length=5)
+    shot: dict[str, JsonValue]
+    prompt: NonBlankStr
+    prompt_constitution_version: NonBlankStr
+    plan_digest: DigestStr
+    provider: Literal["seedream"]
+    model: Literal["seedream-5-pro"]
+    width: Literal[1024]
+    height: Literal[1536]
+    quality: Literal["high"]
+    lock_policy: Literal["hard_fail"]
+    max_refs: Annotated[int, Field(ge=1, le=5)]
+
+    @field_validator("ordered_refs", mode="before")
+    @classmethod
+    def _refs_tuple(cls, value: Any) -> Any:
+        return tuple(value) if isinstance(value, list) else value
+
+    @model_validator(mode="after")
+    def _bind_legacy_frame_plan(self) -> "StoryboardImageFramePlanV1":
+        if self.shot.get("beat_index") != self.beat_index:
+            raise ValueError("shot must contain the matching beat_index")
+        if len(self.ordered_refs) > self.max_refs:
+            raise ValueError("ordered_refs exceeds max_refs")
+        storage_keys = [ref.snapshot.storage_key for ref in self.ordered_refs]
+        if len(storage_keys) != len(set(storage_keys)):
+            raise ValueError("ordered_refs contains duplicate storage keys")
+        if any(
+            ref.snapshot.workspace_id != self.workspace_id for ref in self.ordered_refs
+        ):
+            raise ValueError("frame plan contains a cross-workspace reference")
+        if self.plan_digest != canonical_contract_digest_v1(
+            self,
+            exclude={"plan_digest"},
+        ):
+            raise ValueError("plan_digest does not match BeatFramePlanV1 payload")
+        return self
+
+
+class AthenaFramePlanReceiptV1(BaseModel):
+    """Canonical Athena authority for the exact sixteen paid still prompts."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["AthenaFramePlanReceipt.v1"]
+    workspace_id: NonBlankStr
+    run_id: NonBlankStr
+    script_revision_digest: DigestStr
+    beat_plan_digest: DigestStr
+    beat_plan_revision_digest: DigestStr
+    visual_bridge_digest: DigestStr | None
+    frame_plans: tuple[StoryboardImageFramePlanV1, ...] = Field(
+        min_length=16,
+        max_length=16,
+    )
+    receipt_digest: DigestStr
+
+    @field_validator("frame_plans", mode="before")
+    @classmethod
+    def _plans_tuple(cls, value: Any) -> Any:
+        return tuple(value) if isinstance(value, list) else value
+
+    @model_validator(mode="after")
+    def _bind_complete_receipt(self) -> "AthenaFramePlanReceiptV1":
+        if [plan.beat_index for plan in self.frame_plans] != list(range(16)):
+            raise ValueError("Athena frame plans must cover beats exactly 0..15")
+        if any(
+            plan.workspace_id != self.workspace_id or plan.run_id != self.run_id
+            for plan in self.frame_plans
+        ):
+            raise ValueError("Athena frame plan scope does not match receipt")
+        if self.receipt_digest != derive_athena_frame_plan_receipt_digest_v1(self):
+            raise ValueError("receipt_digest does not match Athena frame-plan receipt")
+        return self
+
+
+class StoryboardImageProviderRequestV1(BaseModel):
+    """Exact paid Seedream request, inert until a fresh capability is minted."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["StoryboardImageProviderRequest.v1"]
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    purpose: Literal["storyboard_draft", "storyboard_regen"]
+    plan_digest: DigestStr
+    ares_script_revision_digest: DigestStr
+    ares_beat_plan_revision_digest: DigestStr
+    paid_budget_authority_digest: DigestStr
+    source_beat_index: StoryboardBeatIndex
+    frame_plan: StoryboardImageFramePlanV1
+    athena_frame_plan_receipt_digest: DigestStr
+    provider: NonBlankStr
+    model: NonBlankStr
+    cost_profile_digest: DigestStr
+    pricing_policy_revision: PositiveSafeInt
+    generation_nonce: UuidStr
+    operation_key: NonBlankStr
+    expected_artifact_id: UuidStr
+    expected_storage_key: NonBlankStr
+    request_digest: DigestStr
+    execution_request_digest: DigestStr
+    idempotency_key: DigestStr
+
+    @field_validator("expected_storage_key")
+    @classmethod
+    def _relative_expected_storage_key(cls, value: str) -> str:
+        _assert_storage_key(value)
+        return value
+
+    @model_validator(mode="after")
+    def _bind_request(self) -> "StoryboardImageProviderRequestV1":
+        if self.ares_beat_plan_revision_digest != self.plan_digest:
+            raise ValueError("ares beat-plan revision digest must equal plan_digest")
+        if (
+            self.frame_plan.workspace_id != self.workspace_id
+            or self.frame_plan.run_id != self.run_id
+            or self.frame_plan.beat_index != self.source_beat_index
+            or self.frame_plan.provider != self.provider
+            or self.frame_plan.model != self.model
+        ):
+            raise ValueError("frame plan does not match image request scope")
+        if self.operation_key != derive_storyboard_image_operation_key_v1(self):
+            raise ValueError("operation_key does not match image request")
+        if self.request_digest != derive_storyboard_image_provider_request_digest_v1(
+            self
+        ):
+            raise ValueError("request_digest does not match image request")
+        if self.expected_artifact_id != (
+            derive_storyboard_image_expected_artifact_id_v1(self)
+        ):
+            raise ValueError("expected_artifact_id does not match image request")
+        if self.expected_storage_key != (
+            derive_storyboard_image_expected_storage_key_v1(self)
+        ):
+            raise ValueError("expected_storage_key does not match image request")
+        if self.execution_request_digest != (
+            derive_storyboard_image_provider_execution_request_digest_v1(self)
+        ):
+            raise ValueError("execution_request_digest does not match image request")
+        if self.idempotency_key != (
+            derive_storyboard_image_provider_idempotency_key_v1(self)
+        ):
+            raise ValueError("idempotency_key does not match image request")
+        return self
+
+    @classmethod
+    def from_verified(
+        cls,
+        value: Mapping[str, Any] | "StoryboardImageProviderRequestV1",
+        *,
+        authority: object,
+        script_revision: AresScriptRevisionV1,
+        plan_revision: AresBeatPlanRevisionV1,
+        athena_receipt: Mapping[str, Any] | AthenaFramePlanReceiptV1,
+        at_utc: str,
+        resolver: FactoryPaidBudgetApprovalResolverV2,
+    ) -> "VerifiedStoryboardImageProviderRequestV1":
+        request = cls.model_validate(value)
+        resolution = _unwrap_verified_factory_paid_budget_resolution_v2(authority)
+        paid_authority = resolution.paid_budget_authority
+        profile = resolution.cost_profile
+        if not isinstance(script_revision, AresScriptRevisionV1) or not isinstance(
+            plan_revision,
+            AresBeatPlanRevisionV1,
+        ):
+            raise TypeError("image execution requires validated Ares revisions")
+        athena = AthenaFramePlanReceiptV1.model_validate(athena_receipt)
+        if not profile.is_valid_at(
+            at_utc
+        ) or not resolution.approval_receipt.authorizes(
+            paid_authority,
+            at_utc=at_utc,
+            resolver=resolver,
+        ):
+            raise ValueError("image execution requires current durable approval")
+        if (
+            not plan_revision.binds_script_revision(script_revision)
+            or script_revision.workspace_id != request.workspace_id
+            or script_revision.run_id != request.run_id
+            or script_revision.factory_revision != request.factory_revision
+            or request.ares_script_revision_digest != script_revision.revision_digest
+            or request.ares_beat_plan_revision_digest != plan_revision.revision_digest
+            or request.plan_digest != plan_revision.revision_digest
+            or len(plan_revision.beat_plan.beats) != 16
+            or plan_revision.beat_plan.beats[request.source_beat_index].beat_index
+            != request.source_beat_index
+        ):
+            raise ValueError(
+                "image request does not bind the current Ares revision pair"
+            )
+        if (
+            athena.workspace_id != request.workspace_id
+            or athena.run_id != request.run_id
+            or athena.script_revision_digest != script_revision.revision_digest
+            or athena.beat_plan_digest != plan_revision.beat_plan.plan_digest
+            or athena.beat_plan_revision_digest != plan_revision.revision_digest
+            or athena.receipt_digest != request.athena_frame_plan_receipt_digest
+            or athena.frame_plans[request.source_beat_index] != request.frame_plan
+        ):
+            raise ValueError("image request does not bind the exact Athena frame plan")
+        if (
+            paid_authority.purpose not in {"storyboard_draft", "storyboard_regen"}
+            or paid_authority.purpose != request.purpose
+            or paid_authority.workspace_id != request.workspace_id
+            or paid_authority.run_id != request.run_id
+            or paid_authority.factory_revision != request.factory_revision
+            or paid_authority.authority_digest != request.paid_budget_authority_digest
+            or request.source_beat_index not in paid_authority.image_source_beat_indices
+            or (
+                paid_authority.purpose == "storyboard_draft"
+                and paid_authority.plan_digest is not None
+            )
+            or (
+                paid_authority.purpose == "storyboard_regen"
+                and paid_authority.plan_digest != request.plan_digest
+            )
+        ):
+            raise ValueError("image request does not match paid image authority")
+        operation = profile.operations.image
+        if (
+            request.provider != operation.provider
+            or request.model != operation.model
+            or request.cost_profile_digest != profile.profile_digest
+            or request.pricing_policy_revision != profile.pricing_policy_revision
+        ):
+            raise ValueError("image provider/model does not match current cost profile")
+        expected_nonce = derive_storyboard_image_generation_nonce_v1(
+            authority_idempotency_key=paid_authority.idempotency_key,
+            purpose=paid_authority.purpose,
+            source_beat_index=request.source_beat_index,
+        )
+        if request.generation_nonce != expected_nonce:
+            raise ValueError("generation_nonce does not match the paid image slot")
+        return VerifiedStoryboardImageProviderRequestV1(
+            request,
+            _token=_VERIFIED_IMAGE_REQUEST_TOKEN_V1,
+        )
+
+
+_VERIFIED_IMAGE_REQUEST_TOKEN_V1 = object()
+_VERIFIED_IMAGE_REQUEST_REGISTRY_V1: WeakKeyDictionary[object, object] = (
+    WeakKeyDictionary()
+)
+
+
+class VerifiedStoryboardImageProviderRequestV1:
+    """Non-serializable single-process capability required before Seedream."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, request: object, *, _token: object) -> None:
+        if _token is not _VERIFIED_IMAGE_REQUEST_TOKEN_V1:
+            raise TypeError(
+                "verified image request can only be minted by from_verified"
+            )
+        _VERIFIED_IMAGE_REQUEST_REGISTRY_V1[self] = request
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise TypeError("verified image request is immutable")
+
+    def __reduce_ex__(self, _protocol: int) -> object:
+        raise TypeError("verified image request is not serializable")
+
+    def __repr__(self) -> str:
+        return "VerifiedStoryboardImageProviderRequestV1(<sealed>)"
+
+
+def require_verified_storyboard_image_provider_request_v1(
+    capability: object,
+) -> StoryboardImageProviderRequestV1:
+    if not isinstance(capability, VerifiedStoryboardImageProviderRequestV1):
+        raise TypeError(
+            "provider call requires VerifiedStoryboardImageProviderRequestV1"
+        )
+    try:
+        request = _VERIFIED_IMAGE_REQUEST_REGISTRY_V1[capability]
+    except KeyError as exc:
+        raise TypeError("unminted verified image request capability") from exc
+    if not isinstance(request, StoryboardImageProviderRequestV1):
+        raise TypeError("verified image request capability is invalid")
+    return request
+
+
+class StoryboardImageProviderReceiptV1(BaseModel):
+    """Committed durable still result for one exact verified image request."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["StoryboardImageProviderReceipt.v1"]
+    request: StoryboardImageProviderRequestV1
+    operation_key: NonBlankStr
+    provider: NonBlankStr
+    model: NonBlankStr
+    provider_task_id: NonBlankStr
+    status: Literal["committed"]
+    artifact_id: UuidStr
+    storage_key: NonBlankStr
+    sha256: DigestStr
+    mime: ImageMime
+    bytes_len: PositiveSafeInt
+    width: PositiveDimension
+    height: PositiveDimension
+    started_at_utc: UtcTimestamp
+    completed_at_utc: UtcTimestamp
+    receipt_digest: DigestStr
+
+    @field_validator("storage_key")
+    @classmethod
+    def _relative_storage_key(cls, value: str) -> str:
+        _assert_storage_key(value)
+        return value
+
+    @model_validator(mode="after")
+    def _bind_result(self) -> "StoryboardImageProviderReceiptV1":
+        if (
+            self.operation_key != self.request.operation_key
+            or self.provider != self.request.provider
+            or self.model != self.request.model
+            or self.artifact_id != self.request.expected_artifact_id
+            or self.storage_key != self.request.expected_storage_key
+        ):
+            raise ValueError("provider result does not match exact verified request")
+        if _parse_utc(self.completed_at_utc) < _parse_utc(self.started_at_utc):
+            raise ValueError("completed_at_utc must not precede started_at_utc")
+        if self.receipt_digest != derive_storyboard_image_provider_receipt_digest_v1(
+            self
+        ):
+            raise ValueError("receipt_digest does not match image provider receipt")
+        return self
+
+    @classmethod
+    def from_verified_request(
+        cls,
+        value: Mapping[str, Any] | "StoryboardImageProviderReceiptV1",
+        *,
+        request: object,
+    ) -> "StoryboardImageProviderReceiptV1":
+        expected = require_verified_storyboard_image_provider_request_v1(request)
+        receipt = cls.model_validate(value)
+        if receipt.request != expected:
+            raise ValueError("provider receipt does not bind verified image request")
+        return receipt
+
+    @classmethod
+    def from_historical_evidence(
+        cls,
+        value: Mapping[str, Any] | "StoryboardImageProviderReceiptV1",
+        *,
+        request: StoryboardImageProviderRequestV1,
+        evidence: object,
+    ) -> "StoryboardImageProviderReceiptV1":
+        receipt = cls.model_validate(value)
+        historical = require_verified_factory_paid_operation_historical_evidence_v2(
+            evidence
+        )
+        if (
+            receipt.request != request
+            or not _historical_evidence_binds_image_receipt_v2(
+                historical,
+                receipt,
+            )
+        ):
+            raise ValueError("historical evidence does not bind image receipt")
+        return receipt
+
+    @classmethod
+    def from_reconciled_claim(
+        cls,
+        value: Mapping[str, Any] | "StoryboardImageProviderReceiptV1",
+        *,
+        request: StoryboardImageProviderRequestV1,
+        reconciliation: object,
+    ) -> "StoryboardImageProviderReceiptV1":
+        return cls.from_historical_evidence(
+            value,
+            request=request,
+            evidence=reconciliation,
+        )
 
 
 class StoryboardImageArtifactRefV1(BaseModel):
@@ -641,15 +1361,29 @@ class StoryboardImageSetReceiptV1(BaseModel):
     factory_revision: NonNegativeInt
     plan_digest: DigestStr
     paid_budget_authority_digest: DigestStr
+    paid_source_beat_indices: tuple[StoryboardBeatIndex, ...] = Field(
+        min_length=1,
+        max_length=16,
+    )
+    previous_image_set_receipt_digest: DigestStr | None
     expected_image_count: Literal[16]
     images: tuple[StoryboardImageArtifactRefV1, ...] = Field(
+        min_length=16,
+        max_length=16,
+    )
+    provider_receipts: tuple[StoryboardImageProviderReceiptV1, ...] = Field(
         min_length=16,
         max_length=16,
     )
     completed_at_utc: UtcTimestamp
     receipt_digest: DigestStr
 
-    @field_validator("images", mode="before")
+    @field_validator(
+        "paid_source_beat_indices",
+        "images",
+        "provider_receipts",
+        mode="before",
+    )
     @classmethod
     def _images_tuple(cls, value: Any) -> Any:
         return tuple(value) if isinstance(value, list) else value
@@ -672,9 +1406,199 @@ class StoryboardImageSetReceiptV1(BaseModel):
             if len(values) != len(set(values)):
                 raise ValueError(f"image {field} values must be unique")
 
+        receipt_sources = [
+            receipt.request.source_beat_index for receipt in self.provider_receipts
+        ]
+        if receipt_sources != list(range(_STORYBOARD_BEAT_COUNT)):
+            raise ValueError(
+                "provider receipts must cover source beats exactly 0..15 in order"
+            )
+        execution_fields = {
+            "provider_task_id": [
+                receipt.provider_task_id for receipt in self.provider_receipts
+            ],
+            "receipt_digest": [
+                receipt.receipt_digest for receipt in self.provider_receipts
+            ],
+            "operation_key": [
+                receipt.request.operation_key for receipt in self.provider_receipts
+            ],
+            "request_digest": [
+                receipt.request.request_digest for receipt in self.provider_receipts
+            ],
+            "execution_request_digest": [
+                receipt.request.execution_request_digest
+                for receipt in self.provider_receipts
+            ],
+            "idempotency_key": [
+                receipt.request.idempotency_key for receipt in self.provider_receipts
+            ],
+            "generation_nonce": [
+                receipt.request.generation_nonce for receipt in self.provider_receipts
+            ],
+            "artifact_id": [receipt.artifact_id for receipt in self.provider_receipts],
+            "storage_key": [receipt.storage_key for receipt in self.provider_receipts],
+        }
+        for field, values in execution_fields.items():
+            if len(values) != len(set(values)):
+                raise ValueError(f"provider receipt {field} values must be unique")
+
+        for image, receipt in zip(
+            self.images,
+            self.provider_receipts,
+            strict=True,
+        ):
+            request = receipt.request
+            if (
+                image.source_beat_index != request.source_beat_index
+                or image.artifact_id != receipt.artifact_id
+                or image.storage_key != receipt.storage_key
+                or image.sha256 != receipt.sha256
+                or image.mime != receipt.mime
+                or image.width != receipt.width
+                or image.height != receipt.height
+                or image.provider_receipt_digest != receipt.receipt_digest
+                or image.frame_plan_digest != request.frame_plan.plan_digest
+                or image.generation_nonce != request.generation_nonce
+                or request.workspace_id != self.workspace_id
+                or request.run_id != self.run_id
+                or request.factory_revision != self.factory_revision
+                or request.plan_digest != self.plan_digest
+            ):
+                raise ValueError("image does not match provider receipt projection")
+        current_receipts = [
+            receipt
+            for receipt in self.provider_receipts
+            if receipt.request.paid_budget_authority_digest
+            == self.paid_budget_authority_digest
+        ]
+        current_purposes = {receipt.request.purpose for receipt in current_receipts}
+        if not current_receipts or len(current_purposes) != 1:
+            raise ValueError("image set current paid authority output is ambiguous")
+        current_purpose = next(iter(current_purposes))
+        current_sources = tuple(
+            receipt.request.source_beat_index for receipt in current_receipts
+        )
+        if current_sources != self.paid_source_beat_indices:
+            raise ValueError(
+                "paid_source_beat_indices must equal current authority receipts"
+            )
+        if current_purpose == "storyboard_draft" and len(current_receipts) != 16:
+            raise ValueError(
+                "storyboard_draft image set requires all 16 current authority receipts"
+            )
+        if current_purpose == "storyboard_draft" and (
+            self.paid_source_beat_indices != tuple(range(16))
+            or self.previous_image_set_receipt_digest is not None
+        ):
+            raise ValueError("initial image set cannot carry prior regen lineage")
+        if current_purpose == "storyboard_regen" and (
+            self.previous_image_set_receipt_digest is None
+            or tuple(sorted(self.paid_source_beat_indices))
+            != self.paid_source_beat_indices
+            or len(set(self.paid_source_beat_indices))
+            != len(self.paid_source_beat_indices)
+        ):
+            raise ValueError(
+                "regen image set requires exact prior lineage and paid subset"
+            )
+        if current_purpose == "storyboard_regen" and any(
+            receipt.request.purpose != "storyboard_regen"
+            for receipt in current_receipts
+        ):
+            raise ValueError("regen image set contains mismatched current receipts")
+        if _parse_utc(self.completed_at_utc) < max(
+            _parse_utc(receipt.completed_at_utc) for receipt in self.provider_receipts
+        ):
+            raise ValueError("completed_at_utc precedes a provider receipt")
+
         if self.receipt_digest != derive_storyboard_image_set_receipt_digest_v1(self):
             raise ValueError("receipt_digest does not match storyboard image set")
         return self
+
+    def binds_paid_operations(
+        self,
+        authority: object,
+        operation_proofs: tuple[object, ...],
+        *,
+        previous_image_set: "StoryboardImageSetReceiptV1 | None" = None,
+    ) -> bool:
+        """Bind only live call capabilities or resolver-verified completed claims."""
+
+        resolution = _resolve_terminal_paid_budget_resolution_v2(
+            authority,
+            operation_proofs,
+        )
+        if resolution is None:
+            return False
+        paid_authority = resolution.paid_budget_authority
+        if not (
+            paid_authority.purpose in {"storyboard_draft", "storyboard_regen"}
+            and paid_authority.workspace_id == self.workspace_id
+            and paid_authority.run_id == self.run_id
+            and paid_authority.factory_revision == self.factory_revision
+            and paid_authority.authority_digest == self.paid_budget_authority_digest
+            and paid_authority.image_source_beat_indices
+            == self.paid_source_beat_indices
+            and len(operation_proofs) == len(self.paid_source_beat_indices)
+        ):
+            return False
+        if paid_authority.purpose == "storyboard_draft":
+            if (
+                paid_authority.plan_digest is not None
+                or previous_image_set is not None
+                or self.previous_image_set_receipt_digest is not None
+                or self.paid_source_beat_indices != tuple(range(16))
+            ):
+                return False
+        elif (
+            previous_image_set is None
+            or paid_authority.plan_digest != self.plan_digest
+            or self.previous_image_set_receipt_digest
+            != previous_image_set.receipt_digest
+            or previous_image_set.workspace_id != self.workspace_id
+            or previous_image_set.run_id != self.run_id
+            or previous_image_set.factory_revision != self.factory_revision
+            or previous_image_set.plan_digest != self.plan_digest
+        ):
+            return False
+
+        receipt_by_source = {
+            receipt.request.source_beat_index: receipt
+            for receipt in self.provider_receipts
+        }
+        for source, proof in zip(
+            self.paid_source_beat_indices,
+            operation_proofs,
+            strict=True,
+        ):
+            receipt = receipt_by_source[source]
+            if (
+                receipt.request.paid_budget_authority_digest
+                != paid_authority.authority_digest
+                or receipt.request.purpose != paid_authority.purpose
+                or not _image_receipt_binds_operation_proof_v2(receipt, proof)
+            ):
+                return False
+
+        paid_sources = set(self.paid_source_beat_indices)
+        if paid_authority.purpose == "storyboard_draft":
+            return all(
+                receipt.request.paid_budget_authority_digest
+                == paid_authority.authority_digest
+                and receipt.request.purpose == "storyboard_draft"
+                for receipt in self.provider_receipts
+            )
+
+        assert previous_image_set is not None
+        for source in set(range(16)) - paid_sources:
+            if (
+                self.images[source] != previous_image_set.images[source]
+                or self.provider_receipts[source]
+                != previous_image_set.provider_receipts[source]
+            ):
+                return False
+        return True
 
 
 class StoryboardCardV1(BaseModel):
@@ -686,7 +1610,8 @@ class StoryboardCardV1(BaseModel):
     source_beat_index: StoryboardBeatIndex
     sequence_index: StoryboardBeatIndex
     scene_id: SceneId
-    beat_text: BeatText
+    voice_text: VoiceText
+    caption_text: CaptionText
     beat_identity_digest: DigestStr
     prompt_override: PromptOverride | None
     crop_mode: StoryboardCropMode
@@ -1096,6 +2021,42 @@ class StoryboardSceneVideoReceiptV1(BaseModel):
             return False
         return self.request == verified_request
 
+    @classmethod
+    def from_historical_evidence(
+        cls,
+        value: Mapping[str, Any] | BaseModel,
+        *,
+        request: StoryboardSceneVideoRequestV1,
+        evidence: object,
+    ) -> "StoryboardSceneVideoReceiptV1":
+        receipt = cls.model_validate(_as_json_dict(value))
+        historical = require_verified_factory_paid_operation_historical_evidence_v2(
+            evidence
+        )
+        if (
+            receipt.request != request
+            or not _historical_evidence_binds_scene_receipt_v2(
+                historical,
+                receipt,
+            )
+        ):
+            raise ValueError("historical evidence does not bind scene video receipt")
+        return receipt
+
+    @classmethod
+    def from_reconciled_claim(
+        cls,
+        value: Mapping[str, Any] | BaseModel,
+        *,
+        request: StoryboardSceneVideoRequestV1,
+        reconciliation: object,
+    ) -> "StoryboardSceneVideoReceiptV1":
+        return cls.from_historical_evidence(
+            value,
+            request=request,
+            evidence=reconciliation,
+        )
+
 
 class StoryboardBeatSceneVideoProjectionV1(BaseModel):
     """One card's deterministic reference to its scene's shared video."""
@@ -1236,9 +2197,11 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
         authority: object,
         verified_requests: tuple[object, ...],
     ) -> bool:
-        try:
-            resolution = _unwrap_verified_factory_paid_budget_resolution_v2(authority)
-        except TypeError:
+        resolution = _resolve_terminal_paid_budget_resolution_v2(
+            authority,
+            verified_requests,
+        )
+        if resolution is None:
             return False
         paid_authority = resolution.paid_budget_authority
         profile = resolution.cost_profile
@@ -1282,7 +2245,10 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
         ):
             request = receipt.request
             if not (
-                receipt.binds_verified_request(request_capability)
+                _scene_receipt_binds_operation_proof_v2(
+                    receipt,
+                    request_capability,
+                )
                 and request.scene_sequence_index == scene_sequence_index
                 and request.scene_id == scene.scene_id
                 and request.scene_digest == scene.scene_digest
@@ -1318,6 +2284,167 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
         return True
 
 
+class StoryboardBeatSceneProjectionSummaryV1(BaseModel):
+    """Browser-safe 16-to-N scene mapping without artifact/provider identity."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["StoryboardBeatSceneProjectionSummary.v1"]
+    sequence_index: StoryboardBeatIndex
+    source_beat_index: StoryboardBeatIndex
+    scene_sequence_index: StoryboardBeatIndex
+    scene_digest: DigestStr
+    repeat_index: StoryboardBeatIndex
+    projection_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_projection_digest(self) -> "StoryboardBeatSceneProjectionSummaryV1":
+        if self.projection_digest != (
+            derive_storyboard_beat_scene_projection_summary_digest_v1(self)
+        ):
+            raise ValueError("projection_digest does not match safe scene projection")
+        return self
+
+
+class StoryboardSceneVideoSetSummaryV1(BaseModel):
+    """Browser-safe projection of the server-only scene video set receipt."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["StoryboardSceneVideoSetSummary.v1"]
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    plan_digest: DigestStr
+    storyboard_execution_manifest_digest: DigestStr
+    final_production_authority_digest: DigestStr
+    storyboard_scene_count: StoryboardSceneCount
+    beat_projections: tuple[StoryboardBeatSceneProjectionSummaryV1, ...] = Field(
+        min_length=16,
+        max_length=16,
+    )
+    completed_at_utc: UtcTimestamp
+    scene_video_set_receipt_digest: DigestStr
+    summary_digest: DigestStr
+
+    @field_validator("beat_projections", mode="before")
+    @classmethod
+    def _projections_tuple(cls, value: Any) -> Any:
+        return tuple(value) if isinstance(value, list) else value
+
+    @model_validator(mode="after")
+    def _bind_safe_projection(self) -> "StoryboardSceneVideoSetSummaryV1":
+        if [item.sequence_index for item in self.beat_projections] != list(range(16)):
+            raise ValueError("safe beat projections must be ordered 0..15")
+        if sorted(item.source_beat_index for item in self.beat_projections) != list(
+            range(16)
+        ):
+            raise ValueError("safe beat projections must cover source beats 0..15")
+        seen_scenes: list[int] = []
+        expected_repeat = 0
+        current_scene = -1
+        for projection in self.beat_projections:
+            if projection.scene_sequence_index == current_scene + 1:
+                current_scene += 1
+                seen_scenes.append(current_scene)
+                expected_repeat = 0
+            elif projection.scene_sequence_index != current_scene:
+                raise ValueError("safe scene projections must be contiguous and dense")
+            if projection.repeat_index != expected_repeat:
+                raise ValueError("safe repeat_index must be dense within each scene")
+            expected_repeat += 1
+        if seen_scenes != list(range(self.storyboard_scene_count)):
+            raise ValueError("safe projections must reference every scene exactly")
+        if self.summary_digest != (
+            derive_storyboard_scene_video_set_summary_digest_v1(self)
+        ):
+            raise ValueError("summary_digest does not match scene video set summary")
+        return self
+
+    @classmethod
+    def from_receipt(
+        cls,
+        receipt: StoryboardSceneVideoSetReceiptV1,
+        *,
+        manifest: "StoryboardExecutionManifestV1",
+        authority: object,
+        operation_proofs: tuple[object, ...],
+    ) -> "StoryboardSceneVideoSetSummaryV1":
+        if not receipt.binds(manifest, authority, operation_proofs):
+            raise ValueError(
+                "scene video summary requires verified live or historical proof"
+            )
+        projections: list[dict[str, Any]] = []
+        for item in receipt.beat_projections:
+            body: dict[str, Any] = {
+                "contract_version": "StoryboardBeatSceneProjectionSummary.v1",
+                "sequence_index": item.sequence_index,
+                "source_beat_index": item.source_beat_index,
+                "scene_sequence_index": item.scene_sequence_index,
+                "scene_digest": item.scene_digest,
+                "repeat_index": item.repeat_index,
+            }
+            body["projection_digest"] = (
+                derive_storyboard_beat_scene_projection_summary_digest_v1(body)
+            )
+            projections.append(body)
+        body = {
+            "contract_version": "StoryboardSceneVideoSetSummary.v1",
+            "workspace_id": receipt.workspace_id,
+            "run_id": receipt.run_id,
+            "factory_revision": receipt.factory_revision,
+            "plan_digest": receipt.plan_digest,
+            "storyboard_execution_manifest_digest": (
+                receipt.storyboard_execution_manifest_digest
+            ),
+            "final_production_authority_digest": (
+                receipt.final_production_authority_digest
+            ),
+            "storyboard_scene_count": receipt.storyboard_scene_count,
+            "beat_projections": projections,
+            "completed_at_utc": receipt.completed_at_utc,
+            "scene_video_set_receipt_digest": receipt.receipt_digest,
+        }
+        body["summary_digest"] = derive_storyboard_scene_video_set_summary_digest_v1(
+            body
+        )
+        return cls.model_validate(body)
+
+    def binds(
+        self,
+        receipt: StoryboardSceneVideoSetReceiptV1,
+        *,
+        manifest: "StoryboardExecutionManifestV1",
+        authority: object,
+        operation_proofs: tuple[object, ...],
+    ) -> bool:
+        return self == self.from_receipt(
+            receipt,
+            manifest=manifest,
+            authority=authority,
+            operation_proofs=operation_proofs,
+        )
+
+
+class StoryboardBeatCaptionV1(BaseModel):
+    """One approved beat caption retained independently from scene grouping."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["StoryboardBeatCaption.v1"]
+    source_beat_index: StoryboardBeatIndex
+    sequence_index: StoryboardBeatIndex
+    text_content: CaptionText
+    duration_ms: Literal[4_000]
+    caption_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_caption_digest(self) -> "StoryboardBeatCaptionV1":
+        if self.caption_digest != derive_storyboard_beat_caption_digest_v1(self):
+            raise ValueError("caption_digest does not match beat caption")
+        return self
+
+
 class StoryboardSceneFanInManifestV1(BaseModel):
     """Render input joining shared scene videos to sixteen beat voices."""
 
@@ -1336,12 +2463,17 @@ class StoryboardSceneFanInManifestV1(BaseModel):
         min_length=16,
         max_length=16,
     )
+    captions: tuple[StoryboardBeatCaptionV1, ...] = Field(
+        min_length=16,
+        max_length=16,
+    )
+    caption_set_digest: DigestStr
     timeline_digest: DigestStr
     audio_mix_digest: DigestStr
     render_policy_digest: DigestStr
     manifest_digest: DigestStr
 
-    @field_validator("audio_artifacts", mode="before")
+    @field_validator("audio_artifacts", "captions", mode="before")
     @classmethod
     def _audio_tuple(cls, value: Any) -> Any:
         return tuple(value) if isinstance(value, list) else value
@@ -1378,6 +2510,17 @@ class StoryboardSceneFanInManifestV1(BaseModel):
             if len(values) != len(set(values)):
                 raise ValueError(f"audio artifact {field} values must be unique")
 
+        if [caption.sequence_index for caption in self.captions] != list(range(16)):
+            raise ValueError("captions must be in sequence order 0..15")
+        if sorted(caption.source_beat_index for caption in self.captions) != list(
+            range(16)
+        ):
+            raise ValueError("captions must cover source beats exactly 0..15")
+        if self.caption_set_digest != derive_storyboard_caption_set_digest_v1(
+            self.captions
+        ):
+            raise ValueError("caption_set_digest must bind ordered captions")
+
         expected_audio_mix_digest = canonical_contract_digest_v1(
             {
                 "audio_artifacts": [
@@ -1400,12 +2543,34 @@ class StoryboardSceneFanInManifestV1(BaseModel):
         authority: object,
         verified_requests: tuple[object, ...],
     ) -> bool:
-        try:
-            paid_authority = _unwrap_verified_factory_paid_budget_authority_v2(
-                authority
-            )
-        except TypeError:
+        resolution = _resolve_terminal_paid_budget_resolution_v2(
+            authority,
+            verified_requests,
+        )
+        if resolution is None:
             return False
+        paid_authority = resolution.paid_budget_authority
+        expected_captions = tuple(
+            StoryboardBeatCaptionV1.model_validate(
+                {
+                    "contract_version": "StoryboardBeatCaption.v1",
+                    "source_beat_index": card.source_beat_index,
+                    "sequence_index": card.sequence_index,
+                    "text_content": card.caption_text,
+                    "duration_ms": 4_000,
+                    "caption_digest": derive_storyboard_beat_caption_digest_v1(
+                        {
+                            "contract_version": "StoryboardBeatCaption.v1",
+                            "source_beat_index": card.source_beat_index,
+                            "sequence_index": card.sequence_index,
+                            "text_content": card.caption_text,
+                            "duration_ms": 4_000,
+                        }
+                    ),
+                }
+            )
+            for card in manifest.cards
+        )
         return (
             self.workspace_id == manifest.workspace_id
             and self.run_id == manifest.run_id
@@ -1417,6 +2582,7 @@ class StoryboardSceneFanInManifestV1(BaseModel):
             == manifest.storyboard_draft_digest
             and paid_authority.storyboard_approval_receipt_digest
             == manifest.storyboard_approval_receipt_digest
+            and self.captions == expected_captions
             and self.storyboard_scene_video_set_receipt.binds(
                 manifest,
                 authority,
@@ -1526,6 +2692,114 @@ class ReelsFactoryReceiptV3(BaseModel):
         )
 
 
+class ReelsFactoryCompletionSummaryV3(BaseModel):
+    """Browser-safe terminal output; full fan-in/provider proof stays server-only."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["ReelsFactoryCompletionSummary.v3"]
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    plan_digest: DigestStr
+    paid_budget_authority_digest: DigestStr
+    storyboard_execution_manifest_digest: DigestStr
+    storyboard_scene_video_set_receipt_digest: DigestStr
+    storyboard_scene_video_set_summary_digest: DigestStr
+    fan_in_manifest_digest: DigestStr
+    final_render_receipt_digest: DigestStr
+    rendered_at_utc: UtcTimestamp
+    status: Literal["succeeded"]
+    output_url: NonBlankStr
+    output_sha256: DigestStr
+    factory_receipt_digest: DigestStr
+    summary_digest: DigestStr
+
+    @field_validator("output_url")
+    @classmethod
+    def _durable_output_url(cls, value: str) -> str:
+        _assert_https_url(value)
+        return value
+
+    @model_validator(mode="after")
+    def _bind_summary_digest(self) -> "ReelsFactoryCompletionSummaryV3":
+        if self.summary_digest != derive_reels_factory_completion_summary_digest_v3(
+            self
+        ):
+            raise ValueError("summary_digest does not match factory completion")
+        return self
+
+    @classmethod
+    def from_receipt(
+        cls,
+        receipt: ReelsFactoryReceiptV3,
+        *,
+        scene_video_set_summary: StoryboardSceneVideoSetSummaryV1,
+        manifest: "StoryboardExecutionManifestV1",
+        authority: object,
+        operation_proofs: tuple[object, ...],
+    ) -> "ReelsFactoryCompletionSummaryV3":
+        scene_set = receipt.fan_in_manifest.storyboard_scene_video_set_receipt
+        if not receipt.binds_chain(
+            receipt.fan_in_manifest,
+            scene_set,
+            manifest=manifest,
+            authority=authority,
+            verified_requests=operation_proofs,
+        ) or not scene_video_set_summary.binds(
+            scene_set,
+            manifest=manifest,
+            authority=authority,
+            operation_proofs=operation_proofs,
+        ):
+            raise ValueError("factory summary requires verified terminal proof chain")
+        body: dict[str, Any] = {
+            "contract_version": "ReelsFactoryCompletionSummary.v3",
+            "workspace_id": receipt.workspace_id,
+            "run_id": receipt.run_id,
+            "factory_revision": receipt.factory_revision,
+            "plan_digest": receipt.plan_digest,
+            "paid_budget_authority_digest": receipt.paid_budget_authority_digest,
+            "storyboard_execution_manifest_digest": (
+                receipt.storyboard_execution_manifest_digest
+            ),
+            "storyboard_scene_video_set_receipt_digest": (
+                receipt.storyboard_scene_video_set_receipt_digest
+            ),
+            "storyboard_scene_video_set_summary_digest": (
+                scene_video_set_summary.summary_digest
+            ),
+            "fan_in_manifest_digest": receipt.fan_in_manifest_digest,
+            "final_render_receipt_digest": (
+                receipt.final_render_receipt.receipt_digest
+            ),
+            "rendered_at_utc": receipt.final_render_receipt.rendered_at_utc,
+            "status": receipt.status,
+            "output_url": receipt.output_url,
+            "output_sha256": receipt.output_sha256,
+            "factory_receipt_digest": receipt.receipt_digest,
+        }
+        body["summary_digest"] = derive_reels_factory_completion_summary_digest_v3(body)
+        return cls.model_validate(body)
+
+    def binds(
+        self,
+        receipt: ReelsFactoryReceiptV3,
+        *,
+        scene_video_set_summary: StoryboardSceneVideoSetSummaryV1,
+        manifest: "StoryboardExecutionManifestV1",
+        authority: object,
+        operation_proofs: tuple[object, ...],
+    ) -> bool:
+        return self == self.from_receipt(
+            receipt,
+            scene_video_set_summary=scene_video_set_summary,
+            manifest=manifest,
+            authority=authority,
+            operation_proofs=operation_proofs,
+        )
+
+
 def _assert_card_permutations(
     cards: tuple[StoryboardCardV1, ...],
     *,
@@ -1545,7 +2819,8 @@ def _assert_card_permutations(
         expected_identity = derive_storyboard_beat_identity_digest_v1(
             plan_digest,
             card.source_beat_index,
-            card.beat_text,
+            card.voice_text,
+            card.caption_text,
         )
         if card.beat_identity_digest != expected_identity:
             raise ValueError(
@@ -1598,14 +2873,24 @@ class StoryboardDraftV1(BaseModel):
             and self.image_set_receipt_digest == image_set.receipt_digest
         )
 
-    def is_valid_successor_of(self, previous: "StoryboardDraftV1") -> bool:
+    def is_valid_successor_of(
+        self,
+        previous: "StoryboardDraftV1",
+        *,
+        replacement_image_set: StoryboardImageSetReceiptV1 | None = None,
+    ) -> bool:
+        image_set_matches = (
+            self.image_set_receipt_digest == previous.image_set_receipt_digest
+            if replacement_image_set is None
+            else self.binds_image_set(replacement_image_set)
+        )
         if not (
             self.draft_id == previous.draft_id
             and self.workspace_id == previous.workspace_id
             and self.run_id == previous.run_id
             and self.factory_revision == previous.factory_revision
             and self.plan_digest == previous.plan_digest
-            and self.image_set_receipt_digest == previous.image_set_receipt_digest
+            and image_set_matches
             and self.revision == previous.revision + 1
             and self.parent_draft_digest == previous.draft_digest
         ):
@@ -1617,7 +2902,8 @@ class StoryboardDraftV1(BaseModel):
             current = current_by_source[source_beat_index]
             prior = previous_by_source[source_beat_index]
             if (
-                current.beat_text != prior.beat_text
+                current.voice_text != prior.voice_text
+                or current.caption_text != prior.caption_text
                 or current.beat_identity_digest != prior.beat_identity_digest
             ):
                 return False
@@ -2270,6 +3556,336 @@ class FactoryPaidBudgetResolutionV2(BaseModel):
         )
 
 
+class FactoryPaidOperationHistoricalEvidenceV2(BaseModel):
+    """Server-only evidence for a completed paid operation after currentness ends.
+
+    This wire is reconciliation evidence only.  Its verified capability is
+    intentionally rejected by every provider adapter gate.
+    """
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["FactoryPaidOperationHistoricalEvidence.v2"]
+    evidence_id: NonBlankStr
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    purpose: FactoryPaidBudgetPurposeV2
+    operation: Literal["script", "image", "video", "voice", "render"]
+    source_index: StoryboardBeatIndex | None
+    resolution: FactoryPaidBudgetResolutionV2
+    paid_budget_authority_digest: DigestStr
+    cost_profile_digest: DigestStr
+    pricing_policy_revision: PositiveSafeInt
+    provider: NonBlankStr
+    model: NonBlankStr
+    operation_key: NonBlankStr
+    execution_request_digest: DigestStr
+    provider_operation_id: NonBlankStr
+    provider_binding_receipt_digest: DigestStr
+    provider_result_receipt_id: NonBlankStr
+    provider_result_receipt_digest: DigestStr
+    provider_result_output_digest: DigestStr
+    provider_result_recorded_at_utc: UtcTimestamp
+    completed_claim_output_digest: DigestStr
+    claim_status: Literal["completed"]
+    reserved_at_utc: UtcTimestamp
+    completed_at_utc: UtcTimestamp
+    evidence_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_completed_paid_operation(
+        self,
+    ) -> "FactoryPaidOperationHistoricalEvidenceV2":
+        resolution = self.resolution
+        authority = resolution.paid_budget_authority
+        approval = resolution.approval_receipt
+        profile = resolution.cost_profile
+        operation_profile = getattr(profile.operations, self.operation)
+        if (
+            self.workspace_id != authority.workspace_id
+            or self.run_id != authority.run_id
+            or self.factory_revision != authority.factory_revision
+            or self.purpose != authority.purpose
+            or self.paid_budget_authority_digest != authority.authority_digest
+            or self.cost_profile_digest != profile.profile_digest
+            or self.pricing_policy_revision != profile.pricing_policy_revision
+            or self.provider != operation_profile.provider
+            or self.model != operation_profile.model
+        ):
+            raise ValueError("historical evidence does not bind paid resolution")
+        if self.operation == "image":
+            if (
+                authority.purpose not in {"storyboard_draft", "storyboard_regen"}
+                or self.source_index is None
+                or self.source_index not in authority.image_source_beat_indices
+            ):
+                raise ValueError("historical image evidence is outside paid scope")
+        elif self.operation == "video":
+            if (
+                authority.purpose != "final_production"
+                or authority.storyboard_scene_count is None
+                or self.source_index is None
+                or self.source_index >= authority.storyboard_scene_count
+            ):
+                raise ValueError("historical video evidence is outside paid scope")
+        elif self.operation == "voice":
+            if authority.purpose != "final_production" or self.source_index is None:
+                raise ValueError("historical voice evidence is outside paid scope")
+        elif self.operation == "script":
+            if authority.purpose != "storyboard_draft" or self.source_index is not None:
+                raise ValueError("historical script evidence is outside paid scope")
+        elif authority.purpose != "final_production" or self.source_index is not None:
+            raise ValueError("historical render evidence is outside paid scope")
+
+        reserved = _parse_utc(self.reserved_at_utc)
+        provider_result_recorded = _parse_utc(self.provider_result_recorded_at_utc)
+        completed = _parse_utc(self.completed_at_utc)
+        if not (
+            _parse_utc(approval.approved_at_utc)
+            <= reserved
+            < _parse_utc(approval.expires_at_utc)
+            and profile.is_valid_at(self.reserved_at_utc)
+        ):
+            raise ValueError("historical operation was not reserved in valid windows")
+        if approval.revoked_at_utc is not None and reserved >= _parse_utc(
+            approval.revoked_at_utc
+        ):
+            raise ValueError("historical operation was reserved after revocation")
+        if not reserved <= provider_result_recorded <= completed:
+            raise ValueError("historical result/claim timestamps are out of order")
+        if self.provider_result_output_digest != self.completed_claim_output_digest:
+            raise ValueError("leaf result and completed claim output must be identical")
+        if self.evidence_digest != (
+            derive_factory_paid_operation_historical_evidence_digest_v2(self)
+        ):
+            raise ValueError("evidence_digest does not match historical operation")
+        return self
+
+    @classmethod
+    def from_verified(
+        cls,
+        value: Mapping[str, Any] | "FactoryPaidOperationHistoricalEvidenceV2",
+        *,
+        resolver: FactoryPaidOperationEvidenceResolverV2,
+    ) -> "VerifiedFactoryPaidOperationHistoricalEvidenceV2":
+        evidence = cls.model_validate(value)
+        if not resolver.is_verified_completed_operation(
+            evidence_id=evidence.evidence_id,
+            evidence_digest=evidence.evidence_digest,
+            workspace_id=evidence.workspace_id,
+            run_id=evidence.run_id,
+            factory_revision=evidence.factory_revision,
+            purpose=evidence.purpose,
+            operation=evidence.operation,
+            source_index=evidence.source_index,
+            paid_budget_authority_digest=evidence.paid_budget_authority_digest,
+            cost_profile_digest=evidence.cost_profile_digest,
+            pricing_policy_revision=evidence.pricing_policy_revision,
+            provider=evidence.provider,
+            model=evidence.model,
+            operation_key=evidence.operation_key,
+            execution_request_digest=evidence.execution_request_digest,
+            provider_operation_id=evidence.provider_operation_id,
+            provider_binding_receipt_digest=(evidence.provider_binding_receipt_digest),
+            provider_result_receipt_id=evidence.provider_result_receipt_id,
+            provider_result_receipt_digest=evidence.provider_result_receipt_digest,
+            provider_result_output_digest=evidence.provider_result_output_digest,
+            provider_result_recorded_at_utc=(evidence.provider_result_recorded_at_utc),
+            completed_claim_output_digest=evidence.completed_claim_output_digest,
+            reserved_at_utc=evidence.reserved_at_utc,
+            completed_at_utc=evidence.completed_at_utc,
+        ):
+            raise ValueError(
+                "historical evidence resolver did not verify completed operation"
+            )
+        return VerifiedFactoryPaidOperationHistoricalEvidenceV2(
+            evidence,
+            _token=_VERIFIED_HISTORICAL_EVIDENCE_TOKEN_V2,
+        )
+
+
+_VERIFIED_HISTORICAL_EVIDENCE_TOKEN_V2 = object()
+_VERIFIED_HISTORICAL_EVIDENCE_REGISTRY_V2: WeakKeyDictionary[object, object] = (
+    WeakKeyDictionary()
+)
+
+
+class VerifiedFactoryPaidOperationHistoricalEvidenceV2:
+    """Opaque terminal-only proof; it never authorizes a provider call."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, evidence: object, *, _token: object) -> None:
+        if _token is not _VERIFIED_HISTORICAL_EVIDENCE_TOKEN_V2:
+            raise TypeError(
+                "verified historical evidence can only be minted by from_verified"
+            )
+        _VERIFIED_HISTORICAL_EVIDENCE_REGISTRY_V2[self] = evidence
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise TypeError("verified historical evidence is immutable")
+
+    def __delattr__(self, _name: str) -> None:
+        raise TypeError("verified historical evidence is immutable")
+
+    def __copy__(self) -> object:
+        raise TypeError("verified historical evidence cannot be copied")
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> object:
+        raise TypeError("verified historical evidence cannot be copied")
+
+    def __reduce_ex__(self, _protocol: int) -> object:
+        raise TypeError("verified historical evidence is not serializable")
+
+    def __repr__(self) -> str:
+        return "VerifiedFactoryPaidOperationHistoricalEvidenceV2(<sealed>)"
+
+
+def require_verified_factory_paid_operation_historical_evidence_v2(
+    capability: object,
+) -> FactoryPaidOperationHistoricalEvidenceV2:
+    if not isinstance(
+        capability,
+        VerifiedFactoryPaidOperationHistoricalEvidenceV2,
+    ):
+        raise TypeError(
+            "terminal reconciliation requires "
+            "VerifiedFactoryPaidOperationHistoricalEvidenceV2"
+        )
+    try:
+        evidence = _VERIFIED_HISTORICAL_EVIDENCE_REGISTRY_V2[capability]
+    except KeyError as exc:
+        raise TypeError("unminted historical evidence capability") from exc
+    if not isinstance(evidence, FactoryPaidOperationHistoricalEvidenceV2):
+        raise TypeError("historical evidence capability is invalid")
+    return evidence
+
+
+def _historical_evidence_binds_image_receipt_v2(
+    evidence: FactoryPaidOperationHistoricalEvidenceV2,
+    receipt: StoryboardImageProviderReceiptV1,
+) -> bool:
+    request = receipt.request
+    authority = evidence.resolution.paid_budget_authority
+    profile = evidence.resolution.cost_profile
+    output_digest = derive_factory_paid_operation_claim_output_digest_v2(receipt)
+    return (
+        evidence.operation == "image"
+        and evidence.source_index == request.source_beat_index
+        and evidence.workspace_id == request.workspace_id
+        and evidence.run_id == request.run_id
+        and evidence.factory_revision == request.factory_revision
+        and evidence.purpose == request.purpose
+        and evidence.paid_budget_authority_digest
+        == request.paid_budget_authority_digest
+        == authority.authority_digest
+        and evidence.cost_profile_digest
+        == request.cost_profile_digest
+        == profile.profile_digest
+        and evidence.pricing_policy_revision
+        == request.pricing_policy_revision
+        == profile.pricing_policy_revision
+        and evidence.provider == request.provider == receipt.provider
+        and evidence.model == request.model == receipt.model
+        and evidence.operation_key == request.operation_key == receipt.operation_key
+        and evidence.execution_request_digest == request.execution_request_digest
+        and evidence.provider_operation_id == receipt.provider_task_id
+        and evidence.provider_result_output_digest == output_digest
+        and evidence.completed_claim_output_digest == output_digest
+    )
+
+
+def _historical_evidence_binds_scene_receipt_v2(
+    evidence: FactoryPaidOperationHistoricalEvidenceV2,
+    receipt: StoryboardSceneVideoReceiptV1,
+) -> bool:
+    request = receipt.request
+    authority = evidence.resolution.paid_budget_authority
+    profile = evidence.resolution.cost_profile
+    output_digest = derive_factory_paid_operation_claim_output_digest_v2(receipt)
+    return (
+        evidence.operation == "video"
+        and evidence.source_index == request.scene_sequence_index
+        and evidence.workspace_id == request.workspace_id
+        and evidence.run_id == request.run_id
+        and evidence.factory_revision == request.factory_revision
+        and evidence.purpose == "final_production"
+        and evidence.paid_budget_authority_digest
+        == request.final_production_authority_digest
+        == authority.authority_digest
+        and evidence.cost_profile_digest
+        == request.cost_profile_digest
+        == profile.profile_digest
+        and evidence.pricing_policy_revision
+        == request.pricing_policy_revision
+        == profile.pricing_policy_revision
+        and evidence.provider == request.provider
+        and evidence.model == request.model
+        and evidence.operation_key
+        == derive_storyboard_scene_video_operation_key_v1(request)
+        and evidence.execution_request_digest == request.execution_request_digest
+        and evidence.provider_operation_id == receipt.provider_job_id
+        and evidence.provider_result_output_digest == output_digest
+        and evidence.completed_claim_output_digest == output_digest
+    )
+
+
+def _resolve_terminal_paid_budget_resolution_v2(
+    authority: object,
+    operation_proofs: tuple[object, ...],
+) -> FactoryPaidBudgetResolutionV2 | None:
+    """Resolve terminal truth without turning historical proof into authority."""
+
+    try:
+        return _unwrap_verified_factory_paid_budget_resolution_v2(authority)
+    except TypeError:
+        pass
+    if not isinstance(authority, FactoryPaidBudgetResolutionV2) or not operation_proofs:
+        return None
+    historical: list[FactoryPaidOperationHistoricalEvidenceV2] = []
+    for proof in operation_proofs:
+        try:
+            historical.append(
+                require_verified_factory_paid_operation_historical_evidence_v2(proof)
+            )
+        except TypeError:
+            return None
+    if any(item.resolution != authority for item in historical):
+        return None
+    return authority
+
+
+def _scene_receipt_binds_operation_proof_v2(
+    receipt: StoryboardSceneVideoReceiptV1,
+    proof: object,
+) -> bool:
+    if receipt.binds_verified_request(proof):
+        return True
+    try:
+        evidence = require_verified_factory_paid_operation_historical_evidence_v2(proof)
+    except TypeError:
+        return False
+    return _historical_evidence_binds_scene_receipt_v2(evidence, receipt)
+
+
+def _image_receipt_binds_operation_proof_v2(
+    receipt: StoryboardImageProviderReceiptV1,
+    proof: object,
+) -> bool:
+    try:
+        request = require_verified_storyboard_image_provider_request_v1(proof)
+    except TypeError:
+        request = None
+    if request is not None:
+        return receipt.request == request
+    try:
+        evidence = require_verified_factory_paid_operation_historical_evidence_v2(proof)
+    except TypeError:
+        return False
+    return _historical_evidence_binds_image_receipt_v2(evidence, receipt)
+
+
 class ReelsFactoryProviderAttemptsV3(BaseModel):
     """Phase-local paid attempts with hard global lane ceilings."""
 
@@ -2568,10 +4184,8 @@ class StoryboardExecutionManifestV1(BaseModel):
         for field in (
             "artifact_id",
             "storage_key",
-            "sha256",
             "provider_receipt_digest",
             "generation_nonce",
-            "artifact_digest",
         ):
             values = [getattr(image, field) for image in self.images]
             if len(values) != len(set(values)):
@@ -2631,7 +4245,11 @@ class StoryboardExecutionManifestV1(BaseModel):
 
 
 __all__ = [
+    "ATHENA_FRAME_PLAN_RECEIPT_VERSION_V1",
     "STORYBOARD_IMAGE_ARTIFACT_REF_VERSION_V1",
+    "STORYBOARD_IMAGE_PROVIDER_REQUEST_VERSION_V1",
+    "STORYBOARD_IMAGE_PROVIDER_RECEIPT_VERSION_V1",
+    "FACTORY_PAID_OPERATION_HISTORICAL_EVIDENCE_VERSION_V2",
     "STORYBOARD_IMAGE_SET_RECEIPT_VERSION_V1",
     "STORYBOARD_CARD_VERSION_V1",
     "STORYBOARD_SCENE_VERSION_V1",
@@ -2639,9 +4257,13 @@ __all__ = [
     "STORYBOARD_SCENE_VIDEO_RECEIPT_VERSION_V1",
     "STORYBOARD_BEAT_SCENE_VIDEO_PROJECTION_VERSION_V1",
     "STORYBOARD_SCENE_VIDEO_SET_RECEIPT_VERSION_V1",
+    "STORYBOARD_SCENE_VIDEO_SET_SUMMARY_VERSION_V1",
+    "STORYBOARD_BEAT_SCENE_PROJECTION_SUMMARY_VERSION_V1",
+    "STORYBOARD_BEAT_CAPTION_VERSION_V1",
     "STORYBOARD_SCENE_FAN_IN_MANIFEST_VERSION_V1",
     "STORYBOARD_SCENE_VIDEO_REQUEST_VERSION_V1",
     "REELS_FACTORY_RECEIPT_VERSION_V3",
+    "REELS_FACTORY_COMPLETION_SUMMARY_VERSION_V3",
     "REELS_FACTORY_PROGRESS_RECEIPT_VERSION_V3",
     "REELS_FACTORY_FAILURE_RECEIPT_VERSION_V3",
     "FACTORY_COST_PROFILE_VERSION_V1",
@@ -2654,6 +4276,13 @@ __all__ = [
     "STORYBOARD_CONTRACT_VERSIONS_V1",
     "StoryboardCropMode",
     "FactoryPaidBudgetPurposeV2",
+    "StoryboardImageReferenceSnapshotV1",
+    "StoryboardImagePlannedReferenceV1",
+    "StoryboardImageFramePlanV1",
+    "AthenaFramePlanReceiptV1",
+    "StoryboardImageProviderRequestV1",
+    "VerifiedStoryboardImageProviderRequestV1",
+    "StoryboardImageProviderReceiptV1",
     "StoryboardImageArtifactRefV1",
     "StoryboardSelectedArtifactV1",
     "StoryboardImageSetReceiptV1",
@@ -2666,13 +4295,18 @@ __all__ = [
     "StoryboardSceneVideoReceiptV1",
     "StoryboardBeatSceneVideoProjectionV1",
     "StoryboardSceneVideoSetReceiptV1",
+    "StoryboardBeatSceneProjectionSummaryV1",
+    "StoryboardSceneVideoSetSummaryV1",
+    "StoryboardBeatCaptionV1",
     "StoryboardSceneFanInManifestV1",
     "ReelsFactoryReceiptV3",
+    "ReelsFactoryCompletionSummaryV3",
     "StoryboardDraftV1",
     "StoryboardApprovalReceiptV1",
     "FactoryPaidCallCardinalityV2",
     "FactoryPaidBudgetAuthorityV2",
     "FactoryPaidBudgetApprovalResolverV2",
+    "FactoryPaidOperationEvidenceResolverV2",
     "FactoryPaidBudgetApprovalReceiptV2",
     "VerifiedFactoryPaidBudgetAuthorityV2",
     "FactoryCostOperationV1",
@@ -2683,18 +4317,34 @@ __all__ = [
     "FactoryCostPurposePoliciesV1",
     "FactoryCostProfileV1",
     "FactoryPaidBudgetResolutionV2",
+    "FactoryPaidOperationHistoricalEvidenceV2",
+    "VerifiedFactoryPaidOperationHistoricalEvidenceV2",
     "ReelsFactoryProviderAttemptsV3",
     "ReelsFactoryProviderReplaysV3",
     "ReelsFactoryProgressReceiptV3",
     "ReelsFactoryFailureReceiptV3",
     "StoryboardExecutionManifestV1",
     "derive_storyboard_image_artifact_digest_v1",
+    "derive_athena_frame_plan_receipt_digest_v1",
+    "derive_storyboard_image_generation_nonce_v1",
+    "derive_storyboard_image_operation_key_v1",
+    "derive_storyboard_image_provider_request_digest_v1",
+    "derive_storyboard_image_expected_artifact_id_v1",
+    "derive_storyboard_image_expected_storage_key_v1",
+    "derive_storyboard_image_provider_execution_request_digest_v1",
+    "derive_storyboard_image_provider_idempotency_key_v1",
+    "derive_storyboard_image_provider_receipt_digest_v1",
+    "derive_factory_paid_operation_claim_output_digest_v2",
+    "derive_factory_paid_operation_historical_evidence_digest_v2",
+    "require_verified_factory_paid_operation_historical_evidence_v2",
+    "require_verified_storyboard_image_provider_request_v1",
     "derive_storyboard_image_set_receipt_digest_v1",
     "derive_storyboard_beat_identity_digest_v1",
     "derive_storyboard_card_digest_v1",
     "derive_storyboard_scene_digest_v1",
     "derive_storyboard_scenes_v1",
     "derive_storyboard_scene_video_artifact_digest_v1",
+    "derive_storyboard_scene_video_operation_key_v1",
     "derive_storyboard_scene_video_request_digest_v1",
     "derive_storyboard_scene_video_execution_request_digest_v1",
     "derive_storyboard_scene_video_idempotency_key_v1",
@@ -2703,8 +4353,13 @@ __all__ = [
     "derive_storyboard_scene_video_receipt_digest_v1",
     "derive_storyboard_beat_scene_video_projection_digest_v1",
     "derive_storyboard_scene_video_set_receipt_digest_v1",
+    "derive_storyboard_beat_scene_projection_summary_digest_v1",
+    "derive_storyboard_scene_video_set_summary_digest_v1",
+    "derive_storyboard_beat_caption_digest_v1",
+    "derive_storyboard_caption_set_digest_v1",
     "derive_storyboard_scene_fan_in_manifest_digest_v1",
     "derive_reels_factory_receipt_digest_v3",
+    "derive_reels_factory_completion_summary_digest_v3",
     "derive_reels_factory_progress_receipt_digest_v3",
     "derive_reels_factory_failure_receipt_digest_v3",
     "derive_storyboard_draft_digest_v1",
