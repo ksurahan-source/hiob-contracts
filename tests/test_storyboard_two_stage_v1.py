@@ -51,6 +51,7 @@ from hiob_contracts import (
     derive_storyboard_beat_scene_video_projection_digest_v1,
     derive_storyboard_scene_video_artifact_digest_v1,
     derive_storyboard_scene_video_receipt_digest_v1,
+    derive_storyboard_scene_video_request_digest_v1,
     derive_storyboard_scene_video_set_receipt_digest_v1,
     derive_storyboard_scene_fan_in_manifest_digest_v1,
     derive_storyboard_scenes_v1,
@@ -435,9 +436,7 @@ def _manifest(
     approval: StoryboardApprovalReceiptV1,
     **changes: Any,
 ) -> StoryboardExecutionManifestV1:
-    images_by_source = {
-        image.source_beat_index: image for image in image_set.images
-    }
+    images_by_source = {image.source_beat_index: image for image in image_set.images}
     body: dict[str, Any] = {
         "contract_version": "StoryboardExecutionManifest.v1",
         "manifest_id": MANIFEST_ID,
@@ -494,6 +493,10 @@ def _scene_video_artifact(scene_sequence_index: int) -> dict[str, Any]:
 def _scene_video_receipt(
     scene: StoryboardSceneV1,
     scene_sequence_index: int,
+    *,
+    anchor_card: Any,
+    storyboard_execution_manifest_digest: str,
+    final_production_authority_digest: str,
 ) -> dict[str, Any]:
     body: dict[str, Any] = {
         "contract_version": "StoryboardSceneVideoReceipt.v1",
@@ -506,8 +509,11 @@ def _scene_video_receipt(
         "generation_nonce": (
             f"00000000-0000-4000-8000-{scene_sequence_index + 800:012d}"
         ),
-        "request_digest": sha256_digest(
-            {"scene_video_request": scene_sequence_index}
+        "request_digest": derive_storyboard_scene_video_request_digest_v1(
+            scene=scene,
+            anchor_card=anchor_card,
+            storyboard_execution_manifest_digest=(storyboard_execution_manifest_digest),
+            final_production_authority_digest=(final_production_authority_digest),
         ),
         "provider": "scene-video-provider",
         "model": "scene-video-model-v1",
@@ -552,7 +558,17 @@ def _scene_video_set(
     **changes: Any,
 ) -> StoryboardSceneVideoSetReceiptV1:
     scene_video_receipts = [
-        _scene_video_receipt(scene, index)
+        _scene_video_receipt(
+            scene,
+            index,
+            anchor_card=next(
+                card
+                for card in manifest.cards
+                if card.source_beat_index == scene.source_beat_indices[0]
+            ),
+            storyboard_execution_manifest_digest=manifest.manifest_digest,
+            final_production_authority_digest=final_authority.authority_digest,
+        )
         for index, scene in enumerate(manifest.scenes)
     ]
     scene_by_source = {
@@ -643,9 +659,7 @@ def _scene_fan_in(
         "audio_mix_digest": canonical_contract_digest_v1(
             {"audio_artifacts": audio_artifacts}
         ),
-        "render_policy_digest": sha256_digest(
-            {"render_policy": "storyboard-scenes"}
-        ),
+        "render_policy_digest": sha256_digest({"render_policy": "storyboard-scenes"}),
     }
     body.update(changes)
     return StoryboardSceneFanInManifestV1.model_validate(
@@ -982,6 +996,7 @@ def test_scene_projection_uses_first_card_as_deterministic_anchor() -> None:
     first = scenes[0]
     assert first.scene_id == "scene-00"
     assert first.sequence_index == 0
+    assert [scene.sequence_index for scene in scenes] == list(range(8))
     assert first.source_beat_indices == (0, 1)
     assert first.anchor_selected_artifact == draft.cards[0].selected_artifact
     assert first.scene_digest == derive_storyboard_scene_digest_v1(first)
@@ -990,6 +1005,42 @@ def test_scene_projection_uses_first_card_as_deterministic_anchor() -> None:
     tampered["source_beat_indices"] = [1, 0]
     with pytest.raises(ValidationError, match="scene_digest"):
         StoryboardSceneV1.model_validate(tampered)
+
+
+def test_scene_video_request_digest_binds_only_anchor_visual_fields() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    scene = derive_storyboard_scenes_v1(draft.cards)[0]
+    anchor = draft.cards[0]
+    execution_digest = sha256_digest({"execution_manifest": 1})
+    authority_digest = sha256_digest({"final_authority": 1})
+
+    observed = derive_storyboard_scene_video_request_digest_v1(
+        scene=scene,
+        anchor_card=anchor,
+        storyboard_execution_manifest_digest=execution_digest,
+        final_production_authority_digest=authority_digest,
+    )
+    assert observed == canonical_contract_digest_v1(
+        {
+            "purpose": "storyboard-scene-video-request.v1",
+            "storyboard_execution_manifest_digest": execution_digest,
+            "final_production_authority_digest": authority_digest,
+            "scene_sequence_index": scene.sequence_index,
+            "scene_id": scene.scene_id,
+            "scene_digest": scene.scene_digest,
+            "anchor": {
+                "source_beat_index": anchor.source_beat_index,
+                "beat_identity_digest": anchor.beat_identity_digest,
+                "prompt_override": anchor.prompt_override,
+                "crop_mode": anchor.crop_mode,
+                "focal_x_basis_points": anchor.focal_x_basis_points,
+                "focal_y_basis_points": anchor.focal_y_basis_points,
+                "motion_note": anchor.motion_note,
+                "selected_artifact": anchor.selected_artifact.model_dump(mode="json"),
+            },
+        }
+    )
 
 
 def test_approval_binds_exact_current_draft_revision_and_image_set() -> None:
@@ -1433,9 +1484,7 @@ def test_execution_manifest_rich_images_follow_card_sequence_not_source_order() 
             draft,
             image_set,
             approval,
-            images=[
-                image.model_dump(mode="json") for image in image_set.images
-            ],
+            images=[image.model_dump(mode="json") for image in image_set.images],
         )
 
 
@@ -1558,8 +1607,8 @@ def test_scene_video_set_rejects_repeat_or_video_alias_tampering() -> None:
             aliased["scene_video_receipts"][1]
         )
     )
-    aliased["receipt_digest"] = (
-        derive_storyboard_scene_video_set_receipt_digest_v1(aliased)
+    aliased["receipt_digest"] = derive_storyboard_scene_video_set_receipt_digest_v1(
+        aliased
     )
     with pytest.raises(ValidationError, match="unique"):
         StoryboardSceneVideoSetReceiptV1.model_validate(aliased)
@@ -1567,15 +1616,20 @@ def test_scene_video_set_rejects_repeat_or_video_alias_tampering() -> None:
 
 def test_scene_video_receipt_requires_exact_four_second_immutable_video() -> None:
     image_set = _image_set()
-    scene = derive_storyboard_scenes_v1(_draft(image_set).cards)[0]
-    payload = _scene_video_receipt(scene, 0)
+    draft = _draft(image_set)
+    scene = derive_storyboard_scenes_v1(draft.cards)[0]
+    payload = _scene_video_receipt(
+        scene,
+        0,
+        anchor_card=draft.cards[0],
+        storyboard_execution_manifest_digest=sha256_digest({"manifest": "test"}),
+        final_production_authority_digest=FINAL_AUTHORITY_DIGEST,
+    )
     payload["artifact"]["duration_ms"] = 3_999
     payload["artifact"]["artifact_digest"] = (
         derive_storyboard_scene_video_artifact_digest_v1(payload["artifact"])
     )
-    payload["receipt_digest"] = derive_storyboard_scene_video_receipt_digest_v1(
-        payload
-    )
+    payload["receipt_digest"] = derive_storyboard_scene_video_receipt_digest_v1(payload)
 
     with pytest.raises(ValidationError):
         StoryboardSceneVideoReceiptV1.model_validate(payload)
@@ -1620,8 +1674,7 @@ def test_scene_fan_in_binds_nested_scene_set_and_sequence_ordered_audio() -> Non
         for item in fan_in.storyboard_scene_video_set_receipt.beat_projections
     ] == expected_source_order
     assert all(
-        isinstance(item, StrictAllBeatArtifactRefV1)
-        for item in fan_in.audio_artifacts
+        isinstance(item, StrictAllBeatArtifactRefV1) for item in fan_in.audio_artifacts
     )
     assert fan_in.binds(manifest, verified)
 
@@ -1654,8 +1707,8 @@ def test_scene_fan_in_rejects_audio_order_or_mix_digest_drift() -> None:
     payload["audio_mix_digest"] = canonical_contract_digest_v1(
         {"audio_artifacts": payload["audio_artifacts"]}
     )
-    payload["manifest_digest"] = (
-        derive_storyboard_scene_fan_in_manifest_digest_v1(payload)
+    payload["manifest_digest"] = derive_storyboard_scene_fan_in_manifest_digest_v1(
+        payload
     )
 
     with pytest.raises(ValidationError, match="projection source order"):
@@ -1781,9 +1834,13 @@ def test_registry_and_root_exports_are_additive_and_v1_remains_unchanged() -> No
         "StoryboardImageArtifactRef",
         "StoryboardImageSetReceipt",
         "StoryboardScene",
+        "StoryboardSceneVideoReceipt",
+        "StoryboardSceneVideoSetReceipt",
+        "StoryboardSceneFanInManifest",
         "StoryboardDraft",
         "StoryboardApprovalReceipt",
         "StoryboardExecutionManifest",
+        "ReelsFactoryReceiptV3",
     }.issubset(registered_contracts())
 
     authority_result = validate_payload(

@@ -29,6 +29,12 @@ from .reels_factory_progress_v1 import (
     ReelsFactoryProgressReceiptV2,
     ReelsFactoryProviderAttemptsV1,
 )
+from .storyboard_two_stage_v1 import (
+    FactoryPaidBudgetPurposeV2,
+    ReelsFactoryReceiptV3,
+    StoryboardSceneVideoSetReceiptV1,
+    factory_paid_call_cardinality_v2,
+)
 
 
 _STRICT_FROZEN = ConfigDict(
@@ -67,7 +73,9 @@ class _StarReelsBudgetMultiBeatV1(BaseModel):
     @model_validator(mode="after")
     def _bind_per_beat_lanes(self) -> "_StarReelsBudgetMultiBeatV1":
         if self.image != self.voice:
-            raise ValueError("all-beat paid lanes must have equal image and voice counts")
+            raise ValueError(
+                "all-beat paid lanes must have equal image and voice counts"
+            )
         return self
 
 
@@ -88,12 +96,7 @@ class _StarReelsBudgetV2(BaseModel):
 
     @model_validator(mode="after")
     def _bind_all_paid_beat_lanes(self) -> "_StarReelsBudgetV2":
-        if not (
-            self.image
-            == self.video
-            == self.voice
-            == self.all_beat_count
-        ):
+        if not (self.image == self.video == self.voice == self.all_beat_count):
             raise ValueError("all-beat paid lanes must match all_beat_count")
         artifact_set = self.beat_artifact_set_receipt
         if artifact_set is not None and (
@@ -220,6 +223,19 @@ class _StarReelsViewReceiptsV2(BaseModel):
     plan_approval: AresApprovalReceiptV1 | None
 
 
+class _StarReelsViewReceiptsV3(BaseModel):
+    model_config = _STRICT_FROZEN
+
+    factory: (
+        ReelsFactoryProgressReceiptV2
+        | ReelsFactoryFailureReceiptV2
+        | ReelsFactoryReceiptV3
+        | None
+    )
+    script_approval: AresApprovalReceiptV1 | None
+    plan_approval: AresApprovalReceiptV1 | None
+
+
 def derive_star_product_lock_review_digest_v1(
     draft: ProductElementLockDraftV1,
 ) -> str:
@@ -269,8 +285,7 @@ class StarReelsViewV1(BaseModel):
     ) -> Any:
         if (
             isinstance(value, dict)
-            and value.get("contract_version")
-            == "ProductElementLockDraft.v1"
+            and value.get("contract_version") == "ProductElementLockDraft.v1"
         ):
             return ProductElementLockDraftV1.model_validate(value)
         return value
@@ -278,24 +293,28 @@ class StarReelsViewV1(BaseModel):
     @model_validator(mode="after")
     def _bind_view_shape_to_state(self) -> "StarReelsViewV1":
         valid_pair = (
-            self.section == "LockGate"
-            and self.status
-            in {
-                "missing",
-                "awaiting_product_approval",
-                "revoked",
-                "digest_drift",
-                "ready",
-            }
-        ) or (
-            self.section == "ScriptReview"
-            and self.status == "awaiting_script_approval"
-        ) or (
-            self.section == "PlanReview"
-            and self.status == "awaiting_plan_approval"
-        ) or (
-            self.section == "RunStatus"
-            and self.status in {"pending", "rendering", "ready", "failed"}
+            (
+                self.section == "LockGate"
+                and self.status
+                in {
+                    "missing",
+                    "awaiting_product_approval",
+                    "revoked",
+                    "digest_drift",
+                    "ready",
+                }
+            )
+            or (
+                self.section == "ScriptReview"
+                and self.status == "awaiting_script_approval"
+            )
+            or (
+                self.section == "PlanReview" and self.status == "awaiting_plan_approval"
+            )
+            or (
+                self.section == "RunStatus"
+                and self.status in {"pending", "rendering", "ready", "failed"}
+            )
         )
         if not valid_pair:
             raise ValueError("section does not match durable status")
@@ -305,43 +324,30 @@ class StarReelsViewV1(BaseModel):
             "PlanReview",
         }
         product_review = (
-            self.section == "LockGate"
-            and self.status == "awaiting_product_approval"
+            self.section == "LockGate" and self.status == "awaiting_product_approval"
         )
         lock_gate = self.section == "LockGate"
         if reviewing or product_review:
             if self.stage_output is None or self.review_digest is None:
-                raise ValueError(
-                    "review state requires stage_output and review_digest"
-                )
+                raise ValueError("review state requires stage_output and review_digest")
             if product_review:
                 if not isinstance(
                     self.stage_output,
                     ProductElementLockDraftV1,
                 ):
-                    raise ValueError(
-                        "product review requires typed product draft"
-                    )
+                    raise ValueError("product review requires typed product draft")
                 if self.review_digest != (
-                    derive_star_product_lock_review_digest_v1(
-                        self.stage_output
-                    )
+                    derive_star_product_lock_review_digest_v1(self.stage_output)
                 ):
-                    raise ValueError(
-                        "product review digest does not bind the draft"
-                    )
+                    raise ValueError("product review digest does not bind the draft")
                 if self.provider_call != "none" or self.error is not None:
                     raise ValueError(
                         "product review cannot carry provider work or error"
                     )
             elif self.provider_call != "confirmed" or self.error is not None:
-                raise ValueError(
-                    "review state requires one confirmed script call"
-                )
+                raise ValueError("review state requires one confirmed script call")
         elif self.stage_output is not None or self.review_digest is not None:
-            raise ValueError(
-                "non-review state cannot carry review-only fields"
-            )
+            raise ValueError("non-review state cannot carry review-only fields")
 
         if lock_gate:
             if self.provider_call != "none" or self.receipts.factory is not None:
@@ -353,16 +359,11 @@ class StarReelsViewV1(BaseModel):
             if lock_has_no_error != (self.error is None):
                 raise ValueError("LockGate error does not match lock state")
         elif self.status == "failed":
-            if (
-                self.error is None
-                or not isinstance(
-                    self.receipts.factory,
-                    (ReelsFactoryFailureReceiptV1, ReelsFactoryFailureReceiptV2),
-                )
+            if self.error is None or not isinstance(
+                self.receipts.factory,
+                (ReelsFactoryFailureReceiptV1, ReelsFactoryFailureReceiptV2),
             ):
-                raise ValueError(
-                    "failed state requires error and failure receipt"
-                )
+                raise ValueError("failed state requires error and failure receipt")
         elif self.error is not None:
             raise ValueError("non-failed state cannot carry an error")
 
@@ -408,9 +409,7 @@ class StarReelsViewV1(BaseModel):
             expected_provider_call is not None
             and self.provider_call != expected_provider_call
         ):
-            raise ValueError(
-                "provider_call does not match typed factory receipt"
-            )
+            raise ValueError("provider_call does not match typed factory receipt")
         return self
 
 
@@ -435,9 +434,364 @@ class StarReelsViewV2(StarReelsViewV1):
         return self
 
 
+class FactoryStoryboardCarrierV1(BaseModel):
+    """Digest-only storyboard pointer safe for a Star read projection."""
+
+    model_config = _STRICT_FROZEN
+
+    contract_version: Literal["FactoryStoryboardCarrier.v1"]
+    storyboard_revision: int = Field(ge=1)
+    storyboard_digest: DigestStr
+    image_set_receipt_digest: DigestStr
+    approval_receipt_digest: DigestStr | None
+    execution_manifest_digest: DigestStr | None
+
+    @model_validator(mode="after")
+    def _require_approval_before_execution(self) -> "FactoryStoryboardCarrierV1":
+        if (
+            self.execution_manifest_digest is not None
+            and self.approval_receipt_digest is None
+        ):
+            raise ValueError("execution manifest requires approval receipt")
+        return self
+
+
+_STAR_REELS_PURPOSE_LABELS_V3 = {
+    "storyboard_draft": "스토리보드 이미지 16장",
+    "storyboard_regen": "선택 이미지 재생성",
+    "final_production": "최종 영상 제작",
+}
+
+
+class StarReelsBudgetV3(BaseModel):
+    """Purpose-discriminated zero-capable paid-call projection."""
+
+    model_config = _STRICT_FROZEN
+
+    purpose: FactoryPaidBudgetPurposeV2
+    purpose_label: Literal[
+        "스토리보드 이미지 16장",
+        "선택 이미지 재생성",
+        "최종 영상 제작",
+    ]
+    script: int = Field(ge=0, le=1)
+    image: int = Field(ge=0, le=16)
+    video: int = Field(ge=0, le=16)
+    voice: int = Field(ge=0, le=16)
+    render: int = Field(ge=0, le=1)
+    retries: Literal[0]
+    fallbacks: Literal[0]
+    character_lock: Literal[0]
+    all_beat_count: Literal[16]
+    storyboard_scene_count: int | None = Field(ge=1, le=16)
+    paid_budget_authority_digest: DigestStr | None
+    storyboard_scene_video_set_receipt: StoryboardSceneVideoSetReceiptV1 | None
+
+    @model_validator(mode="after")
+    def _bind_purpose_label_and_paid_call_mask(self) -> "StarReelsBudgetV3":
+        if self.purpose_label != _STAR_REELS_PURPOSE_LABELS_V3[self.purpose]:
+            raise ValueError("purpose_label does not match purpose")
+        expected = factory_paid_call_cardinality_v2(
+            self.purpose,
+            regen_image_count=(
+                self.image if self.purpose == "storyboard_regen" else None
+            ),
+            storyboard_scene_count=self.storyboard_scene_count,
+        )
+        observed = {
+            "script": self.script,
+            "image": self.image,
+            "video": self.video,
+            "voice": self.voice,
+            "render": self.render,
+            "retries": self.retries,
+            "fallbacks": self.fallbacks,
+            "character_lock": self.character_lock,
+        }
+        if observed != expected:
+            raise ValueError("paid call mask does not match purpose")
+        scene_video_set = self.storyboard_scene_video_set_receipt
+        if self.purpose != "final_production" and scene_video_set is not None:
+            raise ValueError("storyboard budget cannot carry scene video receipt")
+        if scene_video_set is not None and (
+            self.paid_budget_authority_digest is None
+            or scene_video_set.storyboard_scene_count != self.storyboard_scene_count
+            or scene_video_set.final_production_authority_digest
+            != self.paid_budget_authority_digest
+        ):
+            raise ValueError("scene video receipt does not match final paid budget")
+        return self
+
+
+class StarReelsViewV3(BaseModel):
+    """Two-stage storyboard projection; V2 replay semantics remain untouched."""
+
+    model_config = _STRICT_FROZEN
+
+    contract_version: Literal["StarReelsView.v3"]
+    section: Literal[
+        "LockGate",
+        "ScriptReview",
+        "PlanReview",
+        "StoryboardReview",
+        "ProductionBudgetApproval",
+        "RunStatus",
+    ]
+    status: Literal[
+        "missing",
+        "awaiting_product_approval",
+        "revoked",
+        "digest_drift",
+        "awaiting_script_approval",
+        "awaiting_plan_approval",
+        "storyboard_generating",
+        "awaiting_storyboard_review",
+        "awaiting_production_budget_approval",
+        "pending",
+        "rendering",
+        "ready",
+        "failed",
+    ]
+    revision: int = Field(ge=0)
+    stage_output: (
+        ProductElementLockDraftV1 | FactoryStoryboardCarrierV1 | dict[str, Any] | None
+    )
+    budget: StarReelsBudgetV3
+    review_digest: DigestStr | None
+    receipts: _StarReelsViewReceiptsV3
+    provider_call: Literal["none", "confirmed", "unknown"]
+    error: NonBlankStr | None
+    storyboard: FactoryStoryboardCarrierV1 | None
+
+    @field_validator("stage_output", mode="before")
+    @classmethod
+    def _freeze_typed_review_output(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        contract_version = value.get("contract_version")
+        if contract_version == "ProductElementLockDraft.v1":
+            return ProductElementLockDraftV1.model_validate(value)
+        if contract_version == "FactoryStoryboardCarrier.v1":
+            return FactoryStoryboardCarrierV1.model_validate(value)
+        return value
+
+    @model_validator(mode="after")
+    def _bind_view_shape_to_state(self) -> "StarReelsViewV3":
+        self._require_valid_section_status_pair()
+        if self.section in {"LockGate", "ScriptReview", "PlanReview"}:
+            self._bind_legacy_gate()
+        elif self.section == "StoryboardReview":
+            self._bind_storyboard_review()
+        elif self.section == "ProductionBudgetApproval":
+            self._bind_production_budget_gate()
+        else:
+            self._bind_two_stage_run()
+        self._bind_factory_receipt_provider_state()
+        return self
+
+    def _require_valid_section_status_pair(self) -> None:
+        valid_pair = (
+            (
+                self.section == "LockGate"
+                and self.status
+                in {
+                    "missing",
+                    "awaiting_product_approval",
+                    "revoked",
+                    "digest_drift",
+                    "ready",
+                }
+            )
+            or (
+                self.section == "ScriptReview"
+                and self.status == "awaiting_script_approval"
+            )
+            or (
+                self.section == "PlanReview" and self.status == "awaiting_plan_approval"
+            )
+            or (
+                self.section == "StoryboardReview"
+                and self.status
+                in {"storyboard_generating", "awaiting_storyboard_review"}
+            )
+            or (
+                self.section == "ProductionBudgetApproval"
+                and self.status == "awaiting_production_budget_approval"
+            )
+            or (
+                self.section == "RunStatus"
+                and self.status in {"pending", "rendering", "ready", "failed"}
+            )
+        )
+        if not valid_pair:
+            raise ValueError("section does not match durable status")
+
+    def _bind_legacy_gate(self) -> None:
+        if self.budget.purpose != "storyboard_draft":
+            raise ValueError("legacy pre-storyboard gate requires draft budget purpose")
+        if self.budget.paid_budget_authority_digest is not None:
+            raise ValueError("pre-production gate cannot carry authority digest")
+        if self.storyboard is not None:
+            raise ValueError("pre-storyboard gate cannot carry storyboard pointer")
+        if self.section == "LockGate":
+            self._bind_lock_gate()
+            return
+        if self.stage_output is None or self.review_digest is None:
+            raise ValueError("review state requires stage_output and review_digest")
+        if self.provider_call != "confirmed" or self.error is not None:
+            raise ValueError("review state requires one confirmed script call")
+        if self.receipts.factory is not None:
+            raise ValueError("review state cannot carry factory receipt")
+
+    def _bind_lock_gate(self) -> None:
+        product_review = self.status == "awaiting_product_approval"
+        if product_review:
+            if not isinstance(self.stage_output, ProductElementLockDraftV1):
+                raise ValueError("product review requires typed product draft")
+            if self.review_digest != derive_star_product_lock_review_digest_v1(
+                self.stage_output
+            ):
+                raise ValueError("product review digest does not bind the draft")
+        elif self.stage_output is not None or self.review_digest is not None:
+            raise ValueError("non-review state cannot carry review-only fields")
+        if self.provider_call != "none" or self.receipts.factory is not None:
+            raise ValueError("LockGate cannot carry provider work")
+        lock_has_no_error = self.status in {
+            "ready",
+            "awaiting_product_approval",
+        }
+        if lock_has_no_error != (self.error is None):
+            raise ValueError("LockGate error does not match lock state")
+
+    def _bind_storyboard_review(self) -> None:
+        if self.budget.purpose not in {"storyboard_draft", "storyboard_regen"}:
+            raise ValueError("StoryboardReview budget purpose is invalid")
+        if self.budget.paid_budget_authority_digest is not None:
+            raise ValueError("StoryboardReview cannot carry authority digest")
+        if (
+            self.provider_call != "confirmed"
+            or self.error is not None
+            or self.receipts.factory is not None
+        ):
+            raise ValueError("StoryboardReview requires confirmed image work")
+        pointer = self.storyboard
+        if self.status == "storyboard_generating":
+            if pointer is None:
+                if self.stage_output is not None or self.review_digest is not None:
+                    raise ValueError(
+                        "generating without a pointer has no review output"
+                    )
+            elif self.stage_output != pointer or self.review_digest is not None:
+                raise ValueError(
+                    "generating pointer must be echoed without review digest"
+                )
+            return
+        if pointer is None or self.stage_output != pointer:
+            raise ValueError(
+                "storyboard review requires the current storyboard pointer"
+            )
+        if pointer.approval_receipt_digest is not None:
+            raise ValueError("unapproved storyboard review cannot carry approval")
+        if pointer.execution_manifest_digest is not None:
+            raise ValueError("storyboard review cannot carry execution manifest")
+        if self.review_digest != pointer.storyboard_digest:
+            raise ValueError("review_digest does not bind current storyboard")
+
+    def _bind_production_budget_gate(self) -> None:
+        if self.budget.purpose != "final_production":
+            raise ValueError("ProductionBudgetApproval budget purpose is invalid")
+        pointer = self.storyboard
+        if pointer is None or self.stage_output != pointer:
+            raise ValueError("production budget gate requires storyboard pointer")
+        if pointer.approval_receipt_digest is None:
+            raise ValueError("production budget gate requires storyboard approval")
+        if pointer.execution_manifest_digest is not None:
+            raise ValueError("production budget gate cannot carry execution manifest")
+        if self.review_digest != pointer.approval_receipt_digest:
+            raise ValueError("review_digest does not bind storyboard approval")
+        if self.budget.paid_budget_authority_digest is not None:
+            raise ValueError("unapproved final budget cannot carry authority digest")
+        if (
+            self.provider_call != "none"
+            or self.error is not None
+            or self.receipts.factory is not None
+        ):
+            raise ValueError("production budget gate cannot carry provider work")
+
+    def _bind_two_stage_run(self) -> None:
+        if self.budget.purpose != "final_production":
+            raise ValueError("RunStatus budget purpose must be final_production")
+        if self.budget.paid_budget_authority_digest is None:
+            raise ValueError("RunStatus requires final paid authority digest")
+        pointer = self.storyboard
+        if (
+            pointer is None
+            or pointer.approval_receipt_digest is None
+            or pointer.execution_manifest_digest is None
+        ):
+            raise ValueError("RunStatus requires approved execution manifest pointer")
+        if self.stage_output is not None or self.review_digest is not None:
+            raise ValueError("RunStatus cannot carry review-only fields")
+        if self.status == "failed":
+            if self.error is None or not isinstance(
+                self.receipts.factory,
+                ReelsFactoryFailureReceiptV2,
+            ):
+                raise ValueError("failed state requires error and failure receipt")
+        elif self.error is not None:
+            raise ValueError("non-failed state cannot carry an error")
+        if self.status in {"pending", "rendering"} and not isinstance(
+            self.receipts.factory,
+            ReelsFactoryProgressReceiptV2,
+        ):
+            raise ValueError("active state requires progress receipt")
+        if self.status == "ready" and not isinstance(
+            self.receipts.factory,
+            ReelsFactoryReceiptV3,
+        ):
+            raise ValueError("ready state requires final factory receipt")
+
+    def _bind_factory_receipt_provider_state(self) -> None:
+        factory = self.receipts.factory
+        if isinstance(factory, ReelsFactoryFailureReceiptV2):
+            expected_provider_call = factory.provider_call
+        elif isinstance(factory, ReelsFactoryProgressReceiptV2):
+            expected_provider_call = (
+                "confirmed"
+                if sum(factory.provider_attempts.model_dump().values()) > 0
+                else "none"
+            )
+        elif isinstance(factory, ReelsFactoryReceiptV3):
+            expected_provider_call = "confirmed"
+            scene_video_set = self.budget.storyboard_scene_video_set_receipt
+            pointer = self.storyboard
+            if (
+                scene_video_set is None
+                or pointer is None
+                or not factory.binds_scene_video_set(scene_video_set)
+                or factory.paid_budget_authority_digest
+                != self.budget.paid_budget_authority_digest
+                or factory.storyboard_execution_manifest_digest
+                != pointer.execution_manifest_digest
+            ):
+                raise ValueError(
+                    "sealed scene video budget does not match ready receipt"
+                )
+        else:
+            expected_provider_call = None
+        if (
+            expected_provider_call is not None
+            and self.provider_call != expected_provider_call
+        ):
+            raise ValueError("provider_call does not match typed factory receipt")
+
+
 __all__ = [
+    "FactoryStoryboardCarrierV1",
+    "StarReelsBudgetV3",
     "StarReelsViewV1",
     "StarReelsViewV2",
+    "StarReelsViewV3",
     "_StarReelsBudgetMultiBeatV1",
     "derive_star_product_lock_review_digest_v1",
 ]

@@ -11,6 +11,7 @@ LP1-7 / UM-1 residual: every SemanticEdge target_contract is registered, plus
 orpheus/apollo/metis/hermes planet envelopes. `validate_edge_target` maps
 edge_id → target schema; `verify_karma_edge_receipt` checks origin + freshness.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -36,7 +37,10 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "FeedbackSignal": ("hiob_contracts.feedback_signal", "FeedbackSignal"),
     "DefectSignal": ("hiob_contracts.defect_signal", "DefectSignal"),
     "ReelMetric": ("hiob_contracts.reel_metric", "ReelMetric"),
-    "CompositionSnapshot": ("hiob_contracts.composition_snapshot", "CompositionSnapshot"),
+    "CompositionSnapshot": (
+        "hiob_contracts.composition_snapshot",
+        "CompositionSnapshot",
+    ),
     "BeatPersona": ("hiob_contracts.beat_personas", "BeatPersona"),
     "BeatPersonas": ("hiob_contracts.beat_personas", "BeatPersonas"),
     "ElementLocks": ("hiob_contracts.element_locks", "ElementLocks"),
@@ -85,8 +89,63 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "hiob_contracts.factory_paid_budget_authority_v1",
         "FactoryPaidBudgetApprovalReceiptV1",
     ),
+    "FactoryPaidBudgetAuthorityV2": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "FactoryPaidBudgetAuthorityV2",
+    ),
+    "FactoryPaidBudgetApprovalReceiptV2": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "FactoryPaidBudgetApprovalReceiptV2",
+    ),
+    "FactoryPaidBudgetResolutionV2": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "FactoryPaidBudgetResolutionV2",
+    ),
+    "StoryboardImageArtifactRef": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardImageArtifactRefV1",
+    ),
+    "StoryboardImageSetReceipt": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardImageSetReceiptV1",
+    ),
+    "StoryboardScene": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardSceneV1",
+    ),
+    "StoryboardSceneVideoReceipt": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardSceneVideoReceiptV1",
+    ),
+    "StoryboardSceneVideoSetReceipt": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardSceneVideoSetReceiptV1",
+    ),
+    "StoryboardSceneFanInManifest": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardSceneFanInManifestV1",
+    ),
+    "ReelsFactoryReceiptV3": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "ReelsFactoryReceiptV3",
+    ),
+    "StoryboardDraft": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardDraftV1",
+    ),
+    "StoryboardApprovalReceipt": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardApprovalReceiptV1",
+    ),
+    "StoryboardExecutionManifest": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardExecutionManifestV1",
+    ),
     # Phase-3 edge targets (j2p / p2a)
-    "ParzifalTargetInput": ("hiob_contracts.parzifal_target_input", "ParzifalTargetInput"),
+    "ParzifalTargetInput": (
+        "hiob_contracts.parzifal_target_input",
+        "ParzifalTargetInput",
+    ),
     "AresScriptInput": ("hiob_contracts.ares_script_input", "AresScriptInput"),
     "AresP2ATargetProjection": (
         "hiob_contracts.ares_create_script_v3",
@@ -99,7 +158,10 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "AtroposDraftInput": ("hiob_contracts.edge_target_inputs", "AtroposDraftInput"),
     "ArtemisReviewInput": ("hiob_contracts.edge_target_inputs", "ArtemisReviewInput"),
     "AtroposApplyInput": ("hiob_contracts.edge_target_inputs", "AtroposApplyInput"),
-    "HephaestusRenderInput": ("hiob_contracts.edge_target_inputs", "HephaestusRenderInput"),
+    "HephaestusRenderInput": (
+        "hiob_contracts.edge_target_inputs",
+        "HephaestusRenderInput",
+    ),
     # Planet envelopes (orpheus / apollo / hephaestus / metis)
     "AudioRequest": ("hiob_contracts.planet_envelopes", "AudioRequest"),
     "SFXRequest": ("hiob_contracts.planet_envelopes", "SFXRequest"),
@@ -107,7 +169,10 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "VisualContext": ("hiob_contracts.planet_envelopes", "VisualContext"),
     "RenderJobRequest": ("hiob_contracts.planet_envelopes", "RenderJobRequest"),
     "RenderJobResponse": ("hiob_contracts.planet_envelopes", "RenderJobResponse"),
-    "ProcessInsightsRequest": ("hiob_contracts.planet_envelopes", "ProcessInsightsRequest"),
+    "ProcessInsightsRequest": (
+        "hiob_contracts.planet_envelopes",
+        "ProcessInsightsRequest",
+    ),
     # Hermes CAPI (was only in hiob-hermes — now contracts-owned for envelope checks)
     "CAPIEvent": ("hiob_contracts.edge_target_inputs", "CAPIEvent"),
     "CAPIPayload": ("hiob_contracts.edge_target_inputs", "CAPIPayload"),
@@ -160,7 +225,9 @@ def _parse(cls: Any, payload: Any) -> Any:
         return cls.from_dict(payload) if hasattr(cls, "from_dict") else cls(**payload)
     if hasattr(cls, "from_dict"):
         return cls.from_dict(payload)
-    raise TypeError(f"{cls.__name__}: dict/list/from_dict 없이 파싱 불가 (payload type={type(payload).__name__})")
+    raise TypeError(
+        f"{cls.__name__}: dict/list/from_dict 없이 파싱 불가 (payload type={type(payload).__name__})"
+    )
 
 
 def validate_payload(contract: str, payload: Any) -> ValidationResult:
@@ -171,7 +238,9 @@ def validate_payload(contract: str, payload: Any) -> ValidationResult:
     """
     cls = _resolve(contract)
     if cls is None:
-        return ValidationResult(False, contract, (f"unknown/unavailable contract: {contract}",))
+        return ValidationResult(
+            False, contract, (f"unknown/unavailable contract: {contract}",)
+        )
     try:
         obj = _parse(cls, payload)
     except Exception as e:  # noqa: BLE001 — 파싱 실패는 위반으로 보고(fail-loud)
@@ -204,6 +273,7 @@ def registered_contracts() -> tuple[str, ...]:
 
 
 # ── LP1-7: edge-scoped validation (9/9 SemanticEdges) ───────────────────────
+
 
 def validate_edge_target(edge_id: str, payload: Any) -> ValidationResult:
     """Validate `payload` as the target_input for a registered SemanticEdge.
@@ -338,9 +408,7 @@ def verify_karma_edge_receipt(
                     "target_contract.version mismatch: "
                     f"expected 'v3', got {target_contract.version!r}"
                 )
-            expected_schema_digest = (
-                ares_p2a_target_projection_v3_schema_digest()
-            )
+            expected_schema_digest = ares_p2a_target_projection_v3_schema_digest()
             if target_contract.schema_digest != expected_schema_digest:
                 errs.append(
                     "target_contract.schema_digest mismatch: "
@@ -358,9 +426,7 @@ def verify_karma_edge_receipt(
     if planet != "karma":
         errs.append(f"mapper.origin planet must be 'karma', got {planet!r}")
     if node_id != _KARMA_MAPPER_NODE:
-        errs.append(
-            f"mapper.node_id must be {_KARMA_MAPPER_NODE!r}, got {node_id!r}"
-        )
+        errs.append(f"mapper.node_id must be {_KARMA_MAPPER_NODE!r}, got {node_id!r}")
 
     if expected_source_digests is not None:
         got = tuple(obj.source_output_digests)
