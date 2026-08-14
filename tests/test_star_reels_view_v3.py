@@ -6,11 +6,20 @@ import pytest
 from pydantic import ValidationError
 
 from hiob_contracts import (
+    FactoryPaidBudgetApprovalReceiptV2,
+    FactoryPaidBudgetAuthorityV2,
     FactoryStoryboardCarrierV1,
+    ReelsFactoryFailureReceiptV3,
+    ReelsFactoryProgressReceiptV3,
     StarReelsBudgetV3,
     StarReelsViewV2,
     StarReelsViewV3,
-    derive_reels_factory_progress_receipt_digest_v1,
+    derive_factory_paid_budget_approval_receipt_digest_v2,
+    derive_factory_paid_budget_approval_subject_digest_v2,
+    derive_factory_paid_budget_authority_digest_v2,
+    derive_factory_paid_budget_idempotency_key_v2,
+    derive_reels_factory_failure_receipt_digest_v3,
+    derive_reels_factory_progress_receipt_digest_v3,
 )
 
 
@@ -18,6 +27,8 @@ DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
 DIGEST_C = "sha256:" + "c" * 64
 DIGEST_D = "sha256:" + "d" * 64
+WORKSPACE_ID = "00000000-0000-4000-8000-000000000001"
+RUN_ID = "00000000-0000-4000-8000-000000000002"
 
 
 def _budget(purpose: str) -> dict[str, object]:
@@ -74,46 +85,193 @@ def _carrier(*, approved: bool, executable: bool = False) -> dict[str, object]:
     }
 
 
-def _receipts() -> dict[str, None]:
+def _paid_pair(
+    purpose: str,
+) -> tuple[FactoryPaidBudgetApprovalReceiptV2, FactoryPaidBudgetAuthorityV2]:
+    image_source_beat_indices = (
+        list(range(16))
+        if purpose == "storyboard_draft"
+        else [0]
+        if purpose == "storyboard_regen"
+        else []
+    )
+    paid_calls = {
+        key: value
+        for key, value in _budget(purpose).items()
+        if key
+        in {
+            "script",
+            "image",
+            "video",
+            "voice",
+            "render",
+            "retries",
+            "fallbacks",
+            "character_lock",
+        }
+    }
+    scope: dict[str, object] = {
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "factory_revision": 7,
+        "all_beat_count": 16,
+        "purpose": purpose,
+        "plan_digest": None if purpose == "storyboard_draft" else DIGEST_C,
+        "storyboard_draft_digest": (
+            None if purpose == "storyboard_draft" else DIGEST_B
+        ),
+        "storyboard_approval_receipt_digest": (
+            DIGEST_D if purpose == "final_production" else None
+        ),
+        "storyboard_scene_count": (8 if purpose == "final_production" else None),
+        "image_source_beat_indices": image_source_beat_indices,
+        "paid_calls": paid_calls,
+        "max_total_cost_microunits": 20_000_000,
+        "currency": "USD",
+        "cost_profile_digest": DIGEST_A,
+        "pricing_policy_revision": 4,
+    }
+    approval_subject_digest = derive_factory_paid_budget_approval_subject_digest_v2(
+        scope
+    )
+    receipt_body: dict[str, object] = {
+        "contract_version": "FactoryPaidBudgetApprovalReceipt.v2",
+        "receipt_id": f"paid-{purpose}",
+        **scope,
+        "approval_subject_digest": approval_subject_digest,
+        "approver_account_id": "account-owner",
+        "decision": "approved",
+        "policy_version": "factory-paid-budget.v2",
+        "state_revision": 2,
+        "approved_at_utc": "2026-08-14T05:00:00Z",
+        "expires_at_utc": "2026-08-14T07:00:00Z",
+        "revoked_at_utc": None,
+        "transaction_audit_id": f"paid-{purpose}",
+    }
+    receipt_body["receipt_digest"] = (
+        derive_factory_paid_budget_approval_receipt_digest_v2(receipt_body)
+    )
+    receipt = FactoryPaidBudgetApprovalReceiptV2.model_validate(receipt_body)
+    authority_body: dict[str, object] = {
+        "contract_version": "FactoryPaidBudgetAuthority.v2",
+        **scope,
+        "approval_receipt_id": receipt.receipt_id,
+        "approval_receipt_digest": receipt.receipt_digest,
+        "approval_subject_digest": approval_subject_digest,
+    }
+    authority_body["idempotency_key"] = derive_factory_paid_budget_idempotency_key_v2(
+        authority_body
+    )
+    authority_body["authority_digest"] = derive_factory_paid_budget_authority_digest_v2(
+        authority_body
+    )
+    return receipt, FactoryPaidBudgetAuthorityV2.model_validate(authority_body)
+
+
+def _receipts(
+    pair: tuple[FactoryPaidBudgetApprovalReceiptV2, FactoryPaidBudgetAuthorityV2]
+    | None = None,
+    *,
+    factory: dict[str, object] | None = None,
+) -> dict[str, object | None]:
     return {
-        "factory": None,
+        "factory": factory,
         "script_approval": None,
         "plan_approval": None,
+        "paid_budget_approval_receipt": pair[0] if pair is not None else None,
+        "paid_budget_authority": pair[1] if pair is not None else None,
     }
 
 
-def _final_progress_receipt() -> dict[str, object]:
+def _progress_receipt_v3(
+    authority: FactoryPaidBudgetAuthorityV2,
+    *,
+    revision: int,
+    stage: str,
+    provider_attempts: dict[str, int],
+    storyboard_execution_manifest_digest: str | None,
+) -> dict[str, object]:
     body: dict[str, object] = {
-        "contract_version": "ReelsFactoryProgressReceipt.v2",
-        "run_id": "00000000-0000-4000-8000-000000000002",
-        "idempotency_key": "star.reels.factory:final",
-        "revision": 9,
-        "stage": "video",
-        "provider_attempts": {
+        "contract_version": "ReelsFactoryProgressReceipt.v3",
+        "workspace_id": authority.workspace_id,
+        "run_id": authority.run_id,
+        "factory_revision": authority.factory_revision,
+        "idempotency_key": authority.idempotency_key,
+        "revision": revision,
+        "purpose": authority.purpose,
+        "stage": stage,
+        "all_beat_count": 16,
+        "storyboard_scene_count": authority.storyboard_scene_count,
+        "paid_budget_authority_digest": authority.authority_digest,
+        "storyboard_execution_manifest_digest": (storyboard_execution_manifest_digest),
+        "provider_attempts": provider_attempts,
+        "provider_replays": {
             "script": 0,
             "image": 0,
-            "video": 1,
+            "video": 0,
             "voice": 0,
             "render": 0,
         },
+        "fallbacks": 0,
     }
     return {
         **body,
-        "receipt_digest": derive_reels_factory_progress_receipt_digest_v1(body),
+        "receipt_digest": derive_reels_factory_progress_receipt_digest_v3(body),
+    }
+
+
+def _failure_receipt_v3(
+    authority: FactoryPaidBudgetAuthorityV2,
+    *,
+    revision: int,
+    stage: str,
+    provider_attempts: dict[str, int],
+    storyboard_execution_manifest_digest: str | None,
+    provider_call: str = "confirmed",
+) -> dict[str, object]:
+    body = _progress_receipt_v3(
+        authority,
+        revision=revision,
+        stage=stage,
+        provider_attempts=provider_attempts,
+        storyboard_execution_manifest_digest=storyboard_execution_manifest_digest,
+    )
+    body.pop("receipt_digest")
+    body["contract_version"] = "ReelsFactoryFailureReceipt.v3"
+    body["code"] = "PROVIDER_TERMINAL"
+    body["provider_call"] = provider_call
+    return {
+        **body,
+        "receipt_digest": derive_reels_factory_failure_receipt_digest_v3(body),
     }
 
 
 def _storyboard_review_view(*, purpose: str = "storyboard_draft") -> dict:
     carrier = _carrier(approved=False)
+    pair = _paid_pair(purpose)
+    budget = _budget(purpose)
+    budget["paid_budget_authority_digest"] = pair[1].authority_digest
+    attempts = (
+        {"script": 1, "image": 16, "video": 0, "voice": 0, "render": 0}
+        if purpose == "storyboard_draft"
+        else {"script": 0, "image": 1, "video": 0, "voice": 0, "render": 0}
+    )
+    factory = _progress_receipt_v3(
+        pair[1],
+        revision=7,
+        stage="image",
+        provider_attempts=attempts,
+        storyboard_execution_manifest_digest=None,
+    )
     return {
         "contract_version": "StarReelsView.v3",
         "section": "StoryboardReview",
         "status": "awaiting_storyboard_review",
         "revision": 7,
         "stage_output": carrier,
-        "budget": _budget(purpose),
+        "budget": budget,
         "review_digest": DIGEST_B,
-        "receipts": _receipts(),
+        "receipts": _receipts(pair, factory=factory),
         "provider_call": "confirmed",
         "error": None,
         "storyboard": carrier,
@@ -127,6 +285,9 @@ def test_v3_storyboard_review_is_exact_and_digest_bound() -> None:
     assert value.stage_output == value.storyboard
     assert value.review_digest == value.storyboard.storyboard_digest
     assert value.budget.purpose == "storyboard_draft"
+    assert value.receipts.paid_budget_authority is not None
+    assert value.receipts.paid_budget_approval_receipt is not None
+    assert isinstance(value.receipts.factory, ReelsFactoryProgressReceiptV3)
 
     extra = _storyboard_review_view()
     extra["preview_url"] = "https://signed.example/credential"
@@ -225,8 +386,22 @@ def test_v3_carrier_rejects_execution_without_storyboard_approval() -> None:
 
 def test_v3_run_status_requires_approved_manifest_and_final_authority() -> None:
     carrier = _carrier(approved=True, executable=True)
+    pair = _paid_pair("final_production")
     budget = _budget("final_production")
-    budget["paid_budget_authority_digest"] = DIGEST_A
+    budget["paid_budget_authority_digest"] = pair[1].authority_digest
+    progress = _progress_receipt_v3(
+        pair[1],
+        revision=9,
+        stage="video",
+        provider_attempts={
+            "script": 0,
+            "image": 0,
+            "video": 1,
+            "voice": 0,
+            "render": 0,
+        },
+        storyboard_execution_manifest_digest=DIGEST_A,
+    )
     payload = {
         "contract_version": "StarReelsView.v3",
         "section": "RunStatus",
@@ -236,8 +411,7 @@ def test_v3_run_status_requires_approved_manifest_and_final_authority() -> None:
         "budget": budget,
         "review_digest": None,
         "receipts": {
-            **_receipts(),
-            "factory": _final_progress_receipt(),
+            **_receipts(pair, factory=progress),
         },
         "provider_call": "confirmed",
         "error": None,
@@ -262,10 +436,142 @@ def test_v3_rejects_section_status_and_budget_purpose_drift() -> None:
     with pytest.raises(ValidationError, match="budget purpose"):
         StarReelsViewV3.model_validate(wrong_purpose)
 
-    premature_phase_b_authority = _storyboard_review_view()
-    premature_phase_b_authority["budget"]["paid_budget_authority_digest"] = DIGEST_A
-    with pytest.raises(ValidationError, match="cannot carry authority"):
-        StarReelsViewV3.model_validate(premature_phase_b_authority)
+    authority_drift = _storyboard_review_view()
+    authority_drift["budget"]["paid_budget_authority_digest"] = DIGEST_C
+    with pytest.raises(ValidationError, match="authority"):
+        StarReelsViewV3.model_validate(authority_drift)
+
+
+def test_v3_storyboard_generating_forbids_approved_or_executable_carrier() -> None:
+    payload = _storyboard_review_view()
+    payload["status"] = "storyboard_generating"
+    payload["review_digest"] = None
+    carrier = _carrier(approved=True, executable=True)
+    payload["storyboard"] = carrier
+    payload["stage_output"] = carrier
+
+    with pytest.raises(ValidationError, match="generating.*approval|execution"):
+        StarReelsViewV3.model_validate(payload)
+
+
+def test_v3_progress_and_failure_attempts_cannot_exceed_paid_authority_mask() -> None:
+    pair = _paid_pair("final_production")
+    exact_attempts = {
+        "script": 0,
+        "image": 0,
+        "video": 8,
+        "voice": 16,
+        "render": 1,
+    }
+    progress = ReelsFactoryProgressReceiptV3.model_validate(
+        _progress_receipt_v3(
+            pair[1],
+            revision=9,
+            stage="render",
+            provider_attempts=exact_attempts,
+            storyboard_execution_manifest_digest=DIGEST_A,
+        )
+    )
+    assert progress.provider_attempts.video == 8
+
+    overflow = _progress_receipt_v3(
+        pair[1],
+        revision=9,
+        stage="video",
+        provider_attempts={**exact_attempts, "video": 999},
+        storyboard_execution_manifest_digest=DIGEST_A,
+    )
+    with pytest.raises(ValidationError, match="attempt"):
+        ReelsFactoryProgressReceiptV3.model_validate(overflow)
+
+    failure_overflow = _failure_receipt_v3(
+        pair[1],
+        revision=9,
+        stage="voice",
+        provider_attempts={**exact_attempts, "voice": 17},
+        storyboard_execution_manifest_digest=DIGEST_A,
+    )
+    with pytest.raises(ValidationError, match="attempt"):
+        ReelsFactoryFailureReceiptV3.model_validate(failure_overflow)
+
+
+def test_v3_failed_view_requires_authority_bound_v3_failure_receipt() -> None:
+    carrier = _carrier(approved=True, executable=True)
+    pair = _paid_pair("final_production")
+    budget = _budget("final_production")
+    budget["paid_budget_authority_digest"] = pair[1].authority_digest
+    failure = _failure_receipt_v3(
+        pair[1],
+        revision=10,
+        stage="video",
+        provider_attempts={
+            "script": 0,
+            "image": 0,
+            "video": 1,
+            "voice": 0,
+            "render": 0,
+        },
+        storyboard_execution_manifest_digest=DIGEST_A,
+    )
+    payload = {
+        "contract_version": "StarReelsView.v3",
+        "section": "RunStatus",
+        "status": "failed",
+        "revision": 10,
+        "stage_output": None,
+        "budget": budget,
+        "review_digest": None,
+        "receipts": _receipts(pair, factory=failure),
+        "provider_call": "confirmed",
+        "error": "PROVIDER_TERMINAL",
+        "storyboard": carrier,
+    }
+
+    value = StarReelsViewV3.model_validate(payload)
+    assert isinstance(value.receipts.factory, ReelsFactoryFailureReceiptV3)
+
+    purpose_drift = deepcopy(payload)
+    purpose_drift["receipts"]["factory"]["purpose"] = "storyboard_draft"
+    purpose_drift["receipts"]["factory"]["storyboard_scene_count"] = None
+    purpose_drift["receipts"]["factory"]["storyboard_execution_manifest_digest"] = None
+    purpose_drift["receipts"]["factory"]["provider_attempts"] = {
+        "script": 1,
+        "image": 0,
+        "video": 0,
+        "voice": 0,
+        "render": 0,
+    }
+    purpose_drift["receipts"]["factory"]["receipt_digest"] = (
+        derive_reels_factory_failure_receipt_digest_v3(
+            purpose_drift["receipts"]["factory"]
+        )
+    )
+    with pytest.raises(ValidationError, match="purpose|authority"):
+        StarReelsViewV3.model_validate(purpose_drift)
+
+
+def test_v3_view_rejects_missing_or_cross_purpose_paid_pair_and_receipt() -> None:
+    payload = _storyboard_review_view()
+    payload["receipts"]["paid_budget_approval_receipt"] = None
+    with pytest.raises(ValidationError, match="paid budget pair"):
+        StarReelsViewV3.model_validate(payload)
+
+    cross_purpose = _storyboard_review_view()
+    final_pair = _paid_pair("final_production")
+    cross_purpose["receipts"]["paid_budget_approval_receipt"] = final_pair[0]
+    cross_purpose["receipts"]["paid_budget_authority"] = final_pair[1]
+    with pytest.raises(ValidationError, match="purpose|authority"):
+        StarReelsViewV3.model_validate(cross_purpose)
+
+    receipt_drift = _storyboard_review_view()
+    receipt_drift["receipts"]["factory"]["paid_budget_authority_digest"] = DIGEST_D
+    receipt_drift["receipts"]["factory"]["receipt_digest"] = (
+        derive_reels_factory_progress_receipt_digest_v3(
+            receipt_drift["receipts"]["factory"]
+        )
+    )
+    with pytest.raises(ValidationError, match="factory.*authority|authority.*factory"):
+        StarReelsViewV3.model_validate(receipt_drift)
 
 
 def test_v2_remains_strict_and_has_no_storyboard_or_purpose_fields() -> None:
@@ -289,7 +595,11 @@ def test_v2_remains_strict_and_has_no_storyboard_or_purpose_fields() -> None:
             "beat_artifact_set_receipt": None,
         },
         "review_digest": None,
-        "receipts": _receipts(),
+        "receipts": {
+            "factory": None,
+            "script_approval": None,
+            "plan_approval": None,
+        },
         "provider_call": "none",
         "error": "PRODUCT_LOCK_MISSING",
     }

@@ -17,6 +17,7 @@ from hiob_contracts import (
     FactoryPaidBudgetApprovalResolverV2,
     FactoryPaidBudgetAuthorityV2,
     FactoryPaidBudgetResolutionV2,
+    FactoryCostProfileV1,
     FactoryStoryboardCarrierV1,
     ReelsFactoryReceiptV3,
     StarReelsViewV3,
@@ -29,16 +30,19 @@ from hiob_contracts import (
     StoryboardImageArtifactRefV1,
     StoryboardImageSetReceiptV1,
     StoryboardSceneV1,
+    StoryboardSceneVideoRequestV1,
     StoryboardSceneVideoArtifactRefV1,
     StoryboardSceneVideoReceiptV1,
     StoryboardSceneVideoSetReceiptV1,
     StrictAllBeatArtifactRefV1,
     StoryboardSelectedArtifactV1,
+    VerifiedStoryboardSceneVideoRequestV1,
     canonical_contract_digest_v1,
     derive_factory_paid_budget_approval_subject_digest_v2,
     derive_factory_paid_budget_approval_receipt_digest_v2,
     derive_factory_paid_budget_authority_digest_v2,
     derive_factory_paid_budget_idempotency_key_v2,
+    derive_factory_cost_profile_digest_v1,
     derive_reels_factory_receipt_digest_v3,
     derive_storyboard_approval_receipt_digest_v1,
     derive_storyboard_beat_identity_digest_v1,
@@ -52,9 +56,11 @@ from hiob_contracts import (
     derive_storyboard_scene_video_artifact_digest_v1,
     derive_storyboard_scene_video_receipt_digest_v1,
     derive_storyboard_scene_video_request_digest_v1,
+    derive_storyboard_scene_video_idempotency_key_v1,
     derive_storyboard_scene_video_set_receipt_digest_v1,
     derive_storyboard_scene_fan_in_manifest_digest_v1,
     derive_storyboard_scenes_v1,
+    require_verified_storyboard_scene_video_request_v1,
     registered_contracts,
     sha256_digest,
     validate_payload,
@@ -416,17 +422,71 @@ def _cost_profile() -> dict[str, Any]:
         "pricing_policy_revision": 4,
         "valid_from_utc": "2026-08-14T00:00:00Z",
         "valid_until_utc": "2026-08-15T00:00:00Z",
+        "all_beat_count": 16,
+        "purpose_policies": {
+            "storyboard_draft": {
+                "script": 1,
+                "image": 16,
+                "video": 0,
+                "voice": 0,
+                "render": 0,
+            },
+            "storyboard_regen": {
+                "script": 0,
+                "image": "selected",
+                "video": 0,
+                "voice": 0,
+                "render": 0,
+            },
+            "final_production": {
+                "script": 0,
+                "image": 0,
+                "video": "approved_scene_count",
+                "voice": 16,
+                "render": 1,
+            },
+        },
         "operations": {
-            "script": {"rate_microunits": 2_000_000},
-            "image": {"rate_microunits": 1_000_000},
-            "video": {"rate_microunits": 100_000},
-            "voice": {"rate_microunits": 90},
-            "render": {"rate_microunits": 2_000_000},
+            "script": {
+                "provider": "openai",
+                "model": "gpt-5.6-sol",
+                "billing_unit": "call",
+                "rate_microunits": 2_000_000,
+                "max_units_per_operation": 1,
+            },
+            "image": {
+                "provider": "seedream",
+                "model": "seedream-5-pro",
+                "billing_unit": "call",
+                "rate_microunits": 160_000,
+                "max_units_per_operation": 1,
+            },
+            "video": {
+                "provider": "piapi",
+                "model": "kling-3.0-omni",
+                "billing_unit": "second",
+                "rate_microunits": 100_000,
+                "max_units_per_operation": 4,
+            },
+            "voice": {
+                "provider": "typecast",
+                "model": "ssfm-v30",
+                "billing_unit": "character",
+                "rate_microunits": 90,
+                "max_units_per_operation": 200,
+            },
+            "render": {
+                "provider": "modal",
+                "model": "hephaestus-final-render-v2",
+                "billing_unit": "call",
+                "rate_microunits": 2_000_000,
+                "max_units_per_operation": 1,
+            },
         },
     }
     return {
         **body,
-        "profile_digest": canonical_contract_digest_v1(body),
+        "profile_digest": derive_factory_cost_profile_digest_v1(body),
     }
 
 
@@ -526,6 +586,65 @@ def _scene_video_receipt(
         digest_field="receipt_digest",
         derive=derive_storyboard_scene_video_receipt_digest_v1,
     )
+
+
+def _scene_video_request(
+    manifest: StoryboardExecutionManifestV1,
+    final_authority: FactoryPaidBudgetAuthorityV2,
+    scene_sequence_index: int = 0,
+    **changes: Any,
+) -> dict[str, Any]:
+    scene = manifest.scenes[scene_sequence_index]
+    anchor_card = next(
+        card
+        for card in manifest.cards
+        if card.source_beat_index == scene.source_beat_indices[0]
+    )
+    anchor_image = next(
+        image
+        for image in manifest.images
+        if image.source_beat_index == anchor_card.source_beat_index
+    )
+    body: dict[str, Any] = {
+        "contract_version": "StoryboardSceneVideoRequest.v1",
+        "workspace_id": manifest.workspace_id,
+        "run_id": manifest.run_id,
+        "factory_revision": manifest.factory_revision,
+        "plan_digest": manifest.plan_digest,
+        "storyboard_execution_manifest_digest": manifest.manifest_digest,
+        "final_production_authority_digest": final_authority.authority_digest,
+        "scene_sequence_index": scene_sequence_index,
+        "scene_id": scene.scene_id,
+        "scene_digest": scene.scene_digest,
+        "anchor": {
+            "source_beat_index": anchor_card.source_beat_index,
+            "beat_identity_digest": anchor_card.beat_identity_digest,
+            "prompt_override": anchor_card.prompt_override,
+            "crop_mode": anchor_card.crop_mode,
+            "focal_x_basis_points": anchor_card.focal_x_basis_points,
+            "focal_y_basis_points": anchor_card.focal_y_basis_points,
+            "motion_note": anchor_card.motion_note,
+            "selected_artifact": anchor_card.selected_artifact.model_dump(mode="json"),
+        },
+        "anchor_image": anchor_image.model_dump(mode="json"),
+        "generation_nonce": (
+            f"00000000-0000-4000-8000-{scene_sequence_index + 800:012d}"
+        ),
+        "duration_ms": 4_000,
+        "width": anchor_image.width,
+        "height": anchor_image.height,
+        "provider": "piapi",
+        "model": "kling-3.0-omni",
+        "request_digest": derive_storyboard_scene_video_request_digest_v1(
+            scene=scene,
+            anchor_card=anchor_card,
+            storyboard_execution_manifest_digest=manifest.manifest_digest,
+            final_production_authority_digest=final_authority.authority_digest,
+        ),
+    }
+    body.update(changes)
+    body["idempotency_key"] = derive_storyboard_scene_video_idempotency_key_v1(body)
+    return body
 
 
 def _beat_scene_video_projection(
@@ -1234,6 +1353,117 @@ def test_v2_resolution_output_is_exact_and_binds_cost_profile_and_capability() -
         )
 
 
+def test_v2_resolution_requires_full_typed_current_cost_profile() -> None:
+    profile_payload = _cost_profile()
+    profile = FactoryCostProfileV1.model_validate(profile_payload)
+
+    assert profile.all_beat_count == 16
+    assert profile.purpose_policies is not None
+    assert set(profile.operations.model_dump(mode="json")) == {
+        "script",
+        "image",
+        "video",
+        "voice",
+        "render",
+    }
+    assert profile.operations.video.provider == "piapi"
+    assert profile.operations.video.model == "kling-3.0-omni"
+    assert profile.operations.video.billing_unit == "second"
+
+    legacy_payload = deepcopy(profile_payload)
+    legacy_payload.pop("all_beat_count")
+    legacy_payload.pop("purpose_policies")
+    legacy_payload["profile_digest"] = derive_factory_cost_profile_digest_v1(
+        legacy_payload
+    )
+    legacy_profile = FactoryCostProfileV1.model_validate(legacy_payload)
+    assert legacy_profile.all_beat_count is None
+    assert legacy_profile.purpose_policies is None
+
+    receipt = _paid_approval_receipt_v2(
+        "final_production",
+        cost_profile_digest=legacy_profile.profile_digest,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(receipt)
+    )
+    with pytest.raises(ValidationError, match="purpose policies"):
+        FactoryPaidBudgetResolutionV2.model_validate(
+            {
+                "approval_receipt": receipt,
+                "cost_profile": legacy_profile,
+                "paid_budget_authority": authority,
+            }
+        )
+
+
+def test_v2_resolution_rejects_currency_or_validity_drift() -> None:
+    eur_payload = _cost_profile()
+    eur_payload["currency"] = "EUR"
+    eur_payload["profile_digest"] = derive_factory_cost_profile_digest_v1(eur_payload)
+    receipt = _paid_approval_receipt_v2(
+        "final_production",
+        cost_profile_digest=eur_payload["profile_digest"],
+        currency="USD",
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(receipt)
+    )
+    with pytest.raises(ValidationError, match="currency"):
+        FactoryPaidBudgetResolutionV2.model_validate(
+            {
+                "approval_receipt": receipt,
+                "cost_profile": eur_payload,
+                "paid_budget_authority": authority,
+            }
+        )
+
+    expired_payload = _cost_profile()
+    expired_payload["valid_until_utc"] = "2026-08-14T06:30:00Z"
+    expired_payload["profile_digest"] = derive_factory_cost_profile_digest_v1(
+        expired_payload
+    )
+    receipt = _paid_approval_receipt_v2(
+        "final_production",
+        cost_profile_digest=expired_payload["profile_digest"],
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(receipt)
+    )
+    resolution = FactoryPaidBudgetResolutionV2.model_validate(
+        {
+            "approval_receipt": receipt,
+            "cost_profile": expired_payload,
+            "paid_budget_authority": authority,
+        }
+    )
+    with pytest.raises(ValueError, match="current cost profile"):
+        resolution.from_verified(
+            at_utc="2026-08-14T06:45:00Z",
+            resolver=_ApprovalResolverV2(),
+        )
+
+
+def test_typed_cost_profile_rejects_missing_operation_identity_or_policy_drift() -> (
+    None
+):
+    missing_provider = _cost_profile()
+    missing_provider["operations"]["video"].pop("provider")
+    missing_provider["profile_digest"] = derive_factory_cost_profile_digest_v1(
+        missing_provider
+    )
+    with pytest.raises(ValidationError):
+        FactoryCostProfileV1.model_validate(missing_provider)
+
+    wrong_selector = _cost_profile()
+    wrong_selector["purpose_policies"]["final_production"]["video"] = 16
+    wrong_selector["profile_digest"] = derive_factory_cost_profile_digest_v1(
+        wrong_selector
+    )
+    with pytest.raises(ValidationError):
+        FactoryCostProfileV1.model_validate(wrong_selector)
+
+
 @pytest.mark.parametrize(
     ("purpose", "indices", "expected_calls"),
     [
@@ -1565,6 +1795,140 @@ def test_scene_video_set_binds_exact_scenes_and_sixteen_beat_projection() -> Non
     )
 
 
+def test_scene_video_set_and_fan_in_reject_alien_manifest_approval_subject() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    verified = FactoryPaidBudgetAuthorityV2.from_verified(
+        authority,
+        approval_receipt=paid_receipt,
+        at_utc="2026-08-14T06:00:00Z",
+        resolver=_ApprovalResolverV2(),
+    )
+    alien_manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        storyboard_draft_digest=sha256_digest({"alien": "draft"}),
+        storyboard_approval_receipt_digest=sha256_digest({"alien": "approval"}),
+        final_production_authority_digest=authority.authority_digest,
+    )
+    assert not alien_manifest.binds(approval, draft, image_set, verified)
+
+    scene_video_set = _scene_video_set(alien_manifest, authority)
+    fan_in = _scene_fan_in(alien_manifest, authority, scene_video_set)
+
+    assert not scene_video_set.binds(alien_manifest, verified)
+    assert not fan_in.binds(alien_manifest, verified)
+
+
+def test_scene_video_request_requires_verified_exact_manifest_capability() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    verified_authority = FactoryPaidBudgetAuthorityV2.from_verified(
+        authority,
+        approval_receipt=paid_receipt,
+        at_utc="2026-08-14T06:00:00Z",
+        resolver=_ApprovalResolverV2(),
+    )
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    payload = _scene_video_request(manifest, authority)
+
+    with pytest.raises(TypeError, match="VerifiedFactoryPaidBudgetAuthorityV2"):
+        StoryboardSceneVideoRequestV1.from_verified(
+            payload,
+            manifest=manifest,
+            authority=authority,
+        )
+
+    capability = StoryboardSceneVideoRequestV1.from_verified(
+        payload,
+        manifest=manifest,
+        authority=verified_authority,
+    )
+    assert isinstance(capability, VerifiedStoryboardSceneVideoRequestV1)
+    request = require_verified_storyboard_scene_video_request_v1(capability)
+    assert request.request_digest == payload["request_digest"]
+    assert request.idempotency_key == payload["idempotency_key"]
+    assert request.anchor.source_beat_index == manifest.scenes[0].source_beat_indices[0]
+
+    with pytest.raises(TypeError, match="VerifiedStoryboardSceneVideoRequestV1"):
+        require_verified_storyboard_scene_video_request_v1(request)
+
+
+def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    verified_authority = FactoryPaidBudgetAuthorityV2.from_verified(
+        authority,
+        approval_receipt=paid_receipt,
+        at_utc="2026-08-14T06:00:00Z",
+        resolver=_ApprovalResolverV2(),
+    )
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    payload = _scene_video_request(manifest, authority)
+
+    provider_drift = deepcopy(payload)
+    provider_drift["model"] = "unpriced-model"
+    with pytest.raises(ValidationError, match="idempotency_key"):
+        StoryboardSceneVideoRequestV1.model_validate(provider_drift)
+
+    alien_image = deepcopy(payload)
+    alien_image["anchor_image"]["storage_key"] = (
+        "workspaces/alien/runs/alien/storyboard/00.webp"
+    )
+    alien_image["idempotency_key"] = derive_storyboard_scene_video_idempotency_key_v1(
+        alien_image
+    )
+    with pytest.raises(ValueError, match="anchor image"):
+        StoryboardSceneVideoRequestV1.from_verified(
+            alien_image,
+            manifest=manifest,
+            authority=verified_authority,
+        )
+
+    extra_non_anchor = deepcopy(payload)
+    extra_non_anchor["non_anchor_prompts"] = [draft.cards[1].prompt_override]
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        StoryboardSceneVideoRequestV1.model_validate(extra_non_anchor)
+
+
 def test_scene_video_set_rejects_repeat_or_video_alias_tampering() -> None:
     image_set = _image_set()
     draft = _draft(image_set)
@@ -1803,6 +2167,8 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
             "factory": factory,
             "script_approval": None,
             "plan_approval": None,
+            "paid_budget_approval_receipt": paid_receipt,
+            "paid_budget_authority": authority,
         },
         "provider_call": "confirmed",
         "error": None,
@@ -1831,10 +2197,14 @@ def test_registry_and_root_exports_are_additive_and_v1_remains_unchanged() -> No
         "FactoryPaidBudgetAuthorityV2",
         "FactoryPaidBudgetApprovalReceiptV2",
         "FactoryPaidBudgetResolutionV2",
+        "FactoryCostProfile",
+        "ReelsFactoryProgressReceiptV3",
+        "ReelsFactoryFailureReceiptV3",
         "StoryboardImageArtifactRef",
         "StoryboardImageSetReceipt",
         "StoryboardScene",
         "StoryboardSceneVideoReceipt",
+        "StoryboardSceneVideoRequest",
         "StoryboardSceneVideoSetReceipt",
         "StoryboardSceneFanInManifest",
         "StoryboardDraft",
