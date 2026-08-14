@@ -83,8 +83,10 @@ class _ApprovalResolverV2:
     def __init__(self, current: bool = True) -> None:
         self.current = current
         self.last_identity: dict[str, Any] | None = None
+        self.call_count = 0
 
     def is_current_approval(self, **identity: Any) -> bool:
+        self.call_count += 1
         self.last_identity = identity
         return self.current
 
@@ -722,7 +724,10 @@ def _reseal_scene_video_request(body: dict[str, Any]) -> dict[str, Any]:
 def _verified_scene_video_requests(
     manifest: StoryboardExecutionManifestV1,
     authority: VerifiedFactoryPaidBudgetAuthorityV2,
+    *,
+    resolver: FactoryPaidBudgetApprovalResolverV2 | None = None,
 ) -> tuple[VerifiedStoryboardSceneVideoRequestV1, ...]:
+    current_approval_resolver = resolver or _ApprovalResolverV2()
     return tuple(
         StoryboardSceneVideoRequestV1.from_verified(
             _scene_video_request(
@@ -734,6 +739,7 @@ def _verified_scene_video_requests(
             manifest=manifest,
             authority=authority,
             at_utc="2026-08-14T06:00:00Z",
+            resolver=current_approval_resolver,
         )
         for scene_sequence_index in range(len(manifest.scenes))
     )
@@ -1019,6 +1025,23 @@ def test_image_set_is_exactly_sixteen_unique_ordered_source_beats() -> None:
     assert image_set.receipt_digest == derive_storyboard_image_set_receipt_digest_v1(
         image_set
     )
+
+
+def test_image_set_allows_distinct_executions_with_identical_bytes() -> None:
+    images = [_image(i) for i in range(16)]
+    images[1] = _image(1, sha256=images[0]["sha256"])
+
+    image_set = _image_set(images=images)
+
+    assert image_set.images[0].sha256 == image_set.images[1].sha256
+    assert image_set.images[0].artifact_digest == image_set.images[1].artifact_digest
+    assert image_set.images[0].artifact_id != image_set.images[1].artifact_id
+    assert image_set.images[0].storage_key != image_set.images[1].storage_key
+    assert (
+        image_set.images[0].provider_receipt_digest
+        != image_set.images[1].provider_receipt_digest
+    )
+    assert image_set.images[0].generation_nonce != image_set.images[1].generation_nonce
 
 
 @pytest.mark.parametrize("mutation", ["missing", "duplicate_beat", "duplicate_asset"])
@@ -2055,6 +2078,7 @@ def test_scene_video_request_requires_verified_exact_manifest_capability() -> No
             manifest=manifest,
             authority=authority,
             at_utc="2026-08-14T06:00:00Z",
+            resolver=_ApprovalResolverV2(),
         )
 
     capability = StoryboardSceneVideoRequestV1.from_verified(
@@ -2062,6 +2086,7 @@ def test_scene_video_request_requires_verified_exact_manifest_capability() -> No
         manifest=manifest,
         authority=verified_authority,
         at_utc="2026-08-14T06:00:00Z",
+        resolver=_ApprovalResolverV2(),
     )
     assert isinstance(capability, VerifiedStoryboardSceneVideoRequestV1)
     request = require_verified_storyboard_scene_video_request_v1(capability)
@@ -2120,6 +2145,75 @@ def test_scene_video_request_requires_verified_exact_manifest_capability() -> No
         require_verified_storyboard_scene_video_request_v1(request)
 
 
+def test_scene_video_request_rechecks_durable_approval_before_every_scene() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    profile = _cost_profile()
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+        cost_profile_digest=profile["profile_digest"],
+        pricing_policy_revision=profile["pricing_policy_revision"],
+        max_total_cost_microunits=_profile_worst_case_cost(
+            profile,
+            purpose="final_production",
+            scene_count=8,
+        ),
+    )
+    resolver = _ApprovalResolverV2()
+    verified_authority = _verified_paid_authority_v2(
+        paid_receipt,
+        profile=profile,
+        resolver=resolver,
+    )
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=verified_authority.authority.authority_digest,
+    )
+
+    assert resolver.call_count == 1
+    capabilities = _verified_scene_video_requests(
+        manifest,
+        verified_authority,
+        resolver=resolver,
+    )
+    assert len(capabilities) == len(manifest.scenes)
+    assert resolver.call_count == 1 + len(manifest.scenes)
+
+    resolver.current = False
+    with pytest.raises(ValueError, match="current durable approval"):
+        StoryboardSceneVideoRequestV1.from_verified(
+            _scene_video_request(
+                manifest,
+                verified_authority.authority,
+                cost_profile=verified_authority.cost_profile,
+            ),
+            manifest=manifest,
+            authority=verified_authority,
+            at_utc="2026-08-14T06:15:00Z",
+            resolver=resolver,
+        )
+    assert resolver.call_count == 2 + len(manifest.scenes)
+
+    resolver.current = True
+    with pytest.raises(ValueError, match="current durable approval"):
+        StoryboardSceneVideoRequestV1.from_verified(
+            _scene_video_request(
+                manifest,
+                verified_authority.authority,
+                cost_profile=verified_authority.cost_profile,
+            ),
+            manifest=manifest,
+            authority=verified_authority,
+            at_utc=paid_receipt.expires_at_utc,
+            resolver=resolver,
+        )
+
+
 def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() -> None:
     image_set = _image_set()
     draft = _draft(image_set)
@@ -2165,6 +2259,7 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
             manifest=manifest,
             authority=verified_authority,
             at_utc="2026-08-14T06:00:00Z",
+            resolver=_ApprovalResolverV2(),
         )
 
     alien_image = deepcopy(payload)
@@ -2178,6 +2273,7 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
             manifest=manifest,
             authority=verified_authority,
             at_utc="2026-08-14T06:00:00Z",
+            resolver=_ApprovalResolverV2(),
         )
 
     wrong_output_profile = deepcopy(payload)
@@ -2220,6 +2316,7 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
                 manifest=manifest,
                 authority=verified_authority,
                 at_utc="2026-08-14T06:00:00Z",
+                resolver=_ApprovalResolverV2(),
             )
 
     extra_non_anchor = deepcopy(payload)
@@ -2275,6 +2372,54 @@ def test_scene_video_set_rejects_repeat_or_video_alias_tampering() -> None:
     )
     with pytest.raises(ValidationError, match="unique"):
         StoryboardSceneVideoSetReceiptV1.model_validate(aliased)
+
+
+def test_scene_video_set_allows_distinct_executions_with_identical_bytes() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    payload = _scene_video_set(manifest, authority).model_dump(mode="json")
+    shared_digest = payload["scene_video_receipts"][0]["artifact"]["sha256"]
+    second_receipt = payload["scene_video_receipts"][1]
+    second_receipt["artifact"]["sha256"] = shared_digest
+    second_receipt["artifact"]["artifact_digest"] = shared_digest
+    second_receipt["receipt_digest"] = derive_storyboard_scene_video_receipt_digest_v1(
+        second_receipt
+    )
+    for projection in payload["beat_projections"]:
+        if projection["scene_sequence_index"] == 1:
+            projection["video_artifact_digest"] = shared_digest
+            projection["projection_digest"] = (
+                derive_storyboard_beat_scene_video_projection_digest_v1(projection)
+            )
+    payload["receipt_digest"] = derive_storyboard_scene_video_set_receipt_digest_v1(
+        payload
+    )
+
+    receipt = StoryboardSceneVideoSetReceiptV1.model_validate(payload)
+
+    first = receipt.scene_video_receipts[0]
+    second = receipt.scene_video_receipts[1]
+    assert first.artifact.sha256 == second.artifact.sha256
+    assert first.artifact.artifact_digest == second.artifact.artifact_digest
+    assert first.artifact.artifact_id != second.artifact.artifact_id
+    assert first.artifact.storage_key != second.artifact.storage_key
+    assert first.provider_job_id != second.provider_job_id
+    assert first.request.generation_nonce != second.request.generation_nonce
 
 
 def test_scene_video_receipt_requires_exact_four_second_immutable_video() -> None:
