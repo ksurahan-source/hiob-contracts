@@ -277,6 +277,8 @@ from .ares_create_story_v4 import (
     request_content_digest_v4,
 )
 from .story_script_review_v1 import (
+    voice_text_metrics_v1,
+    story_voice_limits_v1,
     StoryIntake13QV1,
     StoryScriptPaidCallsV1,
     StoryScriptRequestV1,
@@ -736,6 +738,8 @@ __all__ = [
     "StoryCharacterCardV1",
     "StoryScriptBeatV1",
     "StoryScriptReviewBundleV1",
+    "voice_text_metrics_v1",
+    "story_voice_limits_v1",
     "StoryProducerV4",
     "StoryArtifactTypeV4",
     "StoryProducerStagedStatusV4",

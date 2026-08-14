@@ -19,6 +19,34 @@ from .ares_script_revision_v1 import (
 )
 
 
+_MIN_VOICE_CHARS_PER_SECOND = 3
+_MAX_VOICE_CHARS_PER_SECOND = 12
+_MAX_VOICE_UTF8_BYTES_PER_SECOND = 32
+
+
+def voice_text_metrics_v1(value: str) -> tuple[int, int]:
+    """Return deterministic Unicode-codepoint and UTF-8 byte counts."""
+
+    return len(value), len(value.encode("utf-8"))
+
+
+def story_voice_limits_v1(duration_ms: int) -> tuple[int, int, int]:
+    """Return inclusive character bounds and UTF-8 ceiling for one timed beat."""
+
+    if isinstance(duration_ms, bool) or not isinstance(duration_ms, int):
+        raise TypeError("duration_ms must be an integer")
+    if duration_ms < 1 or duration_ms > 55_000:
+        raise ValueError("duration_ms must be between 1 and 55000")
+    minimum_chars = (
+        duration_ms * _MIN_VOICE_CHARS_PER_SECOND + 999
+    ) // 1_000
+    maximum_chars = duration_ms * _MAX_VOICE_CHARS_PER_SECOND // 1_000
+    maximum_utf8_bytes = (
+        duration_ms * _MAX_VOICE_UTF8_BYTES_PER_SECOND // 1_000
+    )
+    return minimum_chars, maximum_chars, maximum_utf8_bytes
+
+
 class StoryIntake13QV1(BaseModel):
     """The exact current Studio 13Q, with no caller-authored hook or assets."""
 
@@ -132,6 +160,11 @@ class StoryCharacterCardV1(BaseModel):
 
     card_id: NonBlankStr
     role: Literal["lead", "support"]
+    name: NonBlankStr
+    age_range: NonBlankStr
+    appearance: NonBlankStr
+    wardrobe: NonBlankStr
+    visual_traits: tuple[NonBlankStr, ...] = Field(min_length=2, max_length=6)
     audience: NonBlankStr
     pain: NonBlankStr
     jtbd: NonBlankStr
@@ -147,10 +180,20 @@ class StoryCharacterCardV1(BaseModel):
         *,
         card_id: str,
         role: Literal["lead", "support"],
+        name: str,
+        age_range: str,
+        appearance: str,
+        wardrobe: str,
+        visual_traits: tuple[str, ...],
     ) -> "StoryCharacterCardV1":
         body = {
             "card_id": card_id,
             "role": role,
+            "name": name,
+            "age_range": age_range,
+            "appearance": appearance,
+            "wardrobe": wardrobe,
+            "visual_traits": list(visual_traits),
             "audience": intake.audience,
             "pain": intake.pain,
             "jtbd": intake.jtbd,
@@ -159,6 +202,18 @@ class StoryCharacterCardV1(BaseModel):
             "blocker": intake.blocker,
         }
         return cls(**body, card_digest=canonical_contract_digest_v1(body))
+
+    @field_validator("visual_traits", mode="before")
+    @classmethod
+    def _traits_to_tuple(cls, value: Any) -> Any:
+        return tuple(value) if isinstance(value, list) else value
+
+    @field_validator("visual_traits", mode="after")
+    @classmethod
+    def _unique_traits(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(value) != len(set(value)):
+            raise ValueError("visual_traits must be unique")
+        return value
 
     @model_validator(mode="after")
     def _bind_card(self) -> "StoryCharacterCardV1":
@@ -179,6 +234,22 @@ class StoryScriptBeatV1(BaseModel):
     voice_text: NonBlankStr
     caption_text: NonBlankStr
     duration_ms: int = Field(ge=1, le=55_000, strict=True)
+    voice_char_count: NonNegativeInt
+    voice_utf8_bytes: NonNegativeInt
+
+    @model_validator(mode="after")
+    def _bind_speech_rate(self) -> "StoryScriptBeatV1":
+        char_count, utf8_bytes = voice_text_metrics_v1(self.voice_text)
+        if self.voice_char_count != char_count:
+            raise ValueError("voice_char_count does not match voice_text")
+        if self.voice_utf8_bytes != utf8_bytes:
+            raise ValueError("voice_utf8_bytes does not match voice_text")
+        minimum, maximum, utf8_maximum = story_voice_limits_v1(self.duration_ms)
+        if char_count < minimum or char_count > maximum:
+            raise ValueError("voice text exceeds timed speech character limits")
+        if utf8_bytes > utf8_maximum:
+            raise ValueError("voice text exceeds timed speech UTF-8 limit")
+        return self
 
 
 class StoryScriptReviewBundleV1(BaseModel):
@@ -194,6 +265,8 @@ class StoryScriptReviewBundleV1(BaseModel):
     character_cards: tuple[StoryCharacterCardV1, ...] = Field(min_length=1)
     beats: tuple[StoryScriptBeatV1, ...]
     paid_calls: StoryScriptPaidCallsV1
+    total_voice_char_count: NonNegativeInt
+    total_voice_utf8_bytes: NonNegativeInt
     bundle_digest: DigestStr
 
     @field_validator("character_cards", "beats", mode="before")
@@ -222,6 +295,12 @@ class StoryScriptReviewBundleV1(BaseModel):
             ],
             "beats": [beat.model_dump(mode="json") for beat in beats],
             "paid_calls": request.paid_calls.model_dump(mode="json"),
+            "total_voice_char_count": sum(
+                beat.voice_char_count for beat in beats
+            ),
+            "total_voice_utf8_bytes": sum(
+                beat.voice_utf8_bytes for beat in beats
+            ),
         }
         return cls(
             **body,
@@ -242,6 +321,21 @@ class StoryScriptReviewBundleV1(BaseModel):
         total_ms = sum(beat.duration_ms for beat in self.beats)
         if total_ms != self.target_duration_sec * 1_000:
             raise ValueError("beat duration must equal target_duration_sec")
+        total_chars = sum(beat.voice_char_count for beat in self.beats)
+        total_utf8_bytes = sum(beat.voice_utf8_bytes for beat in self.beats)
+        if self.total_voice_char_count != total_chars:
+            raise ValueError(
+                "total_voice_char_count does not match the timed script"
+            )
+        if self.total_voice_utf8_bytes != total_utf8_bytes:
+            raise ValueError(
+                "total_voice_utf8_bytes does not match the timed script"
+            )
+        minimum, maximum, utf8_maximum = story_voice_limits_v1(total_ms)
+        if total_chars < minimum or total_chars > maximum:
+            raise ValueError("total script exceeds timed speech character limits")
+        if total_utf8_bytes > utf8_maximum:
+            raise ValueError("total script exceeds timed speech UTF-8 limit")
         card_ids = [card.card_id for card in self.character_cards]
         if len(card_ids) != len(set(card_ids)):
             raise ValueError("character card_id values must be unique")
@@ -257,6 +351,8 @@ class StoryScriptReviewBundleV1(BaseModel):
 
 
 __all__ = [
+    "voice_text_metrics_v1",
+    "story_voice_limits_v1",
     "StoryIntake13QV1",
     "StoryScriptPaidCallsV1",
     "StoryScriptRequestV1",
