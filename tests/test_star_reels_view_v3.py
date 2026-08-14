@@ -59,7 +59,7 @@ def _budget(purpose: str) -> dict[str, object]:
         "all_beat_count": 16,
         "storyboard_scene_count": (8 if purpose == "final_production" else None),
         "paid_budget_authority_digest": None,
-        "beat_artifact_set_receipt": None,
+        "storyboard_scene_video_set_receipt": None,
     }
 
 

@@ -17,7 +17,10 @@ from hiob_contracts import (
     FactoryPaidBudgetApprovalResolverV2,
     FactoryPaidBudgetAuthorityV2,
     FactoryPaidBudgetResolutionV2,
+    FactoryStoryboardCarrierV1,
     ReelsFactoryReceiptV3,
+    StarReelsViewV3,
+    StoryboardSceneFanInManifestV1,
     StoryboardBeatSceneVideoProjectionV1,
     VerifiedFactoryPaidBudgetAuthorityV2,
     StoryboardApprovalReceiptV1,
@@ -29,6 +32,7 @@ from hiob_contracts import (
     StoryboardSceneVideoArtifactRefV1,
     StoryboardSceneVideoReceiptV1,
     StoryboardSceneVideoSetReceiptV1,
+    StrictAllBeatArtifactRefV1,
     StoryboardSelectedArtifactV1,
     canonical_contract_digest_v1,
     derive_factory_paid_budget_approval_subject_digest_v2,
@@ -48,6 +52,7 @@ from hiob_contracts import (
     derive_storyboard_scene_video_artifact_digest_v1,
     derive_storyboard_scene_video_receipt_digest_v1,
     derive_storyboard_scene_video_set_receipt_digest_v1,
+    derive_storyboard_scene_fan_in_manifest_digest_v1,
     derive_storyboard_scenes_v1,
     registered_contracts,
     sha256_digest,
@@ -589,6 +594,69 @@ def _scene_video_set(
     )
 
 
+def _audio_artifact(source_beat_index: int) -> dict[str, Any]:
+    artifact_id = f"voice-beat-{source_beat_index:02d}.mp3"
+    return {
+        "artifact_id": artifact_id,
+        "kind": "audio",
+        "uri": f"factory-artifacts/{artifact_id}",
+        "sha256": sha256_digest({"voice": source_beat_index}),
+        "mime": "audio/mpeg",
+        "bytes_len": 2_048 + source_beat_index,
+        "duration_ms": 4_000,
+        "width": None,
+        "height": None,
+        "beat_index": source_beat_index,
+        "producer_planet": "orpheus",
+        "producer_node_id": "voice.materialize",
+        "execution_id": f"voice-exec-{source_beat_index:02d}",
+        "producer_revision": "rev-1",
+        "image_digest": None,
+        "source_output_digests": [],
+        "edge_receipt_digests": [],
+        "provenance_refs": [],
+        "consent_refs": [],
+    }
+
+
+def _scene_fan_in(
+    manifest: StoryboardExecutionManifestV1,
+    final_authority: FactoryPaidBudgetAuthorityV2,
+    scene_video_set: StoryboardSceneVideoSetReceiptV1,
+    **changes: Any,
+) -> StoryboardSceneFanInManifestV1:
+    audio_artifacts = [
+        _audio_artifact(card.source_beat_index) for card in manifest.cards
+    ]
+    body: dict[str, Any] = {
+        "contract_version": "StoryboardSceneFanInManifest.v1",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "factory_revision": 7,
+        "plan_digest": PLAN_DIGEST,
+        "paid_budget_authority_digest": final_authority.authority_digest,
+        "storyboard_execution_manifest_digest": manifest.manifest_digest,
+        "storyboard_scene_video_set_receipt": scene_video_set,
+        "storyboard_scene_video_set_receipt_digest": scene_video_set.receipt_digest,
+        "audio_artifacts": audio_artifacts,
+        "timeline_digest": sha256_digest({"timeline": "storyboard-scenes"}),
+        "audio_mix_digest": canonical_contract_digest_v1(
+            {"audio_artifacts": audio_artifacts}
+        ),
+        "render_policy_digest": sha256_digest(
+            {"render_policy": "storyboard-scenes"}
+        ),
+    }
+    body.update(changes)
+    return StoryboardSceneFanInManifestV1.model_validate(
+        _sealed(
+            body,
+            digest_field="manifest_digest",
+            derive=derive_storyboard_scene_fan_in_manifest_digest_v1,
+        )
+    )
+
+
 def _final_render_receipt(fan_in_manifest_digest: str) -> dict[str, Any]:
     artifact = {
         "artifact_id": "final-storyboard-reel.mp4",
@@ -637,9 +705,9 @@ def _factory_receipt_v3(
     manifest: StoryboardExecutionManifestV1,
     final_authority: FactoryPaidBudgetAuthorityV2,
     scene_video_set: StoryboardSceneVideoSetReceiptV1,
+    fan_in: StoryboardSceneFanInManifestV1,
 ) -> dict[str, Any]:
-    fan_in_manifest_digest = sha256_digest({"fan_in": "storyboard-v3"})
-    final_render = _final_render_receipt(fan_in_manifest_digest)
+    final_render = _final_render_receipt(fan_in.manifest_digest)
     body: dict[str, Any] = {
         "contract_version": "ReelsFactoryReceipt.v3",
         "workspace_id": WORKSPACE_ID,
@@ -649,7 +717,8 @@ def _factory_receipt_v3(
         "paid_budget_authority_digest": final_authority.authority_digest,
         "storyboard_execution_manifest_digest": manifest.manifest_digest,
         "storyboard_scene_video_set_receipt_digest": scene_video_set.receipt_digest,
-        "fan_in_manifest_digest": fan_in_manifest_digest,
+        "fan_in_manifest_digest": fan_in.manifest_digest,
+        "fan_in_manifest": fan_in,
         "final_render_receipt": final_render,
         "status": "succeeded",
         "output_url": final_render["output_url"],
@@ -1512,6 +1581,87 @@ def test_scene_video_receipt_requires_exact_four_second_immutable_video() -> Non
         StoryboardSceneVideoReceiptV1.model_validate(payload)
 
 
+def test_scene_fan_in_binds_nested_scene_set_and_sequence_ordered_audio() -> None:
+    image_set = _image_set()
+    draft = _draft(
+        image_set,
+        cards=_cards(image_set, list(reversed(range(16)))),
+    )
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    verified = FactoryPaidBudgetAuthorityV2.from_verified(
+        authority,
+        approval_receipt=paid_receipt,
+        at_utc="2026-08-14T06:00:00Z",
+        resolver=_ApprovalResolverV2(),
+    )
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    scene_video_set = _scene_video_set(manifest, authority)
+    fan_in = _scene_fan_in(manifest, authority, scene_video_set)
+
+    expected_source_order = list(reversed(range(16)))
+    assert [item.beat_index for item in fan_in.audio_artifacts] == (
+        expected_source_order
+    )
+    assert [
+        item.source_beat_index
+        for item in fan_in.storyboard_scene_video_set_receipt.beat_projections
+    ] == expected_source_order
+    assert all(
+        isinstance(item, StrictAllBeatArtifactRefV1)
+        for item in fan_in.audio_artifacts
+    )
+    assert fan_in.binds(manifest, verified)
+
+
+def test_scene_fan_in_rejects_audio_order_or_mix_digest_drift() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    scene_video_set = _scene_video_set(manifest, authority)
+    fan_in = _scene_fan_in(manifest, authority, scene_video_set)
+    payload = fan_in.model_dump(mode="json")
+    payload["audio_artifacts"][0], payload["audio_artifacts"][1] = (
+        payload["audio_artifacts"][1],
+        payload["audio_artifacts"][0],
+    )
+    payload["audio_mix_digest"] = canonical_contract_digest_v1(
+        {"audio_artifacts": payload["audio_artifacts"]}
+    )
+    payload["manifest_digest"] = (
+        derive_storyboard_scene_fan_in_manifest_digest_v1(payload)
+    )
+
+    with pytest.raises(ValidationError, match="projection source order"):
+        StoryboardSceneFanInManifestV1.model_validate(payload)
+
+
 def test_reels_factory_receipt_v3_replaces_beat_artifact_set_linkage() -> None:
     image_set = _image_set()
     draft = _draft(image_set)
@@ -1531,8 +1681,9 @@ def test_reels_factory_receipt_v3_replaces_beat_artifact_set_linkage() -> None:
         final_production_authority_digest=authority.authority_digest,
     )
     scene_video_set = _scene_video_set(manifest, authority)
+    fan_in = _scene_fan_in(manifest, authority, scene_video_set)
     receipt = ReelsFactoryReceiptV3.model_validate(
-        _factory_receipt_v3(manifest, authority, scene_video_set)
+        _factory_receipt_v3(manifest, authority, scene_video_set, fan_in)
     )
 
     assert "beat_artifact_set_receipt_digest" not in receipt.model_fields_set
@@ -1540,6 +1691,78 @@ def test_reels_factory_receipt_v3_replaces_beat_artifact_set_linkage() -> None:
         scene_video_set.receipt_digest
     )
     assert receipt.binds_scene_video_set(scene_video_set)
+    assert receipt.binds_chain(fan_in, scene_video_set)
+
+
+def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    scene_video_set = _scene_video_set(manifest, authority)
+    fan_in = _scene_fan_in(manifest, authority, scene_video_set)
+    factory = _factory_receipt_v3(
+        manifest,
+        authority,
+        scene_video_set,
+        fan_in,
+    )
+    carrier = FactoryStoryboardCarrierV1.model_validate(
+        {
+            "contract_version": "FactoryStoryboardCarrier.v1",
+            "storyboard_revision": draft.revision,
+            "storyboard_digest": draft.draft_digest,
+            "image_set_receipt_digest": image_set.receipt_digest,
+            "approval_receipt_digest": approval.receipt_digest,
+            "execution_manifest_digest": manifest.manifest_digest,
+        }
+    )
+    payload: dict[str, Any] = {
+        "contract_version": "StarReelsView.v3",
+        "section": "RunStatus",
+        "status": "ready",
+        "revision": 12,
+        "stage_output": None,
+        "budget": {
+            "purpose": "final_production",
+            "purpose_label": "최종 영상 제작",
+            **_calls("final_production", storyboard_scene_count=8),
+            "all_beat_count": 16,
+            "storyboard_scene_count": 8,
+            "paid_budget_authority_digest": authority.authority_digest,
+            "storyboard_scene_video_set_receipt": scene_video_set,
+        },
+        "review_digest": None,
+        "receipts": {
+            "factory": factory,
+            "script_approval": None,
+            "plan_approval": None,
+        },
+        "provider_call": "confirmed",
+        "error": None,
+        "storyboard": carrier,
+    }
+    view = StarReelsViewV3.model_validate(payload)
+    assert isinstance(view.receipts.factory, ReelsFactoryReceiptV3)
+    assert view.budget.storyboard_scene_video_set_receipt == scene_video_set
+
+    missing_set = deepcopy(payload)
+    missing_set["budget"]["storyboard_scene_video_set_receipt"] = None
+    with pytest.raises(ValidationError, match="scene video budget"):
+        StarReelsViewV3.model_validate(missing_set)
 
 
 def test_registry_and_root_exports_are_additive_and_v1_remains_unchanged() -> None:
@@ -1619,31 +1842,31 @@ def test_canonical_digest_vector_is_stable_across_db_and_runtime_ports() -> None
     )
     assert (
         draft.draft_digest
-        == "sha256:74364b2bfd4525a7814db32287a214f0bf77ef334cf5397018e6aee5fe340210"
+        == "sha256:75467b94a2cb8ec8a163f875c3bfd4df3cbac1c3e9607f2f56cf1ac7ae28fba8"
     )
     assert (
         approval.receipt_digest
-        == "sha256:531862a7f569748145f029daa1243ced43a51830db6f6dc469d7b63368b4d9e9"
+        == "sha256:6742980902ac7679df57e7054761ab386d6a53c0968a64be937d20ad858f0e4d"
     )
     assert (
         paid_receipt.approval_subject_digest
-        == "sha256:2d14781d37527a8f924dceee78a6e3d6ec60160383283bb5fda0d60bc888a3c8"
+        == "sha256:bc272e590ad0e06bf571ef15981d9719b96c57c568248a6c141ee1baeb4bfa2b"
     )
     assert (
         paid_receipt.receipt_digest
-        == "sha256:19689289191614579ca745352bf037dab487901b81aeee842b8568531fb33911"
+        == "sha256:bd5bf0484ec54d3eaca6f80d270345d26b72315f9f6ebe972ecd4a9c8a5032cf"
     )
     assert (
         authority.idempotency_key
-        == "sha256:2fb9d68143722d5d2cc7f0f30f4dc91b8cbcff52a1b2fb5dae3c57cf38088e7e"
+        == "sha256:b9cf4c7cd70dab409203bda63db47e5cb518dd3b0e2659abe3ed1412ae191a38"
     )
     assert (
         authority.authority_digest
-        == "sha256:d722056d6f365d8f5688eb7d7bcc40a18c55c9452b4b0010337f9bf796f25e58"
+        == "sha256:568e8623cae6ba693ecfbf7fc4e1059b4eba1a78f0c5cff9f442692ed2975ade"
     )
     assert (
         manifest.manifest_digest
-        == "sha256:90beb21d500794e44e58e0006b8992075f42efc3344d9cbcdbacad80e984eee5"
+        == "sha256:c825f1bcfb0b114322c1026e67a4697cb54abe60adf4e9bcc42f2f3b4627b6b3"
     )
     assert (
         manifest.scenes[0].scene_digest
