@@ -10,6 +10,7 @@ from hiob_contracts import (
     StarReelsBudgetV3,
     StarReelsViewV2,
     StarReelsViewV3,
+    derive_reels_factory_progress_receipt_digest_v1,
 )
 
 
@@ -56,10 +57,8 @@ def _budget(purpose: str) -> dict[str, object]:
         "fallbacks": 0,
         "character_lock": 0,
         "all_beat_count": 16,
-        "storyboard_scene_count": (
-            8 if purpose == "final_production" else None
-        ),
-        "paid_budget_authority_digest": DIGEST_A,
+        "storyboard_scene_count": (8 if purpose == "final_production" else None),
+        "paid_budget_authority_digest": None,
         "beat_artifact_set_receipt": None,
     }
 
@@ -80,6 +79,27 @@ def _receipts() -> dict[str, None]:
         "factory": None,
         "script_approval": None,
         "plan_approval": None,
+    }
+
+
+def _final_progress_receipt() -> dict[str, object]:
+    body: dict[str, object] = {
+        "contract_version": "ReelsFactoryProgressReceipt.v2",
+        "run_id": "00000000-0000-4000-8000-000000000002",
+        "idempotency_key": "star.reels.factory:final",
+        "revision": 9,
+        "stage": "video",
+        "provider_attempts": {
+            "script": 0,
+            "image": 0,
+            "video": 1,
+            "voice": 0,
+            "render": 0,
+        },
+    }
+    return {
+        **body,
+        "receipt_digest": derive_reels_factory_progress_receipt_digest_v1(body),
     }
 
 
@@ -182,6 +202,12 @@ def test_v3_production_gate_requires_approved_non_executable_pointer() -> None:
     value = StarReelsViewV3.model_validate(view)
     assert value.storyboard is not None
     assert value.storyboard.approval_receipt_digest == DIGEST_D
+    assert value.budget.paid_budget_authority_digest is None
+
+    premature_authority = deepcopy(view)
+    premature_authority["budget"]["paid_budget_authority_digest"] = DIGEST_A
+    with pytest.raises(ValidationError, match="unapproved final budget"):
+        StarReelsViewV3.model_validate(premature_authority)
 
     executable = deepcopy(view)
     executable_carrier = _carrier(approved=True, executable=True)
@@ -197,6 +223,34 @@ def test_v3_carrier_rejects_execution_without_storyboard_approval() -> None:
         FactoryStoryboardCarrierV1.model_validate(payload)
 
 
+def test_v3_run_status_requires_approved_manifest_and_final_authority() -> None:
+    carrier = _carrier(approved=True, executable=True)
+    budget = _budget("final_production")
+    budget["paid_budget_authority_digest"] = DIGEST_A
+    payload = {
+        "contract_version": "StarReelsView.v3",
+        "section": "RunStatus",
+        "status": "rendering",
+        "revision": 9,
+        "stage_output": None,
+        "budget": budget,
+        "review_digest": None,
+        "receipts": {
+            **_receipts(),
+            "factory": _final_progress_receipt(),
+        },
+        "provider_call": "confirmed",
+        "error": None,
+        "storyboard": carrier,
+    }
+    value = StarReelsViewV3.model_validate(payload)
+    assert value.budget.video == value.budget.storyboard_scene_count == 8
+
+    payload["budget"]["paid_budget_authority_digest"] = None
+    with pytest.raises(ValidationError, match="requires final paid authority"):
+        StarReelsViewV3.model_validate(payload)
+
+
 def test_v3_rejects_section_status_and_budget_purpose_drift() -> None:
     wrong_status = _storyboard_review_view()
     wrong_status["status"] = "awaiting_production_budget_approval"
@@ -207,6 +261,11 @@ def test_v3_rejects_section_status_and_budget_purpose_drift() -> None:
     wrong_purpose["budget"] = _budget("final_production")
     with pytest.raises(ValidationError, match="budget purpose"):
         StarReelsViewV3.model_validate(wrong_purpose)
+
+    premature_phase_b_authority = _storyboard_review_view()
+    premature_phase_b_authority["budget"]["paid_budget_authority_digest"] = DIGEST_A
+    with pytest.raises(ValidationError, match="cannot carry authority"):
+        StarReelsViewV3.model_validate(premature_phase_b_authority)
 
 
 def test_v2_remains_strict_and_has_no_storyboard_or_purpose_fields() -> None:
