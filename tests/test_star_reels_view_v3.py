@@ -442,16 +442,48 @@ def test_v3_rejects_section_status_and_budget_purpose_drift() -> None:
         StarReelsViewV3.model_validate(authority_drift)
 
 
-def test_v3_storyboard_generating_forbids_approved_or_executable_carrier() -> None:
+def test_v3_storyboard_draft_generating_forbids_every_storyboard_projection() -> None:
     payload = _storyboard_review_view()
     payload["status"] = "storyboard_generating"
     payload["review_digest"] = None
-    carrier = _carrier(approved=True, executable=True)
-    payload["storyboard"] = carrier
-    payload["stage_output"] = carrier
+    payload["storyboard"] = None
+    payload["stage_output"] = None
 
-    with pytest.raises(ValidationError, match="generating.*approval|execution"):
-        StarReelsViewV3.model_validate(payload)
+    value = StarReelsViewV3.model_validate(payload)
+    assert value.storyboard is value.stage_output is value.review_digest is None
+
+    for carrier in (
+        _carrier(approved=False),
+        _carrier(approved=True),
+        _carrier(approved=True, executable=True),
+    ):
+        projected = deepcopy(payload)
+        projected["storyboard"] = carrier
+        projected["stage_output"] = carrier
+        with pytest.raises(ValidationError, match="draft.*cannot carry|projection"):
+            StarReelsViewV3.model_validate(projected)
+
+
+def test_v3_storyboard_regen_generating_requires_authority_bound_pointer() -> None:
+    payload = _storyboard_review_view(purpose="storyboard_regen")
+    payload["status"] = "storyboard_generating"
+    payload["review_digest"] = None
+
+    value = StarReelsViewV3.model_validate(payload)
+    assert value.storyboard == value.stage_output
+    assert value.storyboard is not None
+
+    missing = deepcopy(payload)
+    missing["storyboard"] = None
+    missing["stage_output"] = None
+    with pytest.raises(ValidationError, match="regen.*(pointer|current storyboard)"):
+        StarReelsViewV3.model_validate(missing)
+
+    alien = deepcopy(payload)
+    alien["storyboard"]["storyboard_digest"] = DIGEST_C
+    alien["stage_output"] = alien["storyboard"]
+    with pytest.raises(ValidationError, match="regen authority"):
+        StarReelsViewV3.model_validate(alien)
 
 
 def test_v3_progress_and_failure_attempts_cannot_exceed_paid_authority_mask() -> None:
