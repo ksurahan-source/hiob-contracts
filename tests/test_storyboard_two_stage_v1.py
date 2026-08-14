@@ -6,9 +6,10 @@ from copy import copy, deepcopy
 import json
 import pickle
 from typing import Any, Callable
+from uuid import NAMESPACE_URL, uuid5
 
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 import hiob_contracts
 from hiob_contracts import (
@@ -74,9 +75,14 @@ RUN_ID = "00000000-0000-4000-8000-000000000002"
 DRAFT_ID = "00000000-0000-4000-8000-000000000003"
 MANIFEST_ID = "00000000-0000-4000-8000-000000000004"
 PLAN_DIGEST = sha256_digest({"plan": "sixteen-beat-storyboard"})
+ARES_SCRIPT_REVISION_DIGEST = sha256_digest({"ares_script_revision": 7})
+ARES_BEAT_PLAN_REVISION_DIGEST = PLAN_DIGEST
 DRAFT_AUTHORITY_DIGEST = sha256_digest({"authority": "storyboard-draft"})
 FINAL_AUTHORITY_DIGEST = sha256_digest({"authority": "final-production"})
 COST_PROFILE_DIGEST = sha256_digest({"pricing": "storyboard-2026-08-14"})
+DRAFT_AUTHORITY_IDEMPOTENCY_KEY = sha256_digest(
+    {"authority_idempotency": "storyboard-draft"}
+)
 
 
 class _ApprovalResolverV2:
@@ -102,24 +108,293 @@ def _sealed(
     return value
 
 
+def _ares_revision_pair(
+    *,
+    text_prefix: str = "immutable beat text",
+) -> tuple[Any, Any]:
+    script_revision_id = "00000000-0000-4000-8000-000000000010"
+    plan_revision_id = "00000000-0000-4000-8000-000000000011"
+    candidate_id = "00000000-0000-4000-8000-000000000012"
+    segments = [
+        {"beat_index": index, "text": f"{text_prefix} {index}"} for index in range(16)
+    ]
+    package_body: dict[str, Any] = {
+        "contract_version": "AresScriptPackage.v1",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "revision_id": script_revision_id,
+        "candidate_id": candidate_id,
+        "factory_revision": 7,
+        "master_sales_script": {"title": "sixteen beat storyboard"},
+        "voice_script": segments,
+        "caption_script": segments,
+        "pronunciation_overrides": {},
+    }
+    package_body["package_digest"] = canonical_contract_digest_v1(package_body)
+    script_body: dict[str, Any] = {
+        "contract_version": "AresScriptRevision.v1",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "revision_id": script_revision_id,
+        "candidate_id": candidate_id,
+        "factory_revision": 7,
+        "script_package": package_body,
+    }
+    script_body["revision_digest"] = canonical_contract_digest_v1(script_body)
+    script_revision = hiob_contracts.AresScriptRevisionV1.model_validate(script_body)
+    beat_plan_body: dict[str, Any] = {
+        "contract_version": "AresBeatPlan.v1",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "revision_id": plan_revision_id,
+        "script_revision_id": script_revision_id,
+        "factory_revision": 7,
+        "script_package_digest": package_body["package_digest"],
+        "beats": [
+            {
+                "beat_index": index,
+                "text": f"{text_prefix} {index}",
+                "caption": f"{text_prefix} {index}",
+                "scene_direction": {
+                    "shot": "MCU",
+                    "subject": "approved subject",
+                    "setting": "approved setting",
+                    "overlay": "",
+                },
+            }
+            for index in range(16)
+        ],
+        "production_plan": {"visual": {"approved": True}},
+    }
+    beat_plan_body["plan_digest"] = canonical_contract_digest_v1(beat_plan_body)
+    plan_body: dict[str, Any] = {
+        "contract_version": "AresBeatPlanRevision.v1",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "revision_id": plan_revision_id,
+        "script_revision_id": script_revision_id,
+        "factory_revision": 7,
+        "approved_script_package_digest": package_body["package_digest"],
+        "beat_plan": beat_plan_body,
+    }
+    plan_body["revision_digest"] = canonical_contract_digest_v1(plan_body)
+    return script_revision, hiob_contracts.AresBeatPlanRevisionV1.model_validate(
+        plan_body
+    )
+
+
+def _athena_frame_plan_receipt(script_revision: Any, plan_revision: Any) -> dict:
+    body: dict[str, Any] = {
+        "contract_version": "AthenaFramePlanReceipt.v1",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "script_revision_digest": script_revision.revision_digest,
+        "beat_plan_digest": plan_revision.beat_plan.plan_digest,
+        "beat_plan_revision_digest": plan_revision.revision_digest,
+        "visual_bridge_digest": None,
+        "frame_plans": [_image_frame_plan(index) for index in range(16)],
+    }
+    body["receipt_digest"] = canonical_contract_digest_v1(body)
+    return body
+
+
+def _image_frame_plan(source_beat_index: int, **changes: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "run_id": RUN_ID,
+        "workspace_id": WORKSPACE_ID,
+        "beat_index": source_beat_index,
+        "shot_list_digest": sha256_digest({"shot_list": source_beat_index}),
+        "render_mode": "product_solo",
+        "ordered_refs": [],
+        "shot": {"beat_index": source_beat_index, "shot_size": "mcu"},
+        "prompt": f"approved storyboard still prompt {source_beat_index}",
+        "prompt_constitution_version": "visual-constitution.v1",
+        "provider": "seedream",
+        "model": "seedream-5-pro",
+        "width": 1_024,
+        "height": 1_536,
+        "quality": "high",
+        "lock_policy": "hard_fail",
+        "max_refs": 5,
+    }
+    body.update(changes)
+    body["plan_digest"] = canonical_contract_digest_v1(
+        body,
+        exclude={"plan_digest"},
+    )
+    return body
+
+
+def _reseal_image_provider_request(body: dict[str, Any]) -> dict[str, Any]:
+    body["operation_key"] = hiob_contracts.derive_storyboard_image_operation_key_v1(
+        body
+    )
+    body["request_digest"] = (
+        hiob_contracts.derive_storyboard_image_provider_request_digest_v1(body)
+    )
+    body["expected_artifact_id"] = (
+        hiob_contracts.derive_storyboard_image_expected_artifact_id_v1(body)
+    )
+    body["expected_storage_key"] = (
+        hiob_contracts.derive_storyboard_image_expected_storage_key_v1(body)
+    )
+    body["execution_request_digest"] = (
+        hiob_contracts.derive_storyboard_image_provider_execution_request_digest_v1(
+            body
+        )
+    )
+    body["idempotency_key"] = (
+        hiob_contracts.derive_storyboard_image_provider_idempotency_key_v1(body)
+    )
+    return body
+
+
+def _image_provider_request(
+    source_beat_index: int,
+    *,
+    purpose: str = "storyboard_draft",
+    paid_budget_authority_digest: str = DRAFT_AUTHORITY_DIGEST,
+    authority_idempotency_key: str = DRAFT_AUTHORITY_IDEMPOTENCY_KEY,
+    athena_frame_plan_receipt_digest: str | None = None,
+    generation_nonce: str | None = None,
+    cost_profile: dict[str, Any] | FactoryCostProfileV1 | None = None,
+    **changes: Any,
+) -> dict[str, Any]:
+    profile = FactoryCostProfileV1.model_validate(
+        cost_profile if cost_profile is not None else _cost_profile()
+    )
+    body: dict[str, Any] = {
+        "contract_version": "StoryboardImageProviderRequest.v1",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "factory_revision": 7,
+        "purpose": purpose,
+        "plan_digest": PLAN_DIGEST,
+        "ares_script_revision_digest": ARES_SCRIPT_REVISION_DIGEST,
+        "ares_beat_plan_revision_digest": ARES_BEAT_PLAN_REVISION_DIGEST,
+        "paid_budget_authority_digest": paid_budget_authority_digest,
+        "source_beat_index": source_beat_index,
+        "frame_plan": _image_frame_plan(source_beat_index),
+        "athena_frame_plan_receipt_digest": (
+            athena_frame_plan_receipt_digest
+            or sha256_digest({"athena_frame_plan_receipt": PLAN_DIGEST})
+        ),
+        "provider": profile.operations.image.provider,
+        "model": profile.operations.image.model,
+        "cost_profile_digest": profile.profile_digest,
+        "pricing_policy_revision": profile.pricing_policy_revision,
+        "generation_nonce": generation_nonce
+        or hiob_contracts.derive_storyboard_image_generation_nonce_v1(
+            authority_idempotency_key=authority_idempotency_key,
+            purpose=purpose,
+            source_beat_index=source_beat_index,
+        ),
+    }
+    body.update(changes)
+    return _reseal_image_provider_request(body)
+
+
+def _image_provider_receipt(
+    request: dict[str, Any],
+    source_beat_index: int,
+    **changes: Any,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "contract_version": "StoryboardImageProviderReceipt.v1",
+        "request": request,
+        "operation_key": request["operation_key"],
+        "provider": request["provider"],
+        "model": request["model"],
+        "provider_task_id": f"seedream-task-{source_beat_index:02d}",
+        "status": "committed",
+        "artifact_id": request["expected_artifact_id"],
+        "storage_key": request["expected_storage_key"],
+        "sha256": sha256_digest({"image": source_beat_index}),
+        "mime": "image/webp",
+        "bytes_len": 4_096 + source_beat_index,
+        "width": 1_080,
+        "height": 1_920,
+        "started_at_utc": "2026-08-14T05:10:00Z",
+        "completed_at_utc": "2026-08-14T05:20:00Z",
+    }
+    body.update(changes)
+    body["receipt_digest"] = (
+        hiob_contracts.derive_storyboard_image_provider_receipt_digest_v1(body)
+    )
+    return body
+
+
+def _image_from_provider_receipt(
+    receipt: dict[str, Any] | BaseModel,
+) -> dict[str, Any]:
+    value = (
+        receipt.model_dump(mode="json")
+        if isinstance(receipt, BaseModel)
+        else deepcopy(receipt)
+    )
+    request = value["request"]
+    body: dict[str, Any] = {
+        "contract_version": "StoryboardImageArtifactRef.v1",
+        "source_beat_index": request["source_beat_index"],
+        "artifact_id": value["artifact_id"],
+        "storage_key": value["storage_key"],
+        "sha256": value["sha256"],
+        "mime": value["mime"],
+        "width": value["width"],
+        "height": value["height"],
+        "provider_receipt_digest": value["receipt_digest"],
+        "frame_plan_digest": request["frame_plan"]["plan_digest"],
+        "generation_nonce": request["generation_nonce"],
+    }
+    return _sealed(
+        body,
+        digest_field="artifact_digest",
+        derive=derive_storyboard_image_artifact_digest_v1,
+    )
+
+
 def _image(source_beat_index: int, **changes: Any) -> dict[str, Any]:
+    generation_nonce = changes.get(
+        "generation_nonce",
+        hiob_contracts.derive_storyboard_image_generation_nonce_v1(
+            authority_idempotency_key=DRAFT_AUTHORITY_IDEMPOTENCY_KEY,
+            purpose="storyboard_draft",
+            source_beat_index=source_beat_index,
+        ),
+    )
+    request = _image_provider_request(
+        source_beat_index,
+        generation_nonce=generation_nonce,
+    )
+    artifact_changes = {
+        field: changes[field]
+        for field in (
+            "artifact_id",
+            "storage_key",
+            "sha256",
+            "mime",
+            "width",
+            "height",
+        )
+        if field in changes
+    }
+    receipt = _image_provider_receipt(
+        request,
+        source_beat_index,
+        **artifact_changes,
+    )
     body: dict[str, Any] = {
         "contract_version": "StoryboardImageArtifactRef.v1",
         "source_beat_index": source_beat_index,
-        "artifact_id": f"storyboard-image-{source_beat_index:02d}",
-        "storage_key": (
-            f"workspaces/{WORKSPACE_ID}/runs/{RUN_ID}/"
-            f"storyboard/{source_beat_index:02d}.webp"
-        ),
-        "sha256": sha256_digest({"image": source_beat_index}),
-        "mime": "image/webp",
-        "width": 1080,
-        "height": 1920,
-        "provider_receipt_digest": sha256_digest(
-            {"provider_receipt": source_beat_index}
-        ),
-        "frame_plan_digest": sha256_digest({"frame_plan": source_beat_index}),
-        "generation_nonce": (f"00000000-0000-4000-8000-{source_beat_index + 100:012d}"),
+        "artifact_id": receipt["artifact_id"],
+        "storage_key": receipt["storage_key"],
+        "sha256": receipt["sha256"],
+        "mime": receipt["mime"],
+        "width": receipt["width"],
+        "height": receipt["height"],
+        "provider_receipt_digest": receipt["receipt_digest"],
+        "frame_plan_digest": request["frame_plan"]["plan_digest"],
+        "generation_nonce": request["generation_nonce"],
     }
     body.update(changes)
     return _sealed(
@@ -129,7 +404,29 @@ def _image(source_beat_index: int, **changes: Any) -> dict[str, Any]:
     )
 
 
-def _image_set(*, images: list[dict[str, Any]] | None = None, **changes: Any):
+def _image_set(
+    *,
+    images: list[dict[str, Any]] | None = None,
+    provider_receipts: list[dict[str, Any]] | None = None,
+    **changes: Any,
+):
+    selected_images = images if images is not None else [_image(i) for i in range(16)]
+    selected_receipts = provider_receipts or [
+        _image_provider_receipt(
+            _image_provider_request(
+                image["source_beat_index"],
+                generation_nonce=image["generation_nonce"],
+            ),
+            image["source_beat_index"],
+            artifact_id=image["artifact_id"],
+            storage_key=image["storage_key"],
+            sha256=image["sha256"],
+            mime=image["mime"],
+            width=image["width"],
+            height=image["height"],
+        )
+        for image in selected_images
+    ]
     body: dict[str, Any] = {
         "contract_version": "StoryboardImageSetReceipt.v1",
         "receipt_id": "storyboard-image-set-1",
@@ -139,8 +436,9 @@ def _image_set(*, images: list[dict[str, Any]] | None = None, **changes: Any):
         "plan_digest": PLAN_DIGEST,
         "paid_budget_authority_digest": DRAFT_AUTHORITY_DIGEST,
         "expected_image_count": 16,
-        "images": images if images is not None else [_image(i) for i in range(16)],
-        "completed_at_utc": "2026-08-14T05:00:00Z",
+        "images": selected_images,
+        "provider_receipts": selected_receipts,
+        "completed_at_utc": "2026-08-14T05:30:00Z",
     }
     body.update(changes)
     sealed = _sealed(
@@ -571,6 +869,119 @@ def _verified_paid_authority_v2(
         at_utc=at_utc,
         resolver=resolver if resolver is not None else _ApprovalResolverV2(),
     )
+
+
+def _image_set_for_paid_receipt(
+    paid_receipt: FactoryPaidBudgetApprovalReceiptV2,
+    *,
+    previous_image_set: StoryboardImageSetReceiptV1 | None = None,
+) -> StoryboardImageSetReceiptV1:
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    previous_receipts = (
+        list(previous_image_set.provider_receipts)
+        if previous_image_set is not None
+        else []
+    )
+    receipts: list[dict[str, Any] | BaseModel] = []
+    selected = set(authority.image_source_beat_indices)
+    for source_beat_index in range(16):
+        if source_beat_index not in selected:
+            receipts.append(previous_receipts[source_beat_index])
+            continue
+        request = _image_provider_request(
+            source_beat_index,
+            purpose=authority.purpose,
+            paid_budget_authority_digest=authority.authority_digest,
+            authority_idempotency_key=authority.idempotency_key,
+        )
+        receipts.append(_image_provider_receipt(request, source_beat_index))
+    images = [_image_from_provider_receipt(receipt) for receipt in receipts]
+    return _image_set(
+        images=images,
+        provider_receipts=[
+            receipt.model_dump(mode="json")
+            if isinstance(receipt, BaseModel)
+            else receipt
+            for receipt in receipts
+        ],
+        paid_budget_authority_digest=authority.authority_digest,
+    )
+
+
+def _storyboard_carrier(
+    draft: StoryboardDraftV1,
+    image_set: StoryboardImageSetReceiptV1,
+) -> FactoryStoryboardCarrierV1:
+    return FactoryStoryboardCarrierV1.model_validate(
+        {
+            "contract_version": "FactoryStoryboardCarrier.v1",
+            "storyboard_revision": draft.revision,
+            "storyboard_digest": draft.draft_digest,
+            "image_set_receipt_digest": image_set.receipt_digest,
+            "approval_receipt_digest": None,
+            "execution_manifest_digest": None,
+        }
+    )
+
+
+def _phase_a_completion(
+    *,
+    purpose: str = "storyboard_draft",
+    input_draft: StoryboardDraftV1 | None = None,
+    input_image_set: StoryboardImageSetReceiptV1 | None = None,
+) -> Any:
+    selected = list(range(16)) if purpose == "storyboard_draft" else [0]
+    paid_receipt = _paid_approval_receipt_v2(
+        purpose,
+        image_source_beat_indices=selected,
+        **(
+            {"storyboard_draft_digest": input_draft.draft_digest}
+            if input_draft is not None
+            else {}
+        ),
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    output_image_set = _image_set_for_paid_receipt(
+        paid_receipt,
+        previous_image_set=input_image_set,
+    )
+    output_draft = _draft(
+        output_image_set,
+        revision=1 if input_draft is None else input_draft.revision + 1,
+        parent_draft_digest=(None if input_draft is None else input_draft.draft_digest),
+    )
+    carrier = _storyboard_carrier(output_draft, output_image_set)
+    paid_digests = [
+        output_image_set.provider_receipts[index].receipt_digest for index in selected
+    ]
+    body: dict[str, Any] = {
+        "contract_version": "StoryboardPhaseACompletionReceipt.v1",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "factory_revision": 7,
+        "purpose": purpose,
+        "plan_digest": PLAN_DIGEST,
+        "ares_script_revision_digest": ARES_SCRIPT_REVISION_DIGEST,
+        "ares_beat_plan_revision_digest": ARES_BEAT_PLAN_REVISION_DIGEST,
+        "paid_budget_approval_receipt": paid_receipt,
+        "paid_budget_authority": authority,
+        "paid_budget_authority_digest": authority.authority_digest,
+        "paid_source_beat_indices": selected,
+        "input_storyboard_draft": input_draft,
+        "paid_image_provider_receipt_digests": paid_digests,
+        "output_image_set_receipt": output_image_set,
+        "output_storyboard_draft": output_draft,
+        "output_storyboard_carrier": carrier,
+        "completed_at_utc": "2026-08-14T05:40:00Z",
+    }
+    body["receipt_digest"] = (
+        hiob_contracts.derive_storyboard_phase_a_completion_receipt_digest_v1(body)
+    )
+    return hiob_contracts.StoryboardPhaseACompletionReceiptV1.model_validate(body)
 
 
 def _manifest(
@@ -1017,10 +1428,358 @@ def test_image_ref_rejects_noncanonical_fields(field: str, value: Any) -> None:
         StoryboardImageArtifactRefV1.model_validate(payload)
 
 
+def test_image_frame_plan_is_lossless_strict_beat_frame_plan_v1_projection() -> None:
+    legacy = hiob_contracts.BeatFramePlanV1.create(
+        run_id=RUN_ID,
+        workspace_id=WORKSPACE_ID,
+        beat_index=0,
+        shot_list_digest=sha256_digest({"shot_list": 0}),
+        render_mode="product_solo",
+        ordered_refs=(),
+        shot={"beat_index": 0, "shot_size": "mcu"},
+        prompt="approved storyboard still prompt 0",
+        prompt_constitution_version="visual-constitution.v1",
+    )
+
+    projected = hiob_contracts.StoryboardImageFramePlanV1.model_validate(
+        legacy.to_dict()
+    )
+
+    assert projected.model_dump(mode="json") == legacy.to_dict()
+    assert projected.plan_digest == legacy.plan_digest
+
+    tampered = legacy.to_dict()
+    tampered["prompt"] = "unsealed prompt mutation"
+    with pytest.raises(ValidationError, match="plan_digest"):
+        hiob_contracts.StoryboardImageFramePlanV1.model_validate(tampered)
+
+    extra = legacy.to_dict()
+    extra["engine"] = {"fallback": "gpt-image"}
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        hiob_contracts.StoryboardImageFramePlanV1.model_validate(extra)
+
+
+def test_image_provider_request_requires_fresh_profile_resolved_authority() -> None:
+    script_revision, plan_revision = _ares_revision_pair()
+    athena_receipt = _athena_frame_plan_receipt(script_revision, plan_revision)
+    profile = _cost_profile()
+    paid_receipt = _paid_approval_receipt_v2(
+        "storyboard_draft",
+        cost_profile_digest=profile["profile_digest"],
+        pricing_policy_revision=profile["pricing_policy_revision"],
+        max_total_cost_microunits=_profile_worst_case_cost(
+            profile,
+            purpose="storyboard_draft",
+        ),
+    )
+    resolver = _ApprovalResolverV2()
+    verified_authority = _verified_paid_authority_v2(
+        paid_receipt,
+        profile=profile,
+        resolver=resolver,
+    )
+    payload = _image_provider_request(
+        0,
+        paid_budget_authority_digest=verified_authority.authority.authority_digest,
+        authority_idempotency_key=verified_authority.authority.idempotency_key,
+        cost_profile=profile,
+        plan_digest=plan_revision.revision_digest,
+        ares_script_revision_digest=script_revision.revision_digest,
+        ares_beat_plan_revision_digest=plan_revision.revision_digest,
+        athena_frame_plan_receipt_digest=athena_receipt["receipt_digest"],
+    )
+    evidence = {
+        "script_revision": script_revision,
+        "plan_revision": plan_revision,
+        "athena_receipt": athena_receipt,
+    }
+
+    assert resolver.call_count == 1
+    with pytest.raises(TypeError, match="VerifiedFactoryPaidBudgetAuthorityV2"):
+        hiob_contracts.StoryboardImageProviderRequestV1.from_verified(
+            payload,
+            authority=verified_authority.authority,
+            at_utc="2026-08-14T06:00:00Z",
+            resolver=resolver,
+            **evidence,
+        )
+
+    capability = hiob_contracts.StoryboardImageProviderRequestV1.from_verified(
+        payload,
+        authority=verified_authority,
+        at_utc="2026-08-14T06:00:00Z",
+        resolver=resolver,
+        **evidence,
+    )
+    request = hiob_contracts.require_verified_storyboard_image_provider_request_v1(
+        capability
+    )
+
+    assert resolver.call_count == 2
+    assert request.operation_key == (
+        f"reels:{WORKSPACE_ID}:{RUN_ID}:{PLAN_DIGEST}:"
+        f"{request.generation_nonce}:image:0"
+    )
+    assert request.expected_artifact_id == (
+        hiob_contracts.derive_storyboard_image_expected_artifact_id_v1(request)
+    )
+    assert request.expected_storage_key == (
+        hiob_contracts.derive_storyboard_image_expected_storage_key_v1(request)
+    )
+    assert request.execution_request_digest == (
+        hiob_contracts.derive_storyboard_image_provider_execution_request_digest_v1(
+            request
+        )
+    )
+    assert request.idempotency_key == (
+        hiob_contracts.derive_storyboard_image_provider_idempotency_key_v1(request)
+    )
+    with pytest.raises(TypeError, match="VerifiedStoryboardImageProviderRequestV1"):
+        hiob_contracts.require_verified_storyboard_image_provider_request_v1(request)
+
+    resolver.current = False
+    with pytest.raises(ValueError, match="current durable approval"):
+        hiob_contracts.StoryboardImageProviderRequestV1.from_verified(
+            _image_provider_request(
+                1,
+                paid_budget_authority_digest=(
+                    verified_authority.authority.authority_digest
+                ),
+                authority_idempotency_key=(
+                    verified_authority.authority.idempotency_key
+                ),
+                cost_profile=profile,
+                plan_digest=plan_revision.revision_digest,
+                ares_script_revision_digest=script_revision.revision_digest,
+                ares_beat_plan_revision_digest=plan_revision.revision_digest,
+                athena_frame_plan_receipt_digest=athena_receipt["receipt_digest"],
+            ),
+            authority=verified_authority,
+            at_utc="2026-08-14T06:01:00Z",
+            resolver=resolver,
+            **evidence,
+        )
+    assert resolver.call_count == 3
+
+    resolver.current = True
+    with pytest.raises(ValueError, match="current durable approval"):
+        hiob_contracts.StoryboardImageProviderRequestV1.from_verified(
+            payload,
+            authority=verified_authority,
+            at_utc=paid_receipt.expires_at_utc,
+            resolver=resolver,
+            **evidence,
+        )
+
+
+def test_image_provider_request_rejects_transport_or_plan_drift() -> None:
+    script_revision, plan_revision = _ares_revision_pair()
+    athena_receipt = _athena_frame_plan_receipt(script_revision, plan_revision)
+    profile = _cost_profile()
+    paid_receipt = _paid_approval_receipt_v2(
+        "storyboard_draft",
+        cost_profile_digest=profile["profile_digest"],
+        pricing_policy_revision=profile["pricing_policy_revision"],
+        max_total_cost_microunits=_profile_worst_case_cost(
+            profile,
+            purpose="storyboard_draft",
+        ),
+    )
+    verified = _verified_paid_authority_v2(paid_receipt, profile=profile)
+    payload = _image_provider_request(
+        0,
+        paid_budget_authority_digest=verified.authority.authority_digest,
+        authority_idempotency_key=verified.authority.idempotency_key,
+        cost_profile=profile,
+        plan_digest=plan_revision.revision_digest,
+        ares_script_revision_digest=script_revision.revision_digest,
+        ares_beat_plan_revision_digest=plan_revision.revision_digest,
+        athena_frame_plan_receipt_digest=athena_receipt["receipt_digest"],
+    )
+    evidence = {
+        "script_revision": script_revision,
+        "plan_revision": plan_revision,
+        "athena_receipt": athena_receipt,
+    }
+
+    for mutation in (
+        {"provider": "openai", "model": "gpt-image-2"},
+        {"cost_profile_digest": sha256_digest({"profile": "alien"})},
+        {"source_beat_index": 1},
+        {"purpose": "final_production"},
+    ):
+        drift = deepcopy(payload)
+        drift.update(mutation)
+        _reseal_image_provider_request(drift)
+        with pytest.raises((ValidationError, ValueError)):
+            hiob_contracts.StoryboardImageProviderRequestV1.from_verified(
+                drift,
+                authority=verified,
+                at_utc="2026-08-14T06:00:00Z",
+                resolver=_ApprovalResolverV2(),
+                **evidence,
+            )
+
+    frame_plan_drift = deepcopy(payload)
+    frame_plan_drift["frame_plan"]["prompt"] = "tampered after Athena seal"
+    with pytest.raises(ValidationError, match="plan_digest"):
+        hiob_contracts.StoryboardImageProviderRequestV1.model_validate(frame_plan_drift)
+
+    alternate_nonce = deepcopy(payload)
+    alternate_nonce["generation_nonce"] = "00000000-0000-4000-8000-000000009999"
+    _reseal_image_provider_request(alternate_nonce)
+    with pytest.raises(ValueError, match="generation_nonce"):
+        hiob_contracts.StoryboardImageProviderRequestV1.from_verified(
+            alternate_nonce,
+            authority=verified,
+            at_utc="2026-08-14T06:00:00Z",
+            resolver=_ApprovalResolverV2(),
+            **evidence,
+        )
+
+    replay = hiob_contracts.StoryboardImageProviderRequestV1.from_verified(
+        deepcopy(payload),
+        authority=verified,
+        at_utc="2026-08-14T06:00:00Z",
+        resolver=_ApprovalResolverV2(),
+        **evidence,
+    )
+    assert hiob_contracts.require_verified_storyboard_image_provider_request_v1(
+        replay
+    ) == hiob_contracts.StoryboardImageProviderRequestV1.model_validate(payload)
+
+    alien_script, alien_plan = _ares_revision_pair(text_prefix="alien retargeted beat")
+    alien_athena = _athena_frame_plan_receipt(alien_script, alien_plan)
+    with pytest.raises(ValueError, match="Ares|revision|plan"):
+        hiob_contracts.StoryboardImageProviderRequestV1.from_verified(
+            payload,
+            authority=verified,
+            script_revision=alien_script,
+            plan_revision=alien_plan,
+            athena_receipt=alien_athena,
+            at_utc="2026-08-14T06:00:00Z",
+            resolver=_ApprovalResolverV2(),
+        )
+
+    athena_drift = deepcopy(athena_receipt)
+    athena_drift["frame_plans"][0]["prompt"] = "self-hashed unapproved prompt"
+    athena_drift["frame_plans"][0]["plan_digest"] = canonical_contract_digest_v1(
+        athena_drift["frame_plans"][0],
+        exclude={"plan_digest"},
+    )
+    athena_drift["receipt_digest"] = canonical_contract_digest_v1(
+        athena_drift,
+        exclude={"receipt_digest"},
+    )
+    drift_payload = deepcopy(payload)
+    drift_payload["athena_frame_plan_receipt_digest"] = athena_drift["receipt_digest"]
+    _reseal_image_provider_request(drift_payload)
+    with pytest.raises(ValueError, match="Athena|frame plan"):
+        hiob_contracts.StoryboardImageProviderRequestV1.from_verified(
+            drift_payload,
+            authority=verified,
+            script_revision=script_revision,
+            plan_revision=plan_revision,
+            athena_receipt=athena_drift,
+            at_utc="2026-08-14T06:00:00Z",
+            resolver=_ApprovalResolverV2(),
+        )
+
+
+def test_image_provider_receipt_requires_retained_verified_request() -> None:
+    script_revision, plan_revision = _ares_revision_pair()
+    athena_receipt = _athena_frame_plan_receipt(script_revision, plan_revision)
+    profile = _cost_profile()
+    paid_receipt = _paid_approval_receipt_v2("storyboard_draft")
+    verified_authority = _verified_paid_authority_v2(
+        paid_receipt,
+        profile=profile,
+    )
+    request_payload = _image_provider_request(
+        0,
+        paid_budget_authority_digest=verified_authority.authority.authority_digest,
+        authority_idempotency_key=verified_authority.authority.idempotency_key,
+        cost_profile=profile,
+        plan_digest=plan_revision.revision_digest,
+        ares_script_revision_digest=script_revision.revision_digest,
+        ares_beat_plan_revision_digest=plan_revision.revision_digest,
+        athena_frame_plan_receipt_digest=athena_receipt["receipt_digest"],
+    )
+    request_capability = hiob_contracts.StoryboardImageProviderRequestV1.from_verified(
+        request_payload,
+        authority=verified_authority,
+        at_utc="2026-08-14T06:00:00Z",
+        resolver=_ApprovalResolverV2(),
+        script_revision=script_revision,
+        plan_revision=plan_revision,
+        athena_receipt=athena_receipt,
+    )
+    receipt_payload = _image_provider_receipt(request_payload, 0)
+
+    receipt = hiob_contracts.StoryboardImageProviderReceiptV1.from_verified_request(
+        receipt_payload,
+        request=request_capability,
+    )
+
+    assert receipt.request == (
+        hiob_contracts.require_verified_storyboard_image_provider_request_v1(
+            request_capability
+        )
+    )
+    assert receipt.operation_key == receipt.request.operation_key
+    assert receipt.artifact_id == receipt.request.expected_artifact_id
+    assert receipt.storage_key == receipt.request.expected_storage_key
+
+    with pytest.raises(TypeError, match="VerifiedStoryboardImageProviderRequestV1"):
+        hiob_contracts.StoryboardImageProviderReceiptV1.from_verified_request(
+            receipt_payload,
+            request=receipt.request,
+        )
+
+    for field, value in (
+        ("artifact_id", "00000000-0000-4000-8000-000000009999"),
+        ("storage_key", "synthetic/athena/output.webp"),
+        ("operation_key", "authority-digest-as-operation-proof"),
+        ("provider", "openai"),
+        ("model", "gpt-image-2"),
+    ):
+        drift = deepcopy(receipt_payload)
+        drift[field] = value
+        drift["receipt_digest"] = (
+            hiob_contracts.derive_storyboard_image_provider_receipt_digest_v1(drift)
+        )
+        with pytest.raises(ValidationError):
+            hiob_contracts.StoryboardImageProviderReceiptV1.model_validate(drift)
+
+    fallback = deepcopy(receipt_payload)
+    fallback["fallback_provider"] = "openai"
+    with pytest.raises(ValidationError, match="Extra inputs"):
+        hiob_contracts.StoryboardImageProviderReceiptV1.model_validate(fallback)
+
+    reversed_time = deepcopy(receipt_payload)
+    reversed_time["completed_at_utc"] = "2026-08-14T05:00:00Z"
+    reversed_time["receipt_digest"] = (
+        hiob_contracts.derive_storyboard_image_provider_receipt_digest_v1(reversed_time)
+    )
+    with pytest.raises(ValidationError, match="completed_at_utc"):
+        hiob_contracts.StoryboardImageProviderReceiptV1.model_validate(reversed_time)
+
+
 def test_image_set_is_exactly_sixteen_unique_ordered_source_beats() -> None:
     image_set = _image_set()
 
     assert [image.source_beat_index for image in image_set.images] == list(range(16))
+    assert [
+        receipt.request.source_beat_index for receipt in image_set.provider_receipts
+    ] == list(range(16))
+    assert all(
+        image.provider_receipt_digest == receipt.receipt_digest
+        for image, receipt in zip(
+            image_set.images,
+            image_set.provider_receipts,
+            strict=True,
+        )
+    )
     assert len({image.artifact_id for image in image_set.images}) == 16
     assert image_set.receipt_digest == derive_storyboard_image_set_receipt_digest_v1(
         image_set
@@ -1044,6 +1803,45 @@ def test_image_set_allows_distinct_executions_with_identical_bytes() -> None:
     assert image_set.images[0].generation_nonce != image_set.images[1].generation_nonce
 
 
+def test_image_set_rejects_receipt_projection_execution_alias_or_early_seal() -> None:
+    image_set = _image_set()
+    body = image_set.model_dump(mode="json")
+
+    projection_drift = deepcopy(body)
+    projection_drift["images"][0]["provider_receipt_digest"] = sha256_digest(
+        {"alien": "provider receipt"}
+    )
+    projection_drift["receipt_digest"] = derive_storyboard_image_set_receipt_digest_v1(
+        projection_drift
+    )
+    with pytest.raises(ValidationError, match="provider receipt|projection"):
+        StoryboardImageSetReceiptV1.model_validate(projection_drift)
+
+    task_alias = deepcopy(body)
+    task_alias["provider_receipts"][1]["provider_task_id"] = task_alias[
+        "provider_receipts"
+    ][0]["provider_task_id"]
+    task_alias["provider_receipts"][1]["receipt_digest"] = (
+        hiob_contracts.derive_storyboard_image_provider_receipt_digest_v1(
+            task_alias["provider_receipts"][1]
+        )
+    )
+    task_alias["images"][1]["provider_receipt_digest"] = task_alias[
+        "provider_receipts"
+    ][1]["receipt_digest"]
+    task_alias["receipt_digest"] = derive_storyboard_image_set_receipt_digest_v1(
+        task_alias
+    )
+    with pytest.raises(ValidationError, match="provider_task_id.*unique"):
+        StoryboardImageSetReceiptV1.model_validate(task_alias)
+
+    early = deepcopy(body)
+    early["completed_at_utc"] = "2026-08-14T05:19:59Z"
+    early["receipt_digest"] = derive_storyboard_image_set_receipt_digest_v1(early)
+    with pytest.raises(ValidationError, match="completed_at_utc"):
+        StoryboardImageSetReceiptV1.model_validate(early)
+
+
 @pytest.mark.parametrize("mutation", ["missing", "duplicate_beat", "duplicate_asset"])
 def test_image_set_rejects_partial_or_aliased_paid_results(mutation: str) -> None:
     images = [_image(i) for i in range(16)]
@@ -1062,6 +1860,107 @@ def test_image_set_rejects_partial_or_aliased_paid_results(mutation: str) -> Non
 
     with pytest.raises(ValidationError):
         _image_set(images=images)
+
+
+def test_phase_a_completion_seals_initial_paid_output_and_public_summary() -> None:
+    completion = _phase_a_completion()
+
+    assert completion.input_storyboard_draft is None
+    assert completion.paid_source_beat_indices == tuple(range(16))
+    assert completion.ares_beat_plan_revision_digest == completion.plan_digest
+    assert completion.output_storyboard_draft.revision == 1
+    assert completion.output_storyboard_draft.binds_image_set(
+        completion.output_image_set_receipt
+    )
+    assert completion.output_storyboard_carrier.storyboard_digest == (
+        completion.output_storyboard_draft.draft_digest
+    )
+    assert completion.completed_at_utc >= (
+        completion.output_image_set_receipt.completed_at_utc
+    )
+
+    summary = hiob_contracts.StoryboardPhaseACompletionSummaryV1.from_completion(
+        completion
+    )
+    summary_json = summary.model_dump(mode="json")
+    assert summary.binds(completion)
+    assert summary.image_count == 16
+    assert summary.completion_receipt_digest == completion.receipt_digest
+    assert summary.output_storyboard_carrier_digest == (
+        hiob_contracts.derive_factory_storyboard_carrier_digest_v1(
+            completion.output_storyboard_carrier
+        )
+    )
+    assert "output_image_set_receipt" not in summary_json
+    assert "provider_receipts" not in json.dumps(summary_json)
+    assert "storage_key" not in json.dumps(summary_json)
+    assert "provider_task_id" not in json.dumps(summary_json)
+
+    pointer_drift = completion.model_dump(mode="json")
+    pointer_drift["output_storyboard_carrier"]["storyboard_digest"] = sha256_digest(
+        {"alien": "pointer"}
+    )
+    pointer_drift["receipt_digest"] = (
+        hiob_contracts.derive_storyboard_phase_a_completion_receipt_digest_v1(
+            pointer_drift
+        )
+    )
+    with pytest.raises(ValidationError, match="carrier|output storyboard"):
+        hiob_contracts.StoryboardPhaseACompletionReceiptV1.model_validate(pointer_drift)
+
+    early = completion.model_dump(mode="json")
+    early["completed_at_utc"] = "2026-08-14T05:29:59Z"
+    early["receipt_digest"] = (
+        hiob_contracts.derive_storyboard_phase_a_completion_receipt_digest_v1(early)
+    )
+    with pytest.raises(ValidationError, match="completed_at_utc"):
+        hiob_contracts.StoryboardPhaseACompletionReceiptV1.model_validate(early)
+
+
+def test_phase_a_regen_binds_previous_draft_and_legitimate_successor() -> None:
+    initial = _phase_a_completion()
+    regenerated = _phase_a_completion(
+        purpose="storyboard_regen",
+        input_draft=initial.output_storyboard_draft,
+        input_image_set=initial.output_image_set_receipt,
+    )
+
+    assert regenerated.paid_source_beat_indices == (0,)
+    assert regenerated.paid_budget_authority.storyboard_draft_digest == (
+        initial.output_storyboard_draft.draft_digest
+    )
+    assert regenerated.output_storyboard_draft.is_valid_successor_of(
+        initial.output_storyboard_draft,
+        replacement_image_set=regenerated.output_image_set_receipt,
+    )
+    assert regenerated.output_storyboard_draft.cards[0].selected_artifact != (
+        initial.output_storyboard_draft.cards[0].selected_artifact
+    )
+    assert regenerated.output_storyboard_draft.cards[1].selected_artifact == (
+        initial.output_storyboard_draft.cards[1].selected_artifact
+    )
+
+    alien_input = regenerated.model_dump(mode="json")
+    alien_input["input_storyboard_draft"] = None
+    alien_input["receipt_digest"] = (
+        hiob_contracts.derive_storyboard_phase_a_completion_receipt_digest_v1(
+            alien_input
+        )
+    )
+    with pytest.raises(ValidationError, match="regen.*input|input.*regen"):
+        hiob_contracts.StoryboardPhaseACompletionReceiptV1.model_validate(alien_input)
+
+    unpaid_mutation = regenerated.model_dump(mode="json")
+    unpaid_mutation["paid_source_beat_indices"] = [1]
+    unpaid_mutation["receipt_digest"] = (
+        hiob_contracts.derive_storyboard_phase_a_completion_receipt_digest_v1(
+            unpaid_mutation
+        )
+    )
+    with pytest.raises(ValidationError, match="paid source|authority"):
+        hiob_contracts.StoryboardPhaseACompletionReceiptV1.model_validate(
+            unpaid_mutation
+        )
 
 
 def test_draft_separates_immutable_source_identity_from_editor_sequence() -> None:
@@ -1864,6 +2763,23 @@ def test_execution_manifest_binds_approved_cards_images_and_final_authority() ->
 
     assert not manifest.binds(approval, draft, image_set, final_authority)
     assert manifest.binds(approval, draft, image_set, verified)
+
+
+def test_full_storyboard_chain_allows_distinct_image_executions_with_same_bytes() -> (
+    None
+):
+    images = [_image(i) for i in range(16)]
+    images[1] = _image(1, sha256=images[0]["sha256"])
+    image_set = _image_set(images=images)
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    manifest = _manifest(draft, image_set, approval)
+
+    assert image_set.images[0].sha256 == image_set.images[1].sha256
+    assert image_set.images[0].artifact_digest == image_set.images[1].artifact_digest
+    assert image_set.images[0].artifact_id != image_set.images[1].artifact_id
+    assert manifest.images[0].sha256 == manifest.images[1].sha256
+    assert manifest.images[0].artifact_id != manifest.images[1].artifact_id
     assert manifest.manifest_digest == derive_storyboard_execution_manifest_digest_v1(
         manifest
     )
@@ -2657,8 +3573,9 @@ def test_reels_factory_receipt_v3_replaces_beat_artifact_set_linkage() -> None:
 
 
 def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> None:
-    image_set = _image_set()
-    draft = _draft(image_set)
+    phase_a_completion = _phase_a_completion()
+    image_set = phase_a_completion.output_image_set_receipt
+    draft = phase_a_completion.output_storyboard_draft
     approval = _approval(draft, image_set)
     paid_receipt = _paid_approval_receipt_v2(
         "final_production",
@@ -2714,6 +3631,11 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
             "plan_approval": None,
             "paid_budget_approval_receipt": paid_receipt,
             "paid_budget_authority": authority,
+            "storyboard_phase_a_completion_summary": (
+                hiob_contracts.StoryboardPhaseACompletionSummaryV1.from_completion(
+                    phase_a_completion
+                )
+            ),
         },
         "provider_call": "confirmed",
         "error": None,
@@ -2745,8 +3667,13 @@ def test_registry_and_root_exports_are_additive_and_v1_remains_unchanged() -> No
         "FactoryCostProfile",
         "ReelsFactoryProgressReceiptV3",
         "ReelsFactoryFailureReceiptV3",
+        "AthenaFramePlanReceipt",
         "StoryboardImageArtifactRef",
+        "StoryboardImageProviderRequest",
+        "StoryboardImageProviderReceipt",
         "StoryboardImageSetReceipt",
+        "StoryboardPhaseACompletionReceipt",
+        "StoryboardPhaseACompletionSummary",
         "StoryboardScene",
         "StoryboardSceneVideoReceipt",
         "StoryboardSceneVideoRequest",
@@ -2786,6 +3713,55 @@ def test_digest_derivations_use_exact_top_level_exclusion_only() -> None:
     assert (
         derive_factory_paid_budget_authority_digest_v2(changed)
         != authority["authority_digest"]
+    )
+
+
+def test_phase_a_image_execution_identity_preimages_are_stable_and_acyclic() -> None:
+    nonce = hiob_contracts.derive_storyboard_image_generation_nonce_v1(
+        authority_idempotency_key=DRAFT_AUTHORITY_IDEMPOTENCY_KEY,
+        purpose="storyboard_draft",
+        source_beat_index=3,
+    )
+    assert nonce == str(
+        uuid5(
+            NAMESPACE_URL,
+            (
+                "hiob:storyboard-image-generation.v1:"
+                f"{DRAFT_AUTHORITY_IDEMPOTENCY_KEY}:storyboard_draft:image:3"
+            ),
+        )
+    )
+    request = _image_provider_request(3, generation_nonce=nonce)
+    assert request["operation_key"] == (
+        f"reels:{WORKSPACE_ID}:{RUN_ID}:{PLAN_DIGEST}:{nonce}:image:3"
+    )
+    assert request["expected_artifact_id"] == str(
+        uuid5(
+            NAMESPACE_URL,
+            (
+                "hiob:storyboard-image-artifact.v1:"
+                f"{request['operation_key']}:{request['request_digest']}"
+            ),
+        )
+    )
+    assert request["expected_storage_key"] == (
+        f"workspaces/{WORKSPACE_ID}/runs/{RUN_ID}/storyboard/images/03/"
+        f"{request['expected_artifact_id']}"
+    )
+
+    expected_drift = deepcopy(request)
+    expected_drift["expected_storage_key"] += "-alien"
+    assert (
+        hiob_contracts.derive_storyboard_image_provider_request_digest_v1(
+            expected_drift
+        )
+        == request["request_digest"]
+    )
+    assert (
+        hiob_contracts.derive_storyboard_image_provider_execution_request_digest_v1(
+            expected_drift
+        )
+        != request["execution_request_digest"]
     )
 
 

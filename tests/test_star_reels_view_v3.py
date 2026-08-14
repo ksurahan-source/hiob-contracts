@@ -5,6 +5,7 @@ from copy import deepcopy
 import pytest
 from pydantic import ValidationError
 
+import hiob_contracts
 from hiob_contracts import (
     FactoryPaidBudgetApprovalReceiptV2,
     FactoryPaidBudgetAuthorityV2,
@@ -168,11 +169,48 @@ def _paid_pair(
     return receipt, FactoryPaidBudgetAuthorityV2.model_validate(authority_body)
 
 
+def _completion_summary(
+    *,
+    purpose: str = "storyboard_draft",
+    authority_digest: str | None = None,
+    carrier: dict[str, object] | None = None,
+) -> dict[str, object]:
+    output = carrier if carrier is not None else _carrier(approved=False)
+    phase_a_authority_digest = (
+        authority_digest
+        if authority_digest is not None
+        else _paid_pair(purpose)[1].authority_digest
+    )
+    body: dict[str, object] = {
+        "contract_version": "StoryboardPhaseACompletionSummary.v1",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "factory_revision": 7,
+        "purpose": purpose,
+        "plan_digest": DIGEST_C,
+        "paid_budget_authority_digest": phase_a_authority_digest,
+        "output_storyboard_revision": output["storyboard_revision"],
+        "output_storyboard_digest": output["storyboard_digest"],
+        "output_image_set_receipt_digest": output["image_set_receipt_digest"],
+        "output_storyboard_carrier_digest": (
+            hiob_contracts.derive_factory_storyboard_carrier_digest_v1(output)
+        ),
+        "image_count": 16,
+        "completed_at_utc": "2026-08-14T05:40:00Z",
+        "completion_receipt_digest": DIGEST_A,
+    }
+    body["summary_digest"] = (
+        hiob_contracts.derive_storyboard_phase_a_completion_summary_digest_v1(body)
+    )
+    return body
+
+
 def _receipts(
     pair: tuple[FactoryPaidBudgetApprovalReceiptV2, FactoryPaidBudgetAuthorityV2]
     | None = None,
     *,
     factory: dict[str, object] | None = None,
+    completion_summary: dict[str, object] | None = None,
 ) -> dict[str, object | None]:
     return {
         "factory": factory,
@@ -180,6 +218,7 @@ def _receipts(
         "plan_approval": None,
         "paid_budget_approval_receipt": pair[0] if pair is not None else None,
         "paid_budget_authority": pair[1] if pair is not None else None,
+        "storyboard_phase_a_completion_summary": completion_summary,
     }
 
 
@@ -271,7 +310,15 @@ def _storyboard_review_view(*, purpose: str = "storyboard_draft") -> dict:
         "stage_output": carrier,
         "budget": budget,
         "review_digest": DIGEST_B,
-        "receipts": _receipts(pair, factory=factory),
+        "receipts": _receipts(
+            pair,
+            factory=factory,
+            completion_summary=_completion_summary(
+                purpose=purpose,
+                authority_digest=pair[1].authority_digest,
+                carrier=carrier,
+            ),
+        ),
         "provider_call": "confirmed",
         "error": None,
         "storyboard": carrier,
@@ -287,12 +334,18 @@ def test_v3_storyboard_review_is_exact_and_digest_bound() -> None:
     assert value.budget.purpose == "storyboard_draft"
     assert value.receipts.paid_budget_authority is not None
     assert value.receipts.paid_budget_approval_receipt is not None
+    assert value.receipts.storyboard_phase_a_completion_summary is not None
     assert isinstance(value.receipts.factory, ReelsFactoryProgressReceiptV3)
 
     extra = _storyboard_review_view()
     extra["preview_url"] = "https://signed.example/credential"
     with pytest.raises(ValidationError, match="Extra inputs"):
         StarReelsViewV3.model_validate(extra)
+
+    missing_completion = _storyboard_review_view()
+    missing_completion["receipts"]["storyboard_phase_a_completion_summary"] = None
+    with pytest.raises(ValidationError, match="Phase.?A completion"):
+        StarReelsViewV3.model_validate(missing_completion)
 
 
 @pytest.mark.parametrize(
@@ -355,7 +408,9 @@ def test_v3_production_gate_requires_approved_non_executable_pointer() -> None:
         "stage_output": carrier,
         "budget": _budget("final_production"),
         "review_digest": DIGEST_D,
-        "receipts": _receipts(),
+        "receipts": _receipts(
+            completion_summary=_completion_summary(carrier=_carrier(approved=False))
+        ),
         "provider_call": "none",
         "error": None,
         "storyboard": carrier,
@@ -364,6 +419,11 @@ def test_v3_production_gate_requires_approved_non_executable_pointer() -> None:
     assert value.storyboard is not None
     assert value.storyboard.approval_receipt_digest == DIGEST_D
     assert value.budget.paid_budget_authority_digest is None
+    assert value.receipts.storyboard_phase_a_completion_summary is not None
+    assert (
+        value.receipts.storyboard_phase_a_completion_summary.paid_budget_authority_digest
+        != value.budget.paid_budget_authority_digest
+    )
 
     premature_authority = deepcopy(view)
     premature_authority["budget"]["paid_budget_authority_digest"] = DIGEST_A
@@ -411,7 +471,13 @@ def test_v3_run_status_requires_approved_manifest_and_final_authority() -> None:
         "budget": budget,
         "review_digest": None,
         "receipts": {
-            **_receipts(pair, factory=progress),
+            **_receipts(
+                pair,
+                factory=progress,
+                completion_summary=_completion_summary(
+                    carrier=_carrier(approved=False)
+                ),
+            ),
         },
         "provider_call": "confirmed",
         "error": None,
@@ -419,6 +485,11 @@ def test_v3_run_status_requires_approved_manifest_and_final_authority() -> None:
     }
     value = StarReelsViewV3.model_validate(payload)
     assert value.budget.video == value.budget.storyboard_scene_count == 8
+    assert value.receipts.storyboard_phase_a_completion_summary is not None
+    assert (
+        value.receipts.storyboard_phase_a_completion_summary.paid_budget_authority_digest
+        != value.receipts.paid_budget_authority.authority_digest
+    )
 
     payload["budget"]["paid_budget_authority_digest"] = None
     with pytest.raises(ValidationError, match="requires final paid authority"):
@@ -448,6 +519,7 @@ def test_v3_storyboard_draft_generating_forbids_every_storyboard_projection() ->
     payload["review_digest"] = None
     payload["storyboard"] = None
     payload["stage_output"] = None
+    payload["receipts"]["storyboard_phase_a_completion_summary"] = None
 
     value = StarReelsViewV3.model_validate(payload)
     assert value.storyboard is value.stage_output is value.review_digest is None
@@ -468,6 +540,7 @@ def test_v3_storyboard_regen_generating_requires_authority_bound_pointer() -> No
     payload = _storyboard_review_view(purpose="storyboard_regen")
     payload["status"] = "storyboard_generating"
     payload["review_digest"] = None
+    payload["receipts"]["storyboard_phase_a_completion_summary"] = None
 
     value = StarReelsViewV3.model_validate(payload)
     assert value.storyboard == value.stage_output
@@ -553,7 +626,11 @@ def test_v3_failed_view_requires_authority_bound_v3_failure_receipt() -> None:
         "stage_output": None,
         "budget": budget,
         "review_digest": None,
-        "receipts": _receipts(pair, factory=failure),
+        "receipts": _receipts(
+            pair,
+            factory=failure,
+            completion_summary=_completion_summary(carrier=_carrier(approved=False)),
+        ),
         "provider_call": "confirmed",
         "error": "PROVIDER_TERMINAL",
         "storyboard": carrier,
