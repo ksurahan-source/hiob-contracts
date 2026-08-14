@@ -22,7 +22,6 @@ from pydantic import (
     Field,
     StringConstraints,
     field_validator,
-    field_serializer,
     model_validator,
 )
 
@@ -39,10 +38,7 @@ from .ares_script_revision_v1 import (
     UtcTimestamp,
     UuidStr,
     _FROZEN_STRICT,
-    _deep_freeze_json,
-    _json_value,
     _parse_utc,
-    _validate_json,
     canonical_contract_digest_v1,
 )
 
@@ -58,7 +54,11 @@ STORYBOARD_BEAT_SCENE_VIDEO_PROJECTION_VERSION_V1 = (
 )
 STORYBOARD_SCENE_VIDEO_SET_RECEIPT_VERSION_V1 = "StoryboardSceneVideoSetReceipt.v1"
 STORYBOARD_SCENE_FAN_IN_MANIFEST_VERSION_V1 = "StoryboardSceneFanInManifest.v1"
+STORYBOARD_SCENE_VIDEO_REQUEST_VERSION_V1 = "StoryboardSceneVideoRequest.v1"
 REELS_FACTORY_RECEIPT_VERSION_V3 = "ReelsFactoryReceipt.v3"
+REELS_FACTORY_PROGRESS_RECEIPT_VERSION_V3 = "ReelsFactoryProgressReceipt.v3"
+REELS_FACTORY_FAILURE_RECEIPT_VERSION_V3 = "ReelsFactoryFailureReceipt.v3"
+FACTORY_COST_PROFILE_VERSION_V1 = "FactoryCostProfile.v1"
 STORYBOARD_DRAFT_VERSION_V1 = "StoryboardDraft.v1"
 STORYBOARD_APPROVAL_RECEIPT_VERSION_V1 = "StoryboardApprovalReceipt.v1"
 STORYBOARD_EXECUTION_MANIFEST_VERSION_V1 = "StoryboardExecutionManifest.v1"
@@ -75,7 +75,11 @@ STORYBOARD_CONTRACT_VERSIONS_V1 = {
     "beat_scene_video_projection": (STORYBOARD_BEAT_SCENE_VIDEO_PROJECTION_VERSION_V1),
     "scene_video_set_receipt": STORYBOARD_SCENE_VIDEO_SET_RECEIPT_VERSION_V1,
     "scene_fan_in_manifest": STORYBOARD_SCENE_FAN_IN_MANIFEST_VERSION_V1,
+    "scene_video_request": STORYBOARD_SCENE_VIDEO_REQUEST_VERSION_V1,
     "reels_factory_receipt": REELS_FACTORY_RECEIPT_VERSION_V3,
+    "reels_factory_progress_receipt": REELS_FACTORY_PROGRESS_RECEIPT_VERSION_V3,
+    "reels_factory_failure_receipt": REELS_FACTORY_FAILURE_RECEIPT_VERSION_V3,
+    "factory_cost_profile": FACTORY_COST_PROFILE_VERSION_V1,
     "draft": STORYBOARD_DRAFT_VERSION_V1,
     "approval_receipt": STORYBOARD_APPROVAL_RECEIPT_VERSION_V1,
     "execution_manifest": STORYBOARD_EXECUTION_MANIFEST_VERSION_V1,
@@ -85,6 +89,7 @@ STORYBOARD_CONTRACT_VERSIONS_V1 = {
 
 _JSON_SAFE_INTEGER_MAX = 9_007_199_254_740_991
 _STORYBOARD_BEAT_COUNT = 16
+STORYBOARD_SCENE_VIDEO_PROVIDER_PROMPT_MAX_CHARS_V1 = 2_500
 
 
 def _non_blank_limited(value: str) -> str:
@@ -223,28 +228,105 @@ def derive_storyboard_scene_video_request_digest_v1(
         or card_data["selected_artifact"] != scene_data["anchor_selected_artifact"]
     ):
         raise ValueError("anchor_card must be the scene's first selected card")
+    anchor = {
+        "source_beat_index": card_data["source_beat_index"],
+        "beat_identity_digest": card_data["beat_identity_digest"],
+        "prompt_override": card_data["prompt_override"],
+        "crop_mode": card_data["crop_mode"],
+        "focal_x_basis_points": card_data["focal_x_basis_points"],
+        "focal_y_basis_points": card_data["focal_y_basis_points"],
+        "motion_note": card_data["motion_note"],
+        "selected_artifact": card_data["selected_artifact"],
+    }
+    return _derive_storyboard_scene_video_request_digest_from_anchor_v1(
+        scene_sequence_index=scene_data["sequence_index"],
+        scene_id=scene_data["scene_id"],
+        scene_digest=scene_data["scene_digest"],
+        anchor=anchor,
+        storyboard_execution_manifest_digest=storyboard_execution_manifest_digest,
+        final_production_authority_digest=final_production_authority_digest,
+    )
+
+
+def _derive_storyboard_scene_video_request_digest_from_anchor_v1(
+    *,
+    scene_sequence_index: int,
+    scene_id: str,
+    scene_digest: str,
+    anchor: Mapping[str, Any],
+    storyboard_execution_manifest_digest: str,
+    final_production_authority_digest: str,
+) -> str:
     return canonical_contract_digest_v1(
         {
             "purpose": "storyboard-scene-video-request.v1",
-            "storyboard_execution_manifest_digest": (
-                storyboard_execution_manifest_digest
-            ),
-            "final_production_authority_digest": (final_production_authority_digest),
-            "scene_sequence_index": scene_data["sequence_index"],
-            "scene_id": scene_data["scene_id"],
-            "scene_digest": scene_data["scene_digest"],
-            "anchor": {
-                "source_beat_index": card_data["source_beat_index"],
-                "beat_identity_digest": card_data["beat_identity_digest"],
-                "prompt_override": card_data["prompt_override"],
-                "crop_mode": card_data["crop_mode"],
-                "focal_x_basis_points": card_data["focal_x_basis_points"],
-                "focal_y_basis_points": card_data["focal_y_basis_points"],
-                "motion_note": card_data["motion_note"],
-                "selected_artifact": card_data["selected_artifact"],
-            },
+            "storyboard_execution_manifest_digest": storyboard_execution_manifest_digest,
+            "final_production_authority_digest": final_production_authority_digest,
+            "scene_sequence_index": scene_sequence_index,
+            "scene_id": scene_id,
+            "scene_digest": scene_digest,
+            "anchor": dict(anchor),
         }
     )
+
+
+def derive_storyboard_scene_video_idempotency_key_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    data = _as_json_dict(value)
+    return canonical_contract_digest_v1(
+        {
+            "purpose": "storyboard-scene-video-idempotency.v1",
+            "workspace_id": data["workspace_id"],
+            "run_id": data["run_id"],
+            "factory_revision": data["factory_revision"],
+            "plan_digest": data["plan_digest"],
+            "storyboard_execution_manifest_digest": data[
+                "storyboard_execution_manifest_digest"
+            ],
+            "final_production_authority_digest": data[
+                "final_production_authority_digest"
+            ],
+            "scene_sequence_index": data["scene_sequence_index"],
+            "scene_id": data["scene_id"],
+            "scene_digest": data["scene_digest"],
+            "provider": data["provider"],
+            "model": data["model"],
+            "generation_nonce": data["generation_nonce"],
+            "duration_ms": data["duration_ms"],
+            "fps": data["fps"],
+            "width": data["width"],
+            "height": data["height"],
+            "request_digest": data["request_digest"],
+        }
+    )
+
+
+def derive_storyboard_scene_video_provider_prompt_v1(
+    anchor: Mapping[str, Any] | BaseModel,
+) -> str:
+    """Compile only approved anchor fields into the exact Kling prompt surface."""
+
+    value = StoryboardSceneVideoAnchorV1.model_validate(_as_json_dict(anchor))
+    lines = [
+        "@image_1",
+        f"crop_mode: {value.crop_mode}",
+        f"focal_x_basis_points: {value.focal_x_basis_points}",
+        f"focal_y_basis_points: {value.focal_y_basis_points}",
+    ]
+    for field_name, approved_text in (
+        ("prompt_override", value.prompt_override),
+        ("motion_note", value.motion_note),
+    ):
+        if approved_text is None:
+            continue
+        if "@image_" in approved_text.casefold():
+            raise ValueError("provider prompt permits sole image reference @image_1")
+        lines.extend((f"{field_name}:", approved_text))
+    prompt = "\n".join(lines)
+    if len(prompt) > STORYBOARD_SCENE_VIDEO_PROVIDER_PROMPT_MAX_CHARS_V1:
+        raise ValueError("provider prompt exceeds 2500 character limit")
+    return prompt
 
 
 def derive_storyboard_scene_video_receipt_digest_v1(
@@ -350,6 +432,30 @@ def derive_factory_paid_budget_authority_digest_v2(
 
 
 def derive_factory_paid_budget_approval_receipt_digest_v2(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return _derive_digest(value, "receipt_digest")
+
+
+def derive_factory_cost_profile_digest_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    data = _as_json_dict(value)
+    data.pop("profile_digest", None)
+    if data.get("all_beat_count") is None:
+        data.pop("all_beat_count", None)
+    if data.get("purpose_policies") is None:
+        data.pop("purpose_policies", None)
+    return canonical_contract_digest_v1(data)
+
+
+def derive_reels_factory_progress_receipt_digest_v3(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return _derive_digest(value, "receipt_digest")
+
+
+def derive_reels_factory_failure_receipt_digest_v3(
     value: Mapping[str, Any] | BaseModel,
 ) -> str:
     return _derive_digest(value, "receipt_digest")
@@ -563,6 +669,240 @@ class StoryboardSceneV1(BaseModel):
         if self.scene_digest != derive_storyboard_scene_digest_v1(self):
             raise ValueError("scene_digest does not match storyboard scene")
         return self
+
+
+class StoryboardSceneVideoAnchorV1(BaseModel):
+    """Provider-free visual fields from the first approved card in one scene."""
+
+    model_config = _FROZEN_STRICT
+
+    source_beat_index: StoryboardBeatIndex
+    beat_identity_digest: DigestStr
+    prompt_override: PromptOverride | None
+    crop_mode: StoryboardCropMode
+    focal_x_basis_points: BasisPoints
+    focal_y_basis_points: BasisPoints
+    motion_note: MotionNote | None
+    selected_artifact: StoryboardSelectedArtifactV1
+
+
+class StoryboardSceneVideoRequestV1(BaseModel):
+    """Exact provider request that can execute only after capability verification."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["StoryboardSceneVideoRequest.v1"]
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    plan_digest: DigestStr
+    storyboard_execution_manifest_digest: DigestStr
+    final_production_authority_digest: DigestStr
+    scene_sequence_index: StoryboardBeatIndex
+    scene_id: SceneId
+    scene_digest: DigestStr
+    anchor: StoryboardSceneVideoAnchorV1
+    anchor_image: StoryboardImageArtifactRefV1
+    generation_nonce: UuidStr
+    duration_ms: Literal[4_000]
+    fps: Literal[24]
+    width: Literal[720]
+    height: Literal[1_280]
+    provider: NonBlankStr
+    model: NonBlankStr
+    request_digest: DigestStr
+    idempotency_key: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_request_identity(self) -> "StoryboardSceneVideoRequestV1":
+        derive_storyboard_scene_video_provider_prompt_v1(self.anchor)
+        if (
+            self.anchor.source_beat_index != self.anchor_image.source_beat_index
+            or self.anchor.selected_artifact.artifact_id
+            != self.anchor_image.artifact_id
+            or self.anchor.selected_artifact.artifact_digest
+            != self.anchor_image.artifact_digest
+        ):
+            raise ValueError("anchor image does not match selected artifact")
+        expected_request_digest = (
+            _derive_storyboard_scene_video_request_digest_from_anchor_v1(
+                scene_sequence_index=self.scene_sequence_index,
+                scene_id=self.scene_id,
+                scene_digest=self.scene_digest,
+                anchor=self.anchor.model_dump(mode="json"),
+                storyboard_execution_manifest_digest=(
+                    self.storyboard_execution_manifest_digest
+                ),
+                final_production_authority_digest=(
+                    self.final_production_authority_digest
+                ),
+            )
+        )
+        if self.request_digest != expected_request_digest:
+            raise ValueError("request_digest does not match anchor-only scene request")
+        if self.idempotency_key != derive_storyboard_scene_video_idempotency_key_v1(
+            self
+        ):
+            raise ValueError("idempotency_key does not match scene provider request")
+        return self
+
+    @classmethod
+    def from_verified(
+        cls,
+        value: Mapping[str, Any] | BaseModel,
+        *,
+        manifest: "StoryboardExecutionManifestV1",
+        authority: object,
+        cost_profile: Mapping[str, Any] | BaseModel,
+        at_utc: str,
+    ) -> "VerifiedStoryboardSceneVideoRequestV1":
+        request = cls.model_validate(_as_json_dict(value))
+        profile = FactoryCostProfileV1.model_validate(_as_json_dict(cost_profile))
+        try:
+            paid_authority = _unwrap_verified_factory_paid_budget_authority_v2(
+                authority
+            )
+        except TypeError as exc:
+            raise TypeError(
+                "scene request requires VerifiedFactoryPaidBudgetAuthorityV2"
+            ) from exc
+        if not request._binds_manifest_authority_and_cost_profile(
+            manifest,
+            paid_authority,
+            profile,
+            at_utc=at_utc,
+        ):
+            raise ValueError(
+                "scene request anchor image, manifest, paid authority, or cost "
+                "profile does not bind"
+            )
+        return VerifiedStoryboardSceneVideoRequestV1(
+            request,
+            _token=_VERIFIED_SCENE_VIDEO_REQUEST_TOKEN_V1,
+        )
+
+    def _binds_manifest_authority_and_cost_profile(
+        self,
+        manifest: "StoryboardExecutionManifestV1",
+        paid_authority: "FactoryPaidBudgetAuthorityV2",
+        cost_profile: "FactoryCostProfileV1",
+        *,
+        at_utc: str,
+    ) -> bool:
+        if self.scene_sequence_index >= len(manifest.scenes):
+            return False
+        scene = manifest.scenes[self.scene_sequence_index]
+        anchor_source = scene.source_beat_indices[0]
+        card_by_source = {card.source_beat_index: card for card in manifest.cards}
+        image_by_source = {image.source_beat_index: image for image in manifest.images}
+        anchor_card = card_by_source[anchor_source]
+        expected_anchor = StoryboardSceneVideoAnchorV1.model_validate(
+            {
+                "source_beat_index": anchor_card.source_beat_index,
+                "beat_identity_digest": anchor_card.beat_identity_digest,
+                "prompt_override": anchor_card.prompt_override,
+                "crop_mode": anchor_card.crop_mode,
+                "focal_x_basis_points": anchor_card.focal_x_basis_points,
+                "focal_y_basis_points": anchor_card.focal_y_basis_points,
+                "motion_note": anchor_card.motion_note,
+                "selected_artifact": anchor_card.selected_artifact,
+            }
+        )
+        video_operation = cost_profile.operations.video
+        return (
+            paid_authority.purpose == "final_production"
+            and paid_authority.workspace_id == manifest.workspace_id
+            and paid_authority.run_id == manifest.run_id
+            and paid_authority.factory_revision == manifest.factory_revision
+            and paid_authority.plan_digest == manifest.plan_digest
+            and paid_authority.storyboard_draft_digest
+            == manifest.storyboard_draft_digest
+            and paid_authority.storyboard_approval_receipt_digest
+            == manifest.storyboard_approval_receipt_digest
+            and paid_authority.storyboard_scene_count == len(manifest.scenes)
+            and paid_authority.authority_digest
+            == manifest.final_production_authority_digest
+            and cost_profile.all_beat_count == 16
+            and cost_profile.purpose_policies is not None
+            and cost_profile.profile_digest == paid_authority.cost_profile_digest
+            and cost_profile.pricing_policy_revision
+            == paid_authority.pricing_policy_revision
+            and cost_profile.currency == paid_authority.currency
+            and cost_profile.is_valid_at(at_utc)
+            and cost_profile.worst_case_cost_microunits(paid_authority.paid_calls)
+            == paid_authority.max_total_cost_microunits
+            and self.provider == video_operation.provider
+            and self.model == video_operation.model
+            and video_operation.billing_unit == "second"
+            and self.duration_ms // 1_000 <= video_operation.max_units_per_operation
+            and self.workspace_id == manifest.workspace_id
+            and self.run_id == manifest.run_id
+            and self.factory_revision == manifest.factory_revision
+            and self.plan_digest == manifest.plan_digest
+            and self.storyboard_execution_manifest_digest == manifest.manifest_digest
+            and self.final_production_authority_digest
+            == paid_authority.authority_digest
+            and self.scene_id == scene.scene_id
+            and self.scene_digest == scene.scene_digest
+            and self.anchor == expected_anchor
+            and self.anchor_image == image_by_source[anchor_source]
+        )
+
+
+_VERIFIED_SCENE_VIDEO_REQUEST_TOKEN_V1 = object()
+_VERIFIED_SCENE_VIDEO_REQUEST_REGISTRY_V1: WeakKeyDictionary[
+    object,
+    StoryboardSceneVideoRequestV1,
+] = WeakKeyDictionary()
+
+
+class VerifiedStoryboardSceneVideoRequestV1:
+    """Non-serializable provider-call capability for one exact scene request."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(
+        self,
+        request: StoryboardSceneVideoRequestV1,
+        *,
+        _token: object,
+    ) -> None:
+        if _token is not _VERIFIED_SCENE_VIDEO_REQUEST_TOKEN_V1:
+            raise TypeError(
+                "verified scene request can only be minted by from_verified"
+            )
+        _VERIFIED_SCENE_VIDEO_REQUEST_REGISTRY_V1[self] = request
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise TypeError("verified scene request is immutable")
+
+    def __delattr__(self, _name: str) -> None:
+        raise TypeError("verified scene request is immutable")
+
+    def __copy__(self) -> object:
+        raise TypeError("verified scene request cannot be copied")
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> object:
+        raise TypeError("verified scene request cannot be copied")
+
+    def __reduce_ex__(self, _protocol: int) -> object:
+        raise TypeError("verified scene request is not serializable")
+
+    def __repr__(self) -> str:
+        return "VerifiedStoryboardSceneVideoRequestV1(<sealed>)"
+
+
+def require_verified_storyboard_scene_video_request_v1(
+    capability: object,
+) -> StoryboardSceneVideoRequestV1:
+    """Fail closed immediately before the paid provider adapter is entered."""
+
+    if not isinstance(capability, VerifiedStoryboardSceneVideoRequestV1):
+        raise TypeError("provider call requires VerifiedStoryboardSceneVideoRequestV1")
+    try:
+        return _VERIFIED_SCENE_VIDEO_REQUEST_REGISTRY_V1[capability]
+    except KeyError as exc:
+        raise TypeError("unminted verified scene request capability") from exc
 
 
 def derive_storyboard_scenes_v1(
@@ -812,9 +1152,17 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
             return False
         if not (
             paid_authority.purpose == "final_production"
+            and paid_authority.workspace_id == manifest.workspace_id
+            and paid_authority.run_id == manifest.run_id
+            and paid_authority.factory_revision == manifest.factory_revision
+            and paid_authority.plan_digest == manifest.plan_digest
             and paid_authority.authority_digest
             == self.final_production_authority_digest
             and paid_authority.storyboard_scene_count == self.storyboard_scene_count
+            and paid_authority.storyboard_draft_digest
+            == manifest.storyboard_draft_digest
+            and paid_authority.storyboard_approval_receipt_digest
+            == manifest.storyboard_approval_receipt_digest
             and manifest.final_production_authority_digest
             == paid_authority.authority_digest
             and manifest.manifest_digest == self.storyboard_execution_manifest_digest
@@ -964,6 +1312,10 @@ class StoryboardSceneFanInManifestV1(BaseModel):
             and self.plan_digest == manifest.plan_digest
             and self.paid_budget_authority_digest == paid_authority.authority_digest
             and self.storyboard_execution_manifest_digest == manifest.manifest_digest
+            and paid_authority.storyboard_draft_digest
+            == manifest.storyboard_draft_digest
+            and paid_authority.storyboard_approval_receipt_digest
+            == manifest.storyboard_approval_receipt_digest
             and self.storyboard_scene_video_set_receipt.binds(
                 manifest,
                 authority,
@@ -1599,6 +1951,165 @@ class FactoryPaidBudgetApprovalReceiptV2(BaseModel):
         )
 
 
+class FactoryCostOperationV1(BaseModel):
+    """One priced provider operation with an explicit billing identity."""
+
+    model_config = _FROZEN_STRICT
+
+    provider: NonBlankStr
+    model: NonBlankStr
+    billing_unit: Literal["call", "second", "character"]
+    rate_microunits: PositiveSafeInt
+    max_units_per_operation: PositiveSafeInt
+
+
+_FACTORY_COST_OPERATION_POLICY_V1: dict[
+    str,
+    tuple[str, tuple[str, ...], str, int, int],
+] = {
+    "script": ("openai", ("gpt-5.6-sol",), "call", 2_000_000, 1),
+    "image": ("seedream", ("seedream-5-pro",), "call", 1_000_000, 1),
+    "video": (
+        "piapi",
+        ("seedance-2-fast", "kling-3.0-omni"),
+        "second",
+        160_000,
+        4,
+    ),
+    "voice": ("typecast", ("ssfm-v30",), "character", 90, 200),
+    "render": (
+        "modal",
+        ("hephaestus-final-render-v2",),
+        "call",
+        2_000_000,
+        1,
+    ),
+}
+
+
+class FactoryCostOperationsV1(BaseModel):
+    """The exact five paid operation tracks understood by Factory V1 profiles."""
+
+    model_config = _FROZEN_STRICT
+
+    script: FactoryCostOperationV1
+    image: FactoryCostOperationV1
+    video: FactoryCostOperationV1
+    voice: FactoryCostOperationV1
+    render: FactoryCostOperationV1
+
+    @model_validator(mode="after")
+    def _bind_pricing_identities(self) -> "FactoryCostOperationsV1":
+        for track, policy in _FACTORY_COST_OPERATION_POLICY_V1.items():
+            provider, models, unit, maximum_rate, maximum_units = policy
+            operation = getattr(self, track)
+            if (
+                operation.provider != provider
+                or operation.model not in models
+                or operation.billing_unit != unit
+                or operation.rate_microunits > maximum_rate
+                or operation.max_units_per_operation != maximum_units
+            ):
+                raise ValueError(
+                    f"{track} operation pricing identity is not an allowed "
+                    "FactoryCostProfile.v1 operation"
+                )
+        return self
+
+
+class FactoryStoryboardDraftCostPolicyV1(BaseModel):
+    model_config = _FROZEN_STRICT
+
+    script: Literal[1]
+    image: Literal[16]
+    video: Literal[0]
+    voice: Literal[0]
+    render: Literal[0]
+
+
+class FactoryStoryboardRegenCostPolicyV1(BaseModel):
+    model_config = _FROZEN_STRICT
+
+    script: Literal[0]
+    image: Literal["selected"]
+    video: Literal[0]
+    voice: Literal[0]
+    render: Literal[0]
+
+
+class FactoryFinalProductionCostPolicyV1(BaseModel):
+    model_config = _FROZEN_STRICT
+
+    script: Literal[0]
+    image: Literal[0]
+    video: Literal["approved_scene_count"]
+    voice: Literal[16]
+    render: Literal[1]
+
+
+class FactoryCostPurposePoliciesV1(BaseModel):
+    """Exact purpose selectors used by the current two-stage factory."""
+
+    model_config = _FROZEN_STRICT
+
+    storyboard_draft: FactoryStoryboardDraftCostPolicyV1
+    storyboard_regen: FactoryStoryboardRegenCostPolicyV1
+    final_production: FactoryFinalProductionCostPolicyV1
+
+
+class FactoryCostProfileV1(BaseModel):
+    """Typed cost truth; legacy V1 profiles may omit purpose policy fields."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["FactoryCostProfile.v1"]
+    profile_id: NonBlankStr
+    currency: CurrencyCode
+    pricing_policy_revision: PositiveSafeInt
+    valid_from_utc: UtcTimestamp
+    valid_until_utc: UtcTimestamp
+    all_beat_count: Literal[16] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    purpose_policies: FactoryCostPurposePoliciesV1 | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    operations: FactoryCostOperationsV1
+    profile_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_profile(self) -> "FactoryCostProfileV1":
+        if (self.all_beat_count is None) != (self.purpose_policies is None):
+            raise ValueError(
+                "all_beat_count and purpose policies must be present together"
+            )
+        if _parse_utc(self.valid_until_utc) <= _parse_utc(self.valid_from_utc):
+            raise ValueError("valid_until_utc must follow valid_from_utc")
+        if self.profile_digest != derive_factory_cost_profile_digest_v1(self):
+            raise ValueError("profile_digest does not match cost_profile")
+        return self
+
+    def is_valid_at(self, at_utc: str) -> bool:
+        at = _parse_utc(at_utc)
+        return _parse_utc(self.valid_from_utc) <= at < _parse_utc(self.valid_until_utc)
+
+    def worst_case_cost_microunits(
+        self,
+        paid_calls: FactoryPaidCallCardinalityV2,
+    ) -> int:
+        """Price the exact no-retry paid mask at each operation's unit ceiling."""
+
+        calls = paid_calls.model_dump(mode="python")
+        return sum(
+            calls[track]
+            * getattr(self.operations, track).rate_microunits
+            * getattr(self.operations, track).max_units_per_operation
+            for track in ("script", "image", "video", "voice", "render")
+        )
+
+
 class FactoryPaidBudgetResolutionV2(BaseModel):
     """Exact DB/BFF resolution envelope for a current V2 paid authority."""
 
@@ -1606,38 +2117,27 @@ class FactoryPaidBudgetResolutionV2(BaseModel):
 
     approval_receipt: FactoryPaidBudgetApprovalReceiptV2
     paid_budget_authority: FactoryPaidBudgetAuthorityV2
-    cost_profile: Mapping[str, Any]
-
-    @field_validator("cost_profile", mode="after")
-    @classmethod
-    def _freeze_cost_profile(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
-        _validate_json(value, "cost_profile")
-        return _deep_freeze_json(value)
-
-    @field_serializer("cost_profile", when_used="always")
-    def _serialize_cost_profile(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        return _json_value(value)
+    cost_profile: FactoryCostProfileV1
 
     @model_validator(mode="after")
     def _bind_resolution(self) -> "FactoryPaidBudgetResolutionV2":
         authority = self.paid_budget_authority
         if not self.approval_receipt.structurally_binds(authority):
             raise ValueError("approval_receipt does not bind paid_budget_authority")
-        try:
-            profile_digest = self.cost_profile["profile_digest"]
-            pricing_revision = self.cost_profile["pricing_policy_revision"]
-        except KeyError as exc:
-            raise ValueError("cost_profile is missing identity fields") from exc
+        profile = self.cost_profile
+        if profile.all_beat_count != 16 or profile.purpose_policies is None:
+            raise ValueError("cost_profile requires current two-stage purpose policies")
         if (
-            profile_digest != authority.cost_profile_digest
-            or pricing_revision != authority.pricing_policy_revision
-            or canonical_contract_digest_v1(
-                self.cost_profile,
-                exclude={"profile_digest"},
-            )
-            != profile_digest
+            profile.profile_digest != authority.cost_profile_digest
+            or profile.pricing_policy_revision != authority.pricing_policy_revision
         ):
             raise ValueError("cost_profile does not match paid authority")
+        if profile.currency != authority.currency:
+            raise ValueError("cost_profile currency does not match paid authority")
+        if authority.max_total_cost_microunits != (
+            profile.worst_case_cost_microunits(authority.paid_calls)
+        ):
+            raise ValueError("paid authority cost cap does not match cost_profile")
         return self
 
     def from_verified(
@@ -1646,11 +2146,270 @@ class FactoryPaidBudgetResolutionV2(BaseModel):
         at_utc: str,
         resolver: FactoryPaidBudgetApprovalResolverV2,
     ) -> VerifiedFactoryPaidBudgetAuthorityV2:
+        if not self.cost_profile.is_valid_at(at_utc):
+            raise ValueError("paid execution requires a current cost profile")
         return FactoryPaidBudgetAuthorityV2.from_verified(
             self.paid_budget_authority,
             approval_receipt=self.approval_receipt,
             at_utc=at_utc,
             resolver=resolver,
+        )
+
+
+class ReelsFactoryProviderAttemptsV3(BaseModel):
+    """Phase-local paid attempts with hard global lane ceilings."""
+
+    model_config = _FROZEN_STRICT
+
+    script: Annotated[int, Field(ge=0, le=1)]
+    image: Annotated[int, Field(ge=0, le=16)]
+    video: Annotated[int, Field(ge=0, le=16)]
+    voice: Annotated[int, Field(ge=0, le=16)]
+    render: Annotated[int, Field(ge=0, le=1)]
+
+
+class ReelsFactoryProviderReplaysV3(BaseModel):
+    """Paid V3 execution has no replay budget in any provider lane."""
+
+    model_config = _FROZEN_STRICT
+
+    script: Literal[0]
+    image: Literal[0]
+    video: Literal[0]
+    voice: Literal[0]
+    render: Literal[0]
+
+
+ReelsFactoryProgressStageV3 = Literal["script", "image", "video", "voice", "render"]
+ReelsFactoryFailureStageV3 = Literal[
+    "authority",
+    "script",
+    "project_script",
+    "plan",
+    "project_plan",
+    "scheduler",
+    "image",
+    "video",
+    "voice",
+    "render",
+]
+
+
+_PROGRESS_STAGES_BY_PURPOSE_V3: dict[str, frozenset[str]] = {
+    "storyboard_draft": frozenset({"script", "image"}),
+    "storyboard_regen": frozenset({"image"}),
+    "final_production": frozenset({"video", "voice", "render"}),
+}
+_FAILURE_STAGES_BY_PURPOSE_V3: dict[str, frozenset[str]] = {
+    "storyboard_draft": frozenset(
+        {
+            "authority",
+            "script",
+            "project_script",
+            "plan",
+            "project_plan",
+            "scheduler",
+            "image",
+        }
+    ),
+    "storyboard_regen": frozenset({"authority", "scheduler", "image"}),
+    "final_production": frozenset(
+        {"authority", "scheduler", "video", "voice", "render"}
+    ),
+}
+
+
+def _v3_attempt_limits(
+    *,
+    purpose: FactoryPaidBudgetPurposeV2,
+    storyboard_scene_count: int | None,
+) -> dict[str, int]:
+    if purpose == "storyboard_draft":
+        return {"script": 1, "image": 16, "video": 0, "voice": 0, "render": 0}
+    if purpose == "storyboard_regen":
+        return {"script": 0, "image": 16, "video": 0, "voice": 0, "render": 0}
+    if storyboard_scene_count is None:
+        raise ValueError("final_production requires storyboard_scene_count")
+    return {
+        "script": 0,
+        "image": 0,
+        "video": storyboard_scene_count,
+        "voice": 16,
+        "render": 1,
+    }
+
+
+def _validate_v3_progress_scope(
+    *,
+    purpose: FactoryPaidBudgetPurposeV2,
+    storyboard_scene_count: int | None,
+    storyboard_execution_manifest_digest: str | None,
+    provider_attempts: ReelsFactoryProviderAttemptsV3,
+    stage: str,
+    allowed_stages: Mapping[str, frozenset[str]],
+) -> None:
+    if purpose == "final_production":
+        if (
+            storyboard_scene_count is None
+            or storyboard_execution_manifest_digest is None
+        ):
+            raise ValueError(
+                "final_production progress requires scene count and execution manifest"
+            )
+    elif (
+        storyboard_scene_count is not None
+        or storyboard_execution_manifest_digest is not None
+    ):
+        raise ValueError(
+            "storyboard progress cannot carry scene count or execution manifest"
+        )
+    if stage not in allowed_stages[purpose]:
+        raise ValueError("progress stage does not match paid purpose")
+    limits = _v3_attempt_limits(
+        purpose=purpose,
+        storyboard_scene_count=storyboard_scene_count,
+    )
+    observed = provider_attempts.model_dump(mode="python")
+    if any(observed[track] > limit for track, limit in limits.items()):
+        raise ValueError("provider attempts exceed the paid purpose mask")
+
+
+def _v3_factory_receipt_structurally_binds(
+    *,
+    workspace_id: str,
+    run_id: str,
+    factory_revision: int,
+    idempotency_key: str,
+    all_beat_count: int,
+    purpose: FactoryPaidBudgetPurposeV2,
+    storyboard_scene_count: int | None,
+    paid_budget_authority_digest: str,
+    provider_attempts: ReelsFactoryProviderAttemptsV3,
+    authority: FactoryPaidBudgetAuthorityV2,
+) -> bool:
+    observed = provider_attempts.model_dump(mode="python")
+    paid_calls = authority.paid_calls.model_dump(mode="python")
+    return (
+        workspace_id == authority.workspace_id
+        and run_id == authority.run_id
+        and factory_revision == authority.factory_revision
+        and idempotency_key == authority.idempotency_key
+        and all_beat_count == authority.all_beat_count
+        and purpose == authority.purpose
+        and storyboard_scene_count == authority.storyboard_scene_count
+        and paid_budget_authority_digest == authority.authority_digest
+        and all(observed[track] <= paid_calls[track] for track in observed)
+    )
+
+
+class ReelsFactoryProgressReceiptV3(BaseModel):
+    """Purpose- and authority-bound non-terminal paid execution proof."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["ReelsFactoryProgressReceipt.v3"]
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    idempotency_key: DigestStr
+    revision: RevisionInt
+    purpose: FactoryPaidBudgetPurposeV2
+    stage: ReelsFactoryProgressStageV3
+    all_beat_count: Literal[16]
+    storyboard_scene_count: StoryboardSceneCount | None
+    paid_budget_authority_digest: DigestStr
+    storyboard_execution_manifest_digest: DigestStr | None
+    provider_attempts: ReelsFactoryProviderAttemptsV3
+    provider_replays: ReelsFactoryProviderReplaysV3
+    fallbacks: Literal[0]
+    receipt_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_progress(self) -> "ReelsFactoryProgressReceiptV3":
+        _validate_v3_progress_scope(
+            purpose=self.purpose,
+            storyboard_scene_count=self.storyboard_scene_count,
+            storyboard_execution_manifest_digest=(
+                self.storyboard_execution_manifest_digest
+            ),
+            provider_attempts=self.provider_attempts,
+            stage=self.stage,
+            allowed_stages=_PROGRESS_STAGES_BY_PURPOSE_V3,
+        )
+        if self.receipt_digest != derive_reels_factory_progress_receipt_digest_v3(self):
+            raise ValueError("receipt_digest does not match V3 progress payload")
+        return self
+
+    def structurally_binds(self, authority: FactoryPaidBudgetAuthorityV2) -> bool:
+        return _v3_factory_receipt_structurally_binds(
+            workspace_id=self.workspace_id,
+            run_id=self.run_id,
+            factory_revision=self.factory_revision,
+            idempotency_key=self.idempotency_key,
+            all_beat_count=self.all_beat_count,
+            purpose=self.purpose,
+            storyboard_scene_count=self.storyboard_scene_count,
+            paid_budget_authority_digest=self.paid_budget_authority_digest,
+            provider_attempts=self.provider_attempts,
+            authority=authority,
+        )
+
+
+class ReelsFactoryFailureReceiptV3(BaseModel):
+    """Purpose- and authority-bound terminal failure proof."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["ReelsFactoryFailureReceipt.v3"]
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    idempotency_key: DigestStr
+    revision: RevisionInt
+    purpose: FactoryPaidBudgetPurposeV2
+    stage: ReelsFactoryFailureStageV3
+    all_beat_count: Literal[16]
+    storyboard_scene_count: StoryboardSceneCount | None
+    paid_budget_authority_digest: DigestStr
+    storyboard_execution_manifest_digest: DigestStr | None
+    provider_attempts: ReelsFactoryProviderAttemptsV3
+    provider_replays: ReelsFactoryProviderReplaysV3
+    fallbacks: Literal[0]
+    code: NonBlankStr
+    provider_call: Literal["none", "confirmed", "unknown"]
+    receipt_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_failure(self) -> "ReelsFactoryFailureReceiptV3":
+        _validate_v3_progress_scope(
+            purpose=self.purpose,
+            storyboard_scene_count=self.storyboard_scene_count,
+            storyboard_execution_manifest_digest=(
+                self.storyboard_execution_manifest_digest
+            ),
+            provider_attempts=self.provider_attempts,
+            stage=self.stage,
+            allowed_stages=_FAILURE_STAGES_BY_PURPOSE_V3,
+        )
+        attempt_count = sum(self.provider_attempts.model_dump(mode="python").values())
+        if (attempt_count == 0) != (self.provider_call == "none"):
+            raise ValueError("provider_call must match observed provider attempts")
+        if self.receipt_digest != derive_reels_factory_failure_receipt_digest_v3(self):
+            raise ValueError("receipt_digest does not match V3 failure payload")
+        return self
+
+    def structurally_binds(self, authority: FactoryPaidBudgetAuthorityV2) -> bool:
+        return _v3_factory_receipt_structurally_binds(
+            workspace_id=self.workspace_id,
+            run_id=self.run_id,
+            factory_revision=self.factory_revision,
+            idempotency_key=self.idempotency_key,
+            all_beat_count=self.all_beat_count,
+            purpose=self.purpose,
+            storyboard_scene_count=self.storyboard_scene_count,
+            paid_budget_authority_digest=self.paid_budget_authority_digest,
+            provider_attempts=self.provider_attempts,
+            authority=authority,
         )
 
 
@@ -1767,7 +2526,12 @@ __all__ = [
     "STORYBOARD_BEAT_SCENE_VIDEO_PROJECTION_VERSION_V1",
     "STORYBOARD_SCENE_VIDEO_SET_RECEIPT_VERSION_V1",
     "STORYBOARD_SCENE_FAN_IN_MANIFEST_VERSION_V1",
+    "STORYBOARD_SCENE_VIDEO_REQUEST_VERSION_V1",
     "REELS_FACTORY_RECEIPT_VERSION_V3",
+    "REELS_FACTORY_PROGRESS_RECEIPT_VERSION_V3",
+    "REELS_FACTORY_FAILURE_RECEIPT_VERSION_V3",
+    "FACTORY_COST_PROFILE_VERSION_V1",
+    "STORYBOARD_SCENE_VIDEO_PROVIDER_PROMPT_MAX_CHARS_V1",
     "STORYBOARD_DRAFT_VERSION_V1",
     "STORYBOARD_APPROVAL_RECEIPT_VERSION_V1",
     "STORYBOARD_EXECUTION_MANIFEST_VERSION_V1",
@@ -1781,6 +2545,9 @@ __all__ = [
     "StoryboardImageSetReceiptV1",
     "StoryboardCardV1",
     "StoryboardSceneV1",
+    "StoryboardSceneVideoAnchorV1",
+    "StoryboardSceneVideoRequestV1",
+    "VerifiedStoryboardSceneVideoRequestV1",
     "StoryboardSceneVideoArtifactRefV1",
     "StoryboardSceneVideoReceiptV1",
     "StoryboardBeatSceneVideoProjectionV1",
@@ -1794,7 +2561,18 @@ __all__ = [
     "FactoryPaidBudgetApprovalResolverV2",
     "FactoryPaidBudgetApprovalReceiptV2",
     "VerifiedFactoryPaidBudgetAuthorityV2",
+    "FactoryCostOperationV1",
+    "FactoryCostOperationsV1",
+    "FactoryStoryboardDraftCostPolicyV1",
+    "FactoryStoryboardRegenCostPolicyV1",
+    "FactoryFinalProductionCostPolicyV1",
+    "FactoryCostPurposePoliciesV1",
+    "FactoryCostProfileV1",
     "FactoryPaidBudgetResolutionV2",
+    "ReelsFactoryProviderAttemptsV3",
+    "ReelsFactoryProviderReplaysV3",
+    "ReelsFactoryProgressReceiptV3",
+    "ReelsFactoryFailureReceiptV3",
     "StoryboardExecutionManifestV1",
     "derive_storyboard_image_artifact_digest_v1",
     "derive_storyboard_image_set_receipt_digest_v1",
@@ -1804,11 +2582,16 @@ __all__ = [
     "derive_storyboard_scenes_v1",
     "derive_storyboard_scene_video_artifact_digest_v1",
     "derive_storyboard_scene_video_request_digest_v1",
+    "derive_storyboard_scene_video_idempotency_key_v1",
+    "derive_storyboard_scene_video_provider_prompt_v1",
+    "require_verified_storyboard_scene_video_request_v1",
     "derive_storyboard_scene_video_receipt_digest_v1",
     "derive_storyboard_beat_scene_video_projection_digest_v1",
     "derive_storyboard_scene_video_set_receipt_digest_v1",
     "derive_storyboard_scene_fan_in_manifest_digest_v1",
     "derive_reels_factory_receipt_digest_v3",
+    "derive_reels_factory_progress_receipt_digest_v3",
+    "derive_reels_factory_failure_receipt_digest_v3",
     "derive_storyboard_draft_digest_v1",
     "derive_storyboard_approval_receipt_digest_v1",
     "derive_storyboard_execution_manifest_digest_v1",
@@ -1817,4 +2600,5 @@ __all__ = [
     "derive_factory_paid_budget_idempotency_key_v2",
     "derive_factory_paid_budget_authority_digest_v2",
     "derive_factory_paid_budget_approval_receipt_digest_v2",
+    "derive_factory_cost_profile_digest_v1",
 ]

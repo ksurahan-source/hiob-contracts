@@ -101,6 +101,18 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "hiob_contracts.storyboard_two_stage_v1",
         "FactoryPaidBudgetResolutionV2",
     ),
+    "FactoryCostProfile": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "FactoryCostProfileV1",
+    ),
+    "ReelsFactoryProgressReceiptV3": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "ReelsFactoryProgressReceiptV3",
+    ),
+    "ReelsFactoryFailureReceiptV3": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "ReelsFactoryFailureReceiptV3",
+    ),
     "StoryboardImageArtifactRef": (
         "hiob_contracts.storyboard_two_stage_v1",
         "StoryboardImageArtifactRefV1",
@@ -116,6 +128,10 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "StoryboardSceneVideoReceipt": (
         "hiob_contracts.storyboard_two_stage_v1",
         "StoryboardSceneVideoReceiptV1",
+    ),
+    "StoryboardSceneVideoRequest": (
+        "hiob_contracts.storyboard_two_stage_v1",
+        "StoryboardSceneVideoRequestV1",
     ),
     "StoryboardSceneVideoSetReceipt": (
         "hiob_contracts.storyboard_two_stage_v1",

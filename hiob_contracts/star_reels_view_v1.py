@@ -30,7 +30,11 @@ from .reels_factory_progress_v1 import (
     ReelsFactoryProviderAttemptsV1,
 )
 from .storyboard_two_stage_v1 import (
+    FactoryPaidBudgetApprovalReceiptV2,
+    FactoryPaidBudgetAuthorityV2,
     FactoryPaidBudgetPurposeV2,
+    ReelsFactoryFailureReceiptV3,
+    ReelsFactoryProgressReceiptV3,
     ReelsFactoryReceiptV3,
     StoryboardSceneVideoSetReceiptV1,
     factory_paid_call_cardinality_v2,
@@ -227,13 +231,15 @@ class _StarReelsViewReceiptsV3(BaseModel):
     model_config = _STRICT_FROZEN
 
     factory: (
-        ReelsFactoryProgressReceiptV2
-        | ReelsFactoryFailureReceiptV2
+        ReelsFactoryProgressReceiptV3
+        | ReelsFactoryFailureReceiptV3
         | ReelsFactoryReceiptV3
         | None
     )
     script_approval: AresApprovalReceiptV1 | None
     plan_approval: AresApprovalReceiptV1 | None
+    paid_budget_approval_receipt: FactoryPaidBudgetApprovalReceiptV2 | None
+    paid_budget_authority: FactoryPaidBudgetAuthorityV2 | None
 
 
 def derive_star_product_lock_review_digest_v1(
@@ -586,6 +592,7 @@ class StarReelsViewV3(BaseModel):
             self._bind_production_budget_gate()
         else:
             self._bind_two_stage_run()
+        self._bind_paid_budget_evidence()
         self._bind_factory_receipt_provider_state()
         return self
 
@@ -629,8 +636,6 @@ class StarReelsViewV3(BaseModel):
     def _bind_legacy_gate(self) -> None:
         if self.budget.purpose != "storyboard_draft":
             raise ValueError("legacy pre-storyboard gate requires draft budget purpose")
-        if self.budget.paid_budget_authority_digest is not None:
-            raise ValueError("pre-production gate cannot carry authority digest")
         if self.storyboard is not None:
             raise ValueError("pre-storyboard gate cannot carry storyboard pointer")
         if self.section == "LockGate":
@@ -640,8 +645,8 @@ class StarReelsViewV3(BaseModel):
             raise ValueError("review state requires stage_output and review_digest")
         if self.provider_call != "confirmed" or self.error is not None:
             raise ValueError("review state requires one confirmed script call")
-        if self.receipts.factory is not None:
-            raise ValueError("review state cannot carry factory receipt")
+        if not isinstance(self.receipts.factory, ReelsFactoryProgressReceiptV3):
+            raise ValueError("review state requires V3 progress receipt")
 
     def _bind_lock_gate(self) -> None:
         product_review = self.status == "awaiting_product_approval"
@@ -666,16 +671,24 @@ class StarReelsViewV3(BaseModel):
     def _bind_storyboard_review(self) -> None:
         if self.budget.purpose not in {"storyboard_draft", "storyboard_regen"}:
             raise ValueError("StoryboardReview budget purpose is invalid")
-        if self.budget.paid_budget_authority_digest is not None:
-            raise ValueError("StoryboardReview cannot carry authority digest")
         if (
             self.provider_call != "confirmed"
             or self.error is not None
-            or self.receipts.factory is not None
+            or not isinstance(
+                self.receipts.factory,
+                ReelsFactoryProgressReceiptV3,
+            )
         ):
             raise ValueError("StoryboardReview requires confirmed image work")
         pointer = self.storyboard
         if self.status == "storyboard_generating":
+            if pointer is not None and (
+                pointer.approval_receipt_digest is not None
+                or pointer.execution_manifest_digest is not None
+            ):
+                raise ValueError(
+                    "generating storyboard cannot carry approval or execution manifest"
+                )
             if pointer is None:
                 if self.stage_output is not None or self.review_digest is not None:
                     raise ValueError(
@@ -735,14 +748,14 @@ class StarReelsViewV3(BaseModel):
         if self.status == "failed":
             if self.error is None or not isinstance(
                 self.receipts.factory,
-                ReelsFactoryFailureReceiptV2,
+                ReelsFactoryFailureReceiptV3,
             ):
                 raise ValueError("failed state requires error and failure receipt")
         elif self.error is not None:
             raise ValueError("non-failed state cannot carry an error")
         if self.status in {"pending", "rendering"} and not isinstance(
             self.receipts.factory,
-            ReelsFactoryProgressReceiptV2,
+            ReelsFactoryProgressReceiptV3,
         ):
             raise ValueError("active state requires progress receipt")
         if self.status == "ready" and not isinstance(
@@ -751,11 +764,98 @@ class StarReelsViewV3(BaseModel):
         ):
             raise ValueError("ready state requires final factory receipt")
 
+    def _bind_paid_budget_evidence(self) -> None:
+        approval = self.receipts.paid_budget_approval_receipt
+        authority = self.receipts.paid_budget_authority
+        if self.section == "ProductionBudgetApproval":
+            if (
+                approval is not None
+                or authority is not None
+                or self.budget.paid_budget_authority_digest is not None
+            ):
+                raise ValueError(
+                    "unapproved final budget cannot carry paid budget pair or authority"
+                )
+            return
+
+        if approval is None or authority is None:
+            raise ValueError("V3 purpose state requires a complete paid budget pair")
+        if not approval.structurally_binds(authority):
+            raise ValueError("paid budget pair does not structurally bind authority")
+        if authority.purpose != self.budget.purpose:
+            raise ValueError(
+                "paid authority purpose does not match view budget purpose"
+            )
+        observed_calls = {
+            "script": self.budget.script,
+            "image": self.budget.image,
+            "video": self.budget.video,
+            "voice": self.budget.voice,
+            "render": self.budget.render,
+            "retries": self.budget.retries,
+            "fallbacks": self.budget.fallbacks,
+            "character_lock": self.budget.character_lock,
+        }
+        if authority.paid_calls.model_dump(mode="python") != observed_calls:
+            raise ValueError("paid authority calls do not match view budget")
+        if (
+            authority.all_beat_count != self.budget.all_beat_count
+            or authority.storyboard_scene_count != self.budget.storyboard_scene_count
+            or authority.authority_digest != self.budget.paid_budget_authority_digest
+        ):
+            raise ValueError("paid authority does not bind the current view budget")
+
+        pointer = self.storyboard
+        if authority.purpose == "storyboard_regen" and (
+            pointer is None
+            or authority.storyboard_draft_digest != pointer.storyboard_digest
+        ):
+            raise ValueError("regen authority does not bind current storyboard")
+        if authority.purpose == "final_production" and (
+            pointer is None
+            or authority.storyboard_draft_digest != pointer.storyboard_digest
+            or authority.storyboard_approval_receipt_digest
+            != pointer.approval_receipt_digest
+        ):
+            raise ValueError("final authority does not bind approved storyboard")
+
+        factory = self.receipts.factory
+        if isinstance(
+            factory,
+            (ReelsFactoryProgressReceiptV3, ReelsFactoryFailureReceiptV3),
+        ):
+            if not factory.structurally_binds(authority):
+                raise ValueError("factory receipt does not bind paid authority")
+            if factory.revision != self.revision:
+                raise ValueError("factory receipt revision does not match view")
+            expected_manifest_digest = (
+                pointer.execution_manifest_digest
+                if authority.purpose == "final_production" and pointer is not None
+                else None
+            )
+            if factory.storyboard_execution_manifest_digest != expected_manifest_digest:
+                raise ValueError(
+                    "factory receipt execution manifest does not match storyboard"
+                )
+        elif isinstance(factory, ReelsFactoryReceiptV3):
+            if (
+                authority.purpose != "final_production"
+                or pointer is None
+                or factory.workspace_id != authority.workspace_id
+                or factory.run_id != authority.run_id
+                or factory.factory_revision != authority.factory_revision
+                or factory.plan_digest != authority.plan_digest
+                or factory.paid_budget_authority_digest != authority.authority_digest
+                or factory.storyboard_execution_manifest_digest
+                != pointer.execution_manifest_digest
+            ):
+                raise ValueError("factory success does not bind final paid authority")
+
     def _bind_factory_receipt_provider_state(self) -> None:
         factory = self.receipts.factory
-        if isinstance(factory, ReelsFactoryFailureReceiptV2):
+        if isinstance(factory, ReelsFactoryFailureReceiptV3):
             expected_provider_call = factory.provider_call
-        elif isinstance(factory, ReelsFactoryProgressReceiptV2):
+        elif isinstance(factory, ReelsFactoryProgressReceiptV3):
             expected_provider_call = (
                 "confirmed"
                 if sum(factory.provider_attempts.model_dump().values()) > 0
