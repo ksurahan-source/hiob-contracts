@@ -211,13 +211,34 @@ def derive_storyboard_scene_video_artifact_digest_v1(
 
 
 def derive_storyboard_scene_video_request_digest_v1(
+    value: Mapping[str, Any] | BaseModel | None = None,
     *,
-    scene: Mapping[str, Any] | BaseModel,
-    anchor_card: Mapping[str, Any] | BaseModel,
-    storyboard_execution_manifest_digest: str,
-    final_production_authority_digest: str,
+    scene: Mapping[str, Any] | BaseModel | None = None,
+    anchor_card: Mapping[str, Any] | BaseModel | None = None,
+    storyboard_execution_manifest_digest: str | None = None,
+    final_production_authority_digest: str | None = None,
 ) -> str:
-    """Bind one scene request to only its first approved card's visual fields."""
+    """Bind only the approved anchor and manifest/authority scene scope."""
+
+    if value is not None:
+        data = _as_json_dict(value)
+        return _derive_storyboard_scene_video_request_digest_from_anchor_v1(
+            scene_sequence_index=data["scene_sequence_index"],
+            scene_id=data["scene_id"],
+            scene_digest=data["scene_digest"],
+            anchor=data["anchor"],
+            storyboard_execution_manifest_digest=data[
+                "storyboard_execution_manifest_digest"
+            ],
+            final_production_authority_digest=data["final_production_authority_digest"],
+        )
+    if (
+        scene is None
+        or anchor_card is None
+        or storyboard_execution_manifest_digest is None
+        or final_production_authority_digest is None
+    ):
+        raise TypeError("full request or complete legacy anchor scope is required")
 
     scene_data = _as_json_dict(scene)
     card_data = _as_json_dict(anchor_card)
@@ -297,7 +318,49 @@ def derive_storyboard_scene_video_idempotency_key_v1(
             "fps": data["fps"],
             "width": data["width"],
             "height": data["height"],
+            "audio_mode": data["audio_mode"],
+            "cost_profile_digest": data["cost_profile_digest"],
+            "pricing_policy_revision": data["pricing_policy_revision"],
             "request_digest": data["request_digest"],
+            "execution_request_digest": data["execution_request_digest"],
+        }
+    )
+
+
+def derive_storyboard_scene_video_execution_request_digest_v1(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    """Seal exact paid transport while preserving the anchor-only request digest."""
+
+    data = _as_json_dict(value)
+    return canonical_contract_digest_v1(
+        {
+            "purpose": "storyboard-scene-video-execution-request.v1",
+            "contract_version": data["contract_version"],
+            "workspace_id": data["workspace_id"],
+            "run_id": data["run_id"],
+            "factory_revision": data["factory_revision"],
+            "plan_digest": data["plan_digest"],
+            "storyboard_execution_manifest_digest": data[
+                "storyboard_execution_manifest_digest"
+            ],
+            "final_production_authority_digest": data[
+                "final_production_authority_digest"
+            ],
+            "scene_sequence_index": data["scene_sequence_index"],
+            "scene_id": data["scene_id"],
+            "scene_digest": data["scene_digest"],
+            "request_digest": data["request_digest"],
+            "provider": data["provider"],
+            "model": data["model"],
+            "cost_profile_digest": data["cost_profile_digest"],
+            "pricing_policy_revision": data["pricing_policy_revision"],
+            "duration_ms": data["duration_ms"],
+            "fps": data["fps"],
+            "width": data["width"],
+            "height": data["height"],
+            "audio_mode": data["audio_mode"],
+            "generation_nonce": data["generation_nonce"],
         }
     )
 
@@ -708,9 +771,13 @@ class StoryboardSceneVideoRequestV1(BaseModel):
     fps: Literal[24]
     width: Literal[720]
     height: Literal[1_280]
+    audio_mode: Literal["none"]
     provider: NonBlankStr
     model: NonBlankStr
+    cost_profile_digest: DigestStr
+    pricing_policy_revision: PositiveSafeInt
     request_digest: DigestStr
+    execution_request_digest: DigestStr
     idempotency_key: DigestStr
 
     @model_validator(mode="after")
@@ -724,22 +791,15 @@ class StoryboardSceneVideoRequestV1(BaseModel):
             != self.anchor_image.artifact_digest
         ):
             raise ValueError("anchor image does not match selected artifact")
-        expected_request_digest = (
-            _derive_storyboard_scene_video_request_digest_from_anchor_v1(
-                scene_sequence_index=self.scene_sequence_index,
-                scene_id=self.scene_id,
-                scene_digest=self.scene_digest,
-                anchor=self.anchor.model_dump(mode="json"),
-                storyboard_execution_manifest_digest=(
-                    self.storyboard_execution_manifest_digest
-                ),
-                final_production_authority_digest=(
-                    self.final_production_authority_digest
-                ),
-            )
-        )
+        expected_request_digest = derive_storyboard_scene_video_request_digest_v1(self)
         if self.request_digest != expected_request_digest:
-            raise ValueError("request_digest does not match anchor-only scene request")
+            raise ValueError("request_digest does not match approved anchor request")
+        if self.execution_request_digest != (
+            derive_storyboard_scene_video_execution_request_digest_v1(self)
+        ):
+            raise ValueError(
+                "execution_request_digest does not match paid provider request"
+            )
         if self.idempotency_key != derive_storyboard_scene_video_idempotency_key_v1(
             self
         ):
@@ -753,28 +813,25 @@ class StoryboardSceneVideoRequestV1(BaseModel):
         *,
         manifest: "StoryboardExecutionManifestV1",
         authority: object,
-        cost_profile: Mapping[str, Any] | BaseModel,
         at_utc: str,
     ) -> "VerifiedStoryboardSceneVideoRequestV1":
         request = cls.model_validate(_as_json_dict(value))
-        profile = FactoryCostProfileV1.model_validate(_as_json_dict(cost_profile))
         try:
-            paid_authority = _unwrap_verified_factory_paid_budget_authority_v2(
-                authority
-            )
+            resolution = _unwrap_verified_factory_paid_budget_resolution_v2(authority)
         except TypeError as exc:
             raise TypeError(
                 "scene request requires VerifiedFactoryPaidBudgetAuthorityV2"
             ) from exc
         if not request._binds_manifest_authority_and_cost_profile(
             manifest,
-            paid_authority,
-            profile,
+            resolution.paid_budget_authority,
+            resolution.cost_profile,
             at_utc=at_utc,
         ):
             raise ValueError(
-                "scene request anchor image, manifest, paid authority, or cost "
-                "profile does not bind"
+                "scene request anchor image, manifest, paid authority, audio mode, "
+                "cost profile digest, pricing policy revision, or output profile "
+                "does not bind"
             )
         return VerifiedStoryboardSceneVideoRequestV1(
             request,
@@ -833,6 +890,8 @@ class StoryboardSceneVideoRequestV1(BaseModel):
             == paid_authority.max_total_cost_microunits
             and self.provider == video_operation.provider
             and self.model == video_operation.model
+            and self.cost_profile_digest == cost_profile.profile_digest
+            and self.pricing_policy_revision == cost_profile.pricing_policy_revision
             and video_operation.billing_unit == "second"
             and self.duration_ms // 1_000 <= video_operation.max_units_per_operation
             and self.workspace_id == manifest.workspace_id
@@ -982,19 +1041,12 @@ class StoryboardSceneVideoArtifactRefV1(BaseModel):
 
 
 class StoryboardSceneVideoReceiptV1(BaseModel):
-    """Successful provider receipt for one dense storyboard scene ordinal."""
+    """Successful provider receipt for one exact verified paid request."""
 
     model_config = _FROZEN_STRICT
 
     contract_version: Literal["StoryboardSceneVideoReceipt.v1"]
-    scene_sequence_index: StoryboardBeatIndex
-    scene_id: SceneId
-    scene_digest: DigestStr
-    anchor_selected_artifact: StoryboardSelectedArtifactV1
-    generation_nonce: UuidStr
-    request_digest: DigestStr
-    provider: NonBlankStr
-    model: NonBlankStr
+    request: StoryboardSceneVideoRequestV1
     provider_job_id: ArtifactId
     status: Literal["succeeded"]
     artifact: StoryboardSceneVideoArtifactRefV1
@@ -1008,9 +1060,36 @@ class StoryboardSceneVideoReceiptV1(BaseModel):
 
     @model_validator(mode="after")
     def _bind_receipt_digest(self) -> "StoryboardSceneVideoReceiptV1":
+        if (
+            self.artifact.duration_ms != self.request.duration_ms
+            or self.artifact.width != self.request.width
+            or self.artifact.height != self.request.height
+        ):
+            raise ValueError("video artifact output profile does not match request")
         if self.receipt_digest != derive_storyboard_scene_video_receipt_digest_v1(self):
             raise ValueError("receipt_digest does not match scene video receipt")
         return self
+
+    @classmethod
+    def from_verified_request(
+        cls,
+        value: Mapping[str, Any] | BaseModel,
+        *,
+        request: object,
+    ) -> "StoryboardSceneVideoReceiptV1":
+        receipt = cls.model_validate(_as_json_dict(value))
+        if not receipt.binds_verified_request(request):
+            raise ValueError("receipt does not bind the exact verified request")
+        return receipt
+
+    def binds_verified_request(self, request: object) -> bool:
+        try:
+            verified_request = require_verified_storyboard_scene_video_request_v1(
+                request
+            )
+        except TypeError:
+            return False
+        return self.request == verified_request
 
 
 class StoryboardBeatSceneVideoProjectionV1(BaseModel):
@@ -1079,7 +1158,7 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
             raise ValueError(
                 "scene video receipt count must equal storyboard_scene_count"
             )
-        if [item.scene_sequence_index for item in scene_receipts] != list(
+        if [item.request.scene_sequence_index for item in scene_receipts] != list(
             range(self.storyboard_scene_count)
         ):
             raise ValueError("scene video receipts must use dense sequence order")
@@ -1089,6 +1168,13 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
             "scene_digest",
             "generation_nonce",
             "request_digest",
+            "execution_request_digest",
+            "idempotency_key",
+        ):
+            values = [getattr(item.request, field) for item in scene_receipts]
+            if len(values) != len(set(values)):
+                raise ValueError(f"scene video request {field} values must be unique")
+        for field in (
             "provider_job_id",
             "receipt_digest",
         ):
@@ -1122,7 +1208,7 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
                 raise ValueError("repeat_index must be dense within its scene run")
             scene_receipt = scene_receipts[current_scene]
             if (
-                projection.scene_digest != scene_receipt.scene_digest
+                projection.scene_digest != scene_receipt.request.scene_digest
                 or projection.video_artifact_id != scene_receipt.artifact.artifact_id
                 or projection.video_artifact_digest
                 != scene_receipt.artifact.artifact_digest
@@ -1143,13 +1229,14 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
         self,
         manifest: "StoryboardExecutionManifestV1",
         authority: object,
+        verified_requests: tuple[object, ...],
     ) -> bool:
         try:
-            paid_authority = _unwrap_verified_factory_paid_budget_authority_v2(
-                authority
-            )
+            resolution = _unwrap_verified_factory_paid_budget_resolution_v2(authority)
         except TypeError:
             return False
+        paid_authority = resolution.paid_budget_authority
+        profile = resolution.cost_profile
         if not (
             paid_authority.purpose == "final_production"
             and paid_authority.workspace_id == manifest.workspace_id
@@ -1171,6 +1258,7 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
             and manifest.factory_revision == self.factory_revision
             and manifest.plan_digest == self.plan_digest
             and len(manifest.scenes) == self.storyboard_scene_count
+            and len(verified_requests) == self.storyboard_scene_count
         ):
             return False
 
@@ -1179,22 +1267,29 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
             for scene_sequence_index, scene in enumerate(manifest.scenes)
             for source_beat_index in scene.source_beat_indices
         }
-        card_by_source = {card.source_beat_index: card for card in manifest.cards}
-        for scene_sequence_index, (scene, receipt) in enumerate(
-            zip(manifest.scenes, self.scene_video_receipts, strict=True)
+        for scene_sequence_index, (scene, receipt, request_capability) in enumerate(
+            zip(
+                manifest.scenes,
+                self.scene_video_receipts,
+                verified_requests,
+                strict=True,
+            )
         ):
+            request = receipt.request
             if not (
-                receipt.scene_sequence_index == scene_sequence_index
-                and receipt.scene_id == scene.scene_id
-                and receipt.scene_digest == scene.scene_digest
-                and receipt.anchor_selected_artifact == scene.anchor_selected_artifact
-                and receipt.request_digest
-                == derive_storyboard_scene_video_request_digest_v1(
-                    scene=scene,
-                    anchor_card=card_by_source[scene.source_beat_indices[0]],
-                    storyboard_execution_manifest_digest=manifest.manifest_digest,
-                    final_production_authority_digest=(paid_authority.authority_digest),
-                )
+                receipt.binds_verified_request(request_capability)
+                and request.scene_sequence_index == scene_sequence_index
+                and request.scene_id == scene.scene_id
+                and request.scene_digest == scene.scene_digest
+                and request.anchor.selected_artifact == scene.anchor_selected_artifact
+                and request.storyboard_execution_manifest_digest
+                == manifest.manifest_digest
+                and request.final_production_authority_digest
+                == paid_authority.authority_digest
+                and request.cost_profile_digest == profile.profile_digest
+                and request.pricing_policy_revision == profile.pricing_policy_revision
+                and request.provider == profile.operations.video.provider
+                and request.model == profile.operations.video.model
             ):
                 return False
         for card, projection in zip(
@@ -1273,7 +1368,7 @@ class StoryboardSceneFanInManifestV1(BaseModel):
             audio_source_order
         ) != list(range(_STORYBOARD_BEAT_COUNT)):
             raise ValueError("audio artifacts must match beat projection source order")
-        for field in ("artifact_id", "uri", "sha256", "execution_id"):
+        for field in ("artifact_id", "uri", "execution_id"):
             values = [getattr(artifact, field) for artifact in self.audio_artifacts]
             if len(values) != len(set(values)):
                 raise ValueError(f"audio artifact {field} values must be unique")
@@ -1298,6 +1393,7 @@ class StoryboardSceneFanInManifestV1(BaseModel):
         self,
         manifest: "StoryboardExecutionManifestV1",
         authority: object,
+        verified_requests: tuple[object, ...],
     ) -> bool:
         try:
             paid_authority = _unwrap_verified_factory_paid_budget_authority_v2(
@@ -1319,6 +1415,7 @@ class StoryboardSceneFanInManifestV1(BaseModel):
             and self.storyboard_scene_video_set_receipt.binds(
                 manifest,
                 authority,
+                verified_requests,
             )
         )
 
@@ -1406,6 +1503,10 @@ class ReelsFactoryReceiptV3(BaseModel):
         self,
         fan_in: StoryboardSceneFanInManifestV1,
         scene_video_set: StoryboardSceneVideoSetReceiptV1,
+        *,
+        manifest: "StoryboardExecutionManifestV1",
+        authority: object,
+        verified_requests: tuple[object, ...],
     ) -> bool:
         return (
             self.fan_in_manifest == fan_in
@@ -1416,6 +1517,7 @@ class ReelsFactoryReceiptV3(BaseModel):
             and self.binds_scene_video_set(scene_video_set)
             and self.final_render_receipt.fan_in_manifest_digest
             == fan_in.manifest_digest
+            and fan_in.binds(manifest, authority, verified_requests)
         )
 
 
@@ -1739,33 +1841,9 @@ class FactoryPaidBudgetAuthorityV2(BaseModel):
             raise ValueError("authority_digest does not match paid authority")
         return self
 
-    @classmethod
-    def from_verified(
-        cls,
-        value: Mapping[str, Any] | BaseModel,
-        *,
-        approval_receipt: "FactoryPaidBudgetApprovalReceiptV2",
-        at_utc: str,
-        resolver: FactoryPaidBudgetApprovalResolverV2,
-    ) -> "VerifiedFactoryPaidBudgetAuthorityV2":
-        authority = cls.model_validate(_as_json_dict(value))
-        if not approval_receipt.authorizes(
-            authority,
-            at_utc=at_utc,
-            resolver=resolver,
-        ):
-            raise ValueError("authority requires current durable approval")
-        return VerifiedFactoryPaidBudgetAuthorityV2(
-            authority,
-            _token=_VERIFIED_AUTHORITY_TOKEN_V2,
-        )
-
 
 _VERIFIED_AUTHORITY_TOKEN_V2 = object()
-_VERIFIED_AUTHORITY_REGISTRY_V2: WeakKeyDictionary[
-    object,
-    FactoryPaidBudgetAuthorityV2,
-] = WeakKeyDictionary()
+_VERIFIED_AUTHORITY_REGISTRY_V2: WeakKeyDictionary[object, object] = WeakKeyDictionary()
 
 
 class VerifiedFactoryPaidBudgetAuthorityV2:
@@ -1775,17 +1853,27 @@ class VerifiedFactoryPaidBudgetAuthorityV2:
 
     def __init__(
         self,
-        authority: FactoryPaidBudgetAuthorityV2,
+        resolution: object,
         *,
         _token: object,
     ) -> None:
         if _token is not _VERIFIED_AUTHORITY_TOKEN_V2:
-            raise TypeError("verified authority can only be minted by from_verified")
-        _VERIFIED_AUTHORITY_REGISTRY_V2[self] = authority
+            raise TypeError(
+                "verified authority can only be minted by resolution.from_verified"
+            )
+        _VERIFIED_AUTHORITY_REGISTRY_V2[self] = resolution
 
     @property
     def authority(self) -> FactoryPaidBudgetAuthorityV2:
         return _unwrap_verified_factory_paid_budget_authority_v2(self)
+
+    @property
+    def cost_profile(self) -> "FactoryCostProfileV1":
+        return _unwrap_verified_factory_paid_budget_resolution_v2(self).cost_profile
+
+    @property
+    def approval_receipt(self) -> "FactoryPaidBudgetApprovalReceiptV2":
+        return _unwrap_verified_factory_paid_budget_resolution_v2(self).approval_receipt
 
     def __setattr__(self, _name: str, _value: object) -> None:
         raise TypeError("verified paid authority is immutable")
@@ -1809,12 +1897,23 @@ class VerifiedFactoryPaidBudgetAuthorityV2:
 def _unwrap_verified_factory_paid_budget_authority_v2(
     capability: object,
 ) -> FactoryPaidBudgetAuthorityV2:
+    return _unwrap_verified_factory_paid_budget_resolution_v2(
+        capability
+    ).paid_budget_authority
+
+
+def _unwrap_verified_factory_paid_budget_resolution_v2(
+    capability: object,
+) -> "FactoryPaidBudgetResolutionV2":
     if not isinstance(capability, VerifiedFactoryPaidBudgetAuthorityV2):
         raise TypeError("execution requires VerifiedFactoryPaidBudgetAuthorityV2")
     try:
-        return _VERIFIED_AUTHORITY_REGISTRY_V2[capability]
+        resolution = _VERIFIED_AUTHORITY_REGISTRY_V2[capability]
     except KeyError as exc:
         raise TypeError("unminted verified paid authority capability") from exc
+    if not isinstance(resolution, FactoryPaidBudgetResolutionV2):
+        raise TypeError("paid authority capability is not profile-resolved")
+    return resolution
 
 
 class FactoryPaidBudgetApprovalReceiptV2(BaseModel):
@@ -2128,6 +2227,12 @@ class FactoryPaidBudgetResolutionV2(BaseModel):
         if profile.all_beat_count != 16 or profile.purpose_policies is None:
             raise ValueError("cost_profile requires current two-stage purpose policies")
         if (
+            profile.currency != "USD"
+            or authority.currency != "USD"
+            or self.approval_receipt.currency != "USD"
+        ):
+            raise ValueError("V2 paid execution currency requires USD cost truth")
+        if (
             profile.profile_digest != authority.cost_profile_digest
             or profile.pricing_policy_revision != authority.pricing_policy_revision
         ):
@@ -2148,11 +2253,15 @@ class FactoryPaidBudgetResolutionV2(BaseModel):
     ) -> VerifiedFactoryPaidBudgetAuthorityV2:
         if not self.cost_profile.is_valid_at(at_utc):
             raise ValueError("paid execution requires a current cost profile")
-        return FactoryPaidBudgetAuthorityV2.from_verified(
+        if not self.approval_receipt.authorizes(
             self.paid_budget_authority,
-            approval_receipt=self.approval_receipt,
             at_utc=at_utc,
             resolver=resolver,
+        ):
+            raise ValueError("authority requires current durable approval")
+        return VerifiedFactoryPaidBudgetAuthorityV2(
+            self,
+            _token=_VERIFIED_AUTHORITY_TOKEN_V2,
         )
 
 
@@ -2582,6 +2691,7 @@ __all__ = [
     "derive_storyboard_scenes_v1",
     "derive_storyboard_scene_video_artifact_digest_v1",
     "derive_storyboard_scene_video_request_digest_v1",
+    "derive_storyboard_scene_video_execution_request_digest_v1",
     "derive_storyboard_scene_video_idempotency_key_v1",
     "derive_storyboard_scene_video_provider_prompt_v1",
     "require_verified_storyboard_scene_video_request_v1",

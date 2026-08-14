@@ -54,6 +54,7 @@ from hiob_contracts import (
     derive_storyboard_scene_digest_v1,
     derive_storyboard_beat_scene_video_projection_digest_v1,
     derive_storyboard_scene_video_artifact_digest_v1,
+    derive_storyboard_scene_video_execution_request_digest_v1,
     derive_storyboard_scene_video_receipt_digest_v1,
     derive_storyboard_scene_video_request_digest_v1,
     derive_storyboard_scene_video_idempotency_key_v1,
@@ -706,7 +707,14 @@ def _scene_video_request(
         "pricing_policy_revision": profile.pricing_policy_revision,
     }
     body.update(changes)
+    return _reseal_scene_video_request(body)
+
+
+def _reseal_scene_video_request(body: dict[str, Any]) -> dict[str, Any]:
     body["request_digest"] = derive_storyboard_scene_video_request_digest_v1(body)
+    body["execution_request_digest"] = (
+        derive_storyboard_scene_video_execution_request_digest_v1(body)
+    )
     body["idempotency_key"] = derive_storyboard_scene_video_idempotency_key_v1(body)
     return body
 
@@ -1943,6 +1951,7 @@ def test_scene_video_set_binds_exact_scenes_and_sixteen_beat_projection() -> Non
         1,
     ]
     assert receipt.binds(manifest, verified, verified_requests)
+    assert not receipt.binds(manifest, authority, verified_requests)
     assert not receipt.binds(manifest, verified, ())
     assert receipt.scene_video_receipts[0].binds_verified_request(verified_requests[0])
     assert receipt.scene_video_receipts[0].artifact.duration_ms == 4_000
@@ -1965,12 +1974,7 @@ def test_scene_video_set_binds_exact_scenes_and_sixteen_beat_projection() -> Non
         alien = receipt.model_dump(mode="json")
         request_payload = alien["scene_video_receipts"][0]["request"]
         request_payload[field] = value
-        request_payload["request_digest"] = (
-            derive_storyboard_scene_video_request_digest_v1(request_payload)
-        )
-        request_payload["idempotency_key"] = (
-            derive_storyboard_scene_video_idempotency_key_v1(request_payload)
-        )
+        _reseal_scene_video_request(request_payload)
         alien["scene_video_receipts"][0]["receipt_digest"] = (
             derive_storyboard_scene_video_receipt_digest_v1(
                 alien["scene_video_receipts"][0]
@@ -2061,7 +2065,43 @@ def test_scene_video_request_requires_verified_exact_manifest_capability() -> No
     )
     assert isinstance(capability, VerifiedStoryboardSceneVideoRequestV1)
     request = require_verified_storyboard_scene_video_request_v1(capability)
+    assert set(request.model_dump(mode="json")) == {
+        "contract_version",
+        "workspace_id",
+        "run_id",
+        "factory_revision",
+        "plan_digest",
+        "storyboard_execution_manifest_digest",
+        "final_production_authority_digest",
+        "scene_sequence_index",
+        "scene_id",
+        "scene_digest",
+        "anchor",
+        "anchor_image",
+        "generation_nonce",
+        "duration_ms",
+        "fps",
+        "width",
+        "height",
+        "audio_mode",
+        "provider",
+        "model",
+        "cost_profile_digest",
+        "pricing_policy_revision",
+        "request_digest",
+        "execution_request_digest",
+        "idempotency_key",
+    }
     assert request.request_digest == payload["request_digest"]
+    assert request.request_digest == derive_storyboard_scene_video_request_digest_v1(
+        scene=manifest.scenes[0],
+        anchor_card=manifest.cards[0],
+        storyboard_execution_manifest_digest=manifest.manifest_digest,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    assert request.execution_request_digest == (
+        derive_storyboard_scene_video_execution_request_digest_v1(request)
+    )
     assert request.idempotency_key == payload["idempotency_key"]
     assert request.anchor.source_beat_index == manifest.scenes[0].source_beat_indices[0]
     assert request.fps == 24
@@ -2114,16 +2154,11 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
 
     provider_drift = deepcopy(payload)
     provider_drift["model"] = "unpriced-model"
-    with pytest.raises(ValidationError, match="request_digest"):
+    with pytest.raises(ValidationError, match="execution_request_digest"):
         StoryboardSceneVideoRequestV1.model_validate(provider_drift)
 
     rehashed_provider_drift = deepcopy(provider_drift)
-    rehashed_provider_drift["request_digest"] = (
-        derive_storyboard_scene_video_request_digest_v1(rehashed_provider_drift)
-    )
-    rehashed_provider_drift["idempotency_key"] = (
-        derive_storyboard_scene_video_idempotency_key_v1(rehashed_provider_drift)
-    )
+    _reseal_scene_video_request(rehashed_provider_drift)
     with pytest.raises(ValueError, match="cost profile"):
         StoryboardSceneVideoRequestV1.from_verified(
             rehashed_provider_drift,
@@ -2136,12 +2171,7 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
     alien_image["anchor_image"]["storage_key"] = (
         "workspaces/alien/runs/alien/storyboard/00.webp"
     )
-    alien_image["request_digest"] = derive_storyboard_scene_video_request_digest_v1(
-        alien_image
-    )
-    alien_image["idempotency_key"] = derive_storyboard_scene_video_idempotency_key_v1(
-        alien_image
-    )
+    _reseal_scene_video_request(alien_image)
     with pytest.raises(ValueError, match="anchor image"):
         StoryboardSceneVideoRequestV1.from_verified(
             alien_image,
@@ -2153,28 +2183,19 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
     wrong_output_profile = deepcopy(payload)
     wrong_output_profile["width"] = 1_080
     wrong_output_profile["height"] = 1_920
-    wrong_output_profile["idempotency_key"] = (
-        derive_storyboard_scene_video_idempotency_key_v1(wrong_output_profile)
-    )
+    _reseal_scene_video_request(wrong_output_profile)
     with pytest.raises(ValidationError, match="width|height"):
         StoryboardSceneVideoRequestV1.model_validate(wrong_output_profile)
 
     wrong_fps = deepcopy(payload)
     wrong_fps["fps"] = 30
-    wrong_fps["idempotency_key"] = derive_storyboard_scene_video_idempotency_key_v1(
-        wrong_fps
-    )
+    _reseal_scene_video_request(wrong_fps)
     with pytest.raises(ValidationError, match="fps"):
         StoryboardSceneVideoRequestV1.model_validate(wrong_fps)
 
     long_prompt = deepcopy(payload)
     long_prompt["anchor"]["prompt_override"] = "x" * 2_500
-    long_prompt["request_digest"] = derive_storyboard_scene_video_request_digest_v1(
-        long_prompt
-    )
-    long_prompt["idempotency_key"] = derive_storyboard_scene_video_idempotency_key_v1(
-        long_prompt
-    )
+    _reseal_scene_video_request(long_prompt)
     with pytest.raises(ValidationError, match="provider prompt.*2500"):
         StoryboardSceneVideoRequestV1.model_validate(long_prompt)
 
@@ -2190,10 +2211,7 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
     ):
         drift = deepcopy(payload)
         drift[field] = value
-        drift["request_digest"] = derive_storyboard_scene_video_request_digest_v1(drift)
-        drift["idempotency_key"] = derive_storyboard_scene_video_idempotency_key_v1(
-            drift
-        )
+        _reseal_scene_video_request(drift)
         with pytest.raises(
             (ValidationError, ValueError), match=field.replace("_", " ") + "|literal"
         ):
@@ -2285,6 +2303,11 @@ def test_scene_video_receipt_requires_exact_four_second_immutable_video() -> Non
         payload,
         request=request_capability,
     )
+    with pytest.raises(ValueError, match="verified request"):
+        StoryboardSceneVideoReceiptV1.from_verified_request(
+            payload,
+            request=request,
+        )
 
     assert value.request == request
     assert set(value.model_dump(mode="json")) == {
@@ -2309,12 +2332,7 @@ def test_scene_video_receipt_requires_exact_four_second_immutable_video() -> Non
     alien_request["request"]["generation_nonce"] = (
         "00000000-0000-4000-8000-000000009999"
     )
-    alien_request["request"]["request_digest"] = (
-        derive_storyboard_scene_video_request_digest_v1(alien_request["request"])
-    )
-    alien_request["request"]["idempotency_key"] = (
-        derive_storyboard_scene_video_idempotency_key_v1(alien_request["request"])
-    )
+    _reseal_scene_video_request(alien_request["request"])
     alien_request["receipt_digest"] = derive_storyboard_scene_video_receipt_digest_v1(
         alien_request
     )

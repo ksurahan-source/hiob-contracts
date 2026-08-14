@@ -682,21 +682,28 @@ class StarReelsViewV3(BaseModel):
             raise ValueError("StoryboardReview requires confirmed image work")
         pointer = self.storyboard
         if self.status == "storyboard_generating":
-            if pointer is not None and (
+            if self.budget.purpose == "storyboard_draft":
+                if (
+                    pointer is not None
+                    or self.stage_output is not None
+                    or self.review_digest is not None
+                ):
+                    raise ValueError(
+                        "storyboard draft generating cannot carry a projection"
+                    )
+                return
+            if pointer is None:
+                raise ValueError("storyboard regen generating requires a pointer")
+            if (
                 pointer.approval_receipt_digest is not None
                 or pointer.execution_manifest_digest is not None
             ):
                 raise ValueError(
                     "generating storyboard cannot carry approval or execution manifest"
                 )
-            if pointer is None:
-                if self.stage_output is not None or self.review_digest is not None:
-                    raise ValueError(
-                        "generating without a pointer has no review output"
-                    )
-            elif self.stage_output != pointer or self.review_digest is not None:
+            if self.stage_output != pointer or self.review_digest is not None:
                 raise ValueError(
-                    "generating pointer must be echoed without review digest"
+                    "regen generating pointer must be echoed without review digest"
                 )
             return
         if pointer is None or self.stage_output != pointer:
