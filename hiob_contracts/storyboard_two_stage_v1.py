@@ -937,7 +937,7 @@ class StoryboardImageFramePlanV1(BaseModel):
     model: Literal["seedream-5-pro"]
     width: Literal[1024]
     height: Literal[1536]
-    quality: Literal["high"]
+    quality: Literal["low"]
     lock_policy: Literal["hard_fail"]
     max_refs: Annotated[int, Field(ge=1, le=5)]
 
@@ -2676,6 +2676,9 @@ class ReelsFactoryReceiptV3(BaseModel):
             raise ValueError("output_url does not match final render receipt")
         if render.output_artifact.sha256 != self.output_sha256:
             raise ValueError("output_sha256 does not match final render artifact")
+        expected_duration_ms = sum(caption.duration_ms for caption in fan_in.captions)
+        if render.output_artifact.duration_ms != expected_duration_ms:
+            raise ValueError("final render duration does not match edited timeline")
         if self.receipt_digest != derive_reels_factory_receipt_digest_v3(self):
             raise ValueError("receipt_digest does not match reels factory receipt")
         return self
@@ -3001,7 +3004,7 @@ def factory_paid_call_cardinality_v2(
     if purpose == "storyboard_draft":
         if storyboard_scene_count is not None:
             raise ValueError("storyboard_draft cannot carry storyboard_scene_count")
-        calls = (1, 16, 0, 0, 0)
+        calls = (1, 16, 0, 16, 0)
     elif purpose == "storyboard_regen":
         if storyboard_scene_count is not None:
             raise ValueError("storyboard_regen cannot carry storyboard_scene_count")
@@ -3019,7 +3022,7 @@ def factory_paid_call_cardinality_v2(
             or not 1 <= storyboard_scene_count <= 16
         ):
             raise ValueError("storyboard_scene_count must be an integer from 1 to 16")
-        calls = (0, 0, storyboard_scene_count, 16, 1)
+        calls = (0, 0, storyboard_scene_count, 0, 1)
     else:
         raise ValueError("unsupported paid budget purpose")
     return {

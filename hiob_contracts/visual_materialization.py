@@ -276,7 +276,7 @@ class BeatFramePlanV1:
     model: str = SEEDREAM_5_PRO_MODEL_ID
     width: int = 1024
     height: int = 1536
-    quality: str = "high"
+    quality: str = "low"
     lock_policy: str = "hard_fail"
     max_refs: int = SEEDREAM_V1_MAX_REFS
 
@@ -380,7 +380,7 @@ class BeatFramePlanV2:
     model: str = SEEDREAM_5_PRO_MODEL_ID
     width: int = 1024
     height: int = 1536
-    quality: str = "high"
+    quality: str = "low"
     lock_policy: str = "hard_fail"
     max_refs: int = SEEDREAM_V1_MAX_REFS
     contract_version: str = VISUAL_CONTRACT_VERSION_V2

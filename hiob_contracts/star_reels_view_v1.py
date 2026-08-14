@@ -814,7 +814,7 @@ _StarReelsViewReceiptsV3.model_rebuild()
 
 
 _STAR_REELS_PURPOSE_LABELS_V3 = {
-    "storyboard_draft": "스토리보드 이미지 16장",
+    "storyboard_draft": "스토리보드 이미지와 음성 16개",
     "storyboard_regen": "선택 이미지 재생성",
     "final_production": "최종 영상 제작",
 }
@@ -827,7 +827,7 @@ class StarReelsBudgetV3(BaseModel):
 
     purpose: FactoryPaidBudgetPurposeV2
     purpose_label: Literal[
-        "스토리보드 이미지 16장",
+        "스토리보드 이미지와 음성 16개",
         "선택 이미지 재생성",
         "최종 영상 제작",
     ]

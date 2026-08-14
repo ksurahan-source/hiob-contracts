@@ -227,7 +227,7 @@ class StoryScriptBeatV1(BaseModel):
     script_text: NonBlankStr
     voice_text: NonBlankStr
     caption_text: NonBlankStr
-    duration_ms: int = Field(ge=1, le=55_000, strict=True)
+    duration_ms: int = Field(ge=1_000, le=15_000, strict=True)
     voice_char_count: NonNegativeInt
     voice_utf8_bytes: NonNegativeInt
 

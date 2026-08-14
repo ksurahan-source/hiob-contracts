@@ -38,7 +38,7 @@ def _budget(purpose: str) -> dict[str, object]:
             "script": 1,
             "image": 16,
             "video": 0,
-            "voice": 0,
+            "voice": 16,
             "render": 0,
         },
         "storyboard_regen": {
@@ -52,12 +52,12 @@ def _budget(purpose: str) -> dict[str, object]:
             "script": 0,
             "image": 0,
             "video": 8,
-            "voice": 16,
+            "voice": 0,
             "render": 1,
         },
     }[purpose]
     labels = {
-        "storyboard_draft": "스토리보드 이미지 16장",
+        "storyboard_draft": "스토리보드 이미지와 음성 16개",
         "storyboard_regen": "선택 이미지 재생성",
         "final_production": "최종 영상 제작",
     }
@@ -294,7 +294,7 @@ def _storyboard_review_view(*, purpose: str = "storyboard_draft") -> dict:
     budget = _budget(purpose)
     budget["paid_budget_authority_digest"] = pair[1].authority_digest
     attempts = (
-        {"script": 1, "image": 16, "video": 0, "voice": 0, "render": 0}
+        {"script": 1, "image": 16, "video": 0, "voice": 16, "render": 0}
         if purpose == "storyboard_draft"
         else {"script": 0, "image": 1, "video": 0, "voice": 0, "render": 0}
     )

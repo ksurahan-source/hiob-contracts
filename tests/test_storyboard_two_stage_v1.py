@@ -245,7 +245,7 @@ def _image_frame_plan(source_beat_index: int, **changes: Any) -> dict[str, Any]:
         "model": "seedream-5-pro",
         "width": 1_024,
         "height": 1_536,
-        "quality": "high",
+        "quality": "low",
         "lock_policy": "hard_fail",
         "max_refs": 5,
     }
@@ -614,7 +614,7 @@ def _calls(
             "script": 1,
             "image": 16,
             "video": 0,
-            "voice": 0,
+            "voice": 16,
             "render": 0,
             "retries": 0,
             "fallbacks": 0,
@@ -635,7 +635,7 @@ def _calls(
         "script": 0,
         "image": 0,
         "video": storyboard_scene_count,
-        "voice": 16,
+        "voice": 0,
         "render": 1,
         "retries": 0,
         "fallbacks": 0,
@@ -879,6 +879,9 @@ def _profile_worst_case_cost(
         return (
             operations["script"]["rate_microunits"]
             + 16 * operations["image"]["rate_microunits"]
+            + 16
+            * operations["voice"]["rate_microunits"]
+            * operations["voice"]["max_units_per_operation"]
         )
     if purpose == "storyboard_regen":
         return image_count * operations["image"]["rate_microunits"]
@@ -886,9 +889,6 @@ def _profile_worst_case_cost(
         scene_count
         * operations["video"]["rate_microunits"]
         * operations["video"]["max_units_per_operation"]
-        + 16
-        * operations["voice"]["rate_microunits"]
-        * operations["voice"]["max_units_per_operation"]
         + operations["render"]["rate_microunits"]
     )
 
@@ -1410,7 +1410,7 @@ def _final_render_receipt(fan_in_manifest_digest: str) -> dict[str, Any]:
         "sha256": sha256_digest({"artifact": "final-storyboard-reel"}),
         "mime": "video/mp4",
         "bytes_len": 8_192,
-        "duration_ms": 64_000,
+        "duration_ms": 48_000,
         "width": 1_080,
         "height": 1_920,
         "beat_index": None,
@@ -2700,10 +2700,10 @@ def test_typed_cost_profile_rejects_missing_operation_identity_or_policy_drift()
 @pytest.mark.parametrize(
     ("purpose", "indices", "expected_calls"),
     [
-        ("storyboard_draft", list(range(16)), (1, 16, 0, 0, 0)),
+        ("storyboard_draft", list(range(16)), (1, 16, 0, 16, 0)),
         ("storyboard_regen", [1], (0, 1, 0, 0, 0)),
         ("storyboard_regen", [1, 4, 9, 15], (0, 4, 0, 0, 0)),
-        ("final_production", [], (0, 0, 8, 16, 1)),
+        ("final_production", [], (0, 0, 8, 0, 1)),
     ],
 )
 def test_authority_v2_allows_only_exact_two_stage_or_regen_lanes(
@@ -3700,6 +3700,20 @@ def test_reels_factory_receipt_v3_replaces_beat_artifact_set_linkage() -> None:
         authority=verified,
         verified_requests=verified_requests,
     )
+
+    wrong_duration = _factory_receipt_v3(manifest, authority, scene_video_set, fan_in)
+    wrong_duration["final_render_receipt"]["output_artifact"]["duration_ms"] = 49_000
+    wrong_duration["final_render_receipt"]["receipt_digest"] = (
+        canonical_contract_digest_v1(
+            wrong_duration["final_render_receipt"],
+            exclude={"receipt_digest"},
+        )
+    )
+    wrong_duration["receipt_digest"] = derive_reels_factory_receipt_digest_v3(
+        wrong_duration
+    )
+    with pytest.raises(ValidationError, match="duration"):
+        ReelsFactoryReceiptV3.model_validate(wrong_duration)
 
 
 def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> None:
