@@ -57,6 +57,7 @@ from hiob_contracts import (
     derive_storyboard_scene_video_receipt_digest_v1,
     derive_storyboard_scene_video_request_digest_v1,
     derive_storyboard_scene_video_idempotency_key_v1,
+    derive_storyboard_scene_video_provider_prompt_v1,
     derive_storyboard_scene_video_set_receipt_digest_v1,
     derive_storyboard_scene_fan_in_manifest_digest_v1,
     derive_storyboard_scenes_v1,
@@ -657,6 +658,7 @@ def _scene_video_request(
             f"00000000-0000-4000-8000-{scene_sequence_index + 800:012d}"
         ),
         "duration_ms": 4_000,
+        "fps": 24,
         "width": 720,
         "height": 1_280,
         "provider": "piapi",
@@ -1973,7 +1975,14 @@ def test_scene_video_request_requires_verified_exact_manifest_capability() -> No
     assert request.request_digest == payload["request_digest"]
     assert request.idempotency_key == payload["idempotency_key"]
     assert request.anchor.source_beat_index == manifest.scenes[0].source_beat_indices[0]
+    assert request.fps == 24
     assert (request.width, request.height) == (720, 1_280)
+    assert derive_storyboard_scene_video_provider_prompt_v1(request.anchor) == (
+        "@image_1\n"
+        "crop_mode: cover\n"
+        "focal_x_basis_points: 5000\n"
+        "focal_y_basis_points: 5000"
+    )
 
     with pytest.raises(TypeError, match="VerifiedStoryboardSceneVideoRequestV1"):
         require_verified_storyboard_scene_video_request_v1(request)
@@ -2055,6 +2064,39 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
     )
     with pytest.raises(ValidationError, match="width|height"):
         StoryboardSceneVideoRequestV1.model_validate(wrong_output_profile)
+
+    wrong_fps = deepcopy(payload)
+    wrong_fps["fps"] = 30
+    wrong_fps["idempotency_key"] = derive_storyboard_scene_video_idempotency_key_v1(
+        wrong_fps
+    )
+    with pytest.raises(ValidationError, match="fps"):
+        StoryboardSceneVideoRequestV1.model_validate(wrong_fps)
+
+    long_prompt = deepcopy(payload)
+    long_prompt["anchor"]["prompt_override"] = "x" * 2_500
+    anchor_card = next(
+        card
+        for card in manifest.cards
+        if card.source_beat_index == manifest.scenes[0].source_beat_indices[0]
+    ).model_dump(mode="json")
+    anchor_card["prompt_override"] = long_prompt["anchor"]["prompt_override"]
+    long_prompt["request_digest"] = derive_storyboard_scene_video_request_digest_v1(
+        scene=manifest.scenes[0],
+        anchor_card=anchor_card,
+        storyboard_execution_manifest_digest=manifest.manifest_digest,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    long_prompt["idempotency_key"] = derive_storyboard_scene_video_idempotency_key_v1(
+        long_prompt
+    )
+    with pytest.raises(ValidationError, match="provider prompt.*2500"):
+        StoryboardSceneVideoRequestV1.model_validate(long_prompt)
+
+    extra_image_ref = deepcopy(payload)
+    extra_image_ref["anchor"]["motion_note"] = "pan from @image_2"
+    with pytest.raises(ValueError, match="sole.*@image_1"):
+        derive_storyboard_scene_video_provider_prompt_v1(extra_image_ref["anchor"])
 
     extra_non_anchor = deepcopy(payload)
     extra_non_anchor["non_anchor_prompts"] = [draft.cards[1].prompt_override]
