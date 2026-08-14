@@ -80,7 +80,7 @@ def _bundle(duration: int = 48) -> StoryScriptReviewBundleV1:
 def test_existing_intake_is_exactly_the_current_thirteen_questions() -> None:
     intake = StoryIntake13QV1.model_validate(INTAKE)
 
-    assert tuple(intake.model_fields) == tuple(INTAKE)
+    assert tuple(StoryIntake13QV1.model_fields) == tuple(INTAKE)
     assert intake.model_dump(mode="json") == INTAKE
     with pytest.raises(ValidationError):
         StoryIntake13QV1.model_validate({key: value for key, value in INTAKE.items() if key != "benefit"})
