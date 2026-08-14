@@ -1297,6 +1297,19 @@ def _scene_fan_in(
     audio_artifacts = [
         _audio_artifact(card.source_beat_index) for card in manifest.cards
     ]
+    captions: list[dict[str, Any]] = []
+    for card in manifest.cards:
+        caption: dict[str, Any] = {
+            "contract_version": "StoryboardBeatCaption.v1",
+            "source_beat_index": card.source_beat_index,
+            "sequence_index": card.sequence_index,
+            "text_content": card.beat_text,
+            "duration_ms": 4_000,
+        }
+        caption["caption_digest"] = (
+            hiob_contracts.derive_storyboard_beat_caption_digest_v1(caption)
+        )
+        captions.append(caption)
     body: dict[str, Any] = {
         "contract_version": "StoryboardSceneFanInManifest.v1",
         "workspace_id": WORKSPACE_ID,
@@ -1308,6 +1321,10 @@ def _scene_fan_in(
         "storyboard_scene_video_set_receipt": scene_video_set,
         "storyboard_scene_video_set_receipt_digest": scene_video_set.receipt_digest,
         "audio_artifacts": audio_artifacts,
+        "captions": captions,
+        "caption_set_digest": (
+            hiob_contracts.derive_storyboard_caption_set_digest_v1(captions)
+        ),
         "timeline_digest": sha256_digest({"timeline": "storyboard-scenes"}),
         "audio_mix_digest": canonical_contract_digest_v1(
             {"audio_artifacts": audio_artifacts}
@@ -1901,12 +1918,30 @@ def test_phase_a_completion_seals_initial_paid_output_and_public_summary() -> No
         completion.output_image_set_receipt.completed_at_utc
     )
 
+    resolution = _paid_resolution_v2(completion.paid_budget_approval_receipt)
+    operation_proofs = tuple(
+        _verified_historical_evidence(
+            resolution=resolution,
+            receipt=receipt,
+        )
+        for receipt in completion.output_image_set_receipt.provider_receipts
+    )
     summary = hiob_contracts.StoryboardPhaseACompletionSummaryV1.from_completion(
-        completion
+        completion,
+        authority=resolution,
+        operation_proofs=operation_proofs,
     )
     summary_json = summary.model_dump(mode="json")
-    assert summary.binds(completion)
+    assert summary.binds(
+        completion,
+        authority=resolution,
+        operation_proofs=operation_proofs,
+    )
     assert summary.image_count == 16
+    assert summary.currency == "USD"
+    assert summary.max_total_cost_microunits == (
+        completion.paid_budget_authority.max_total_cost_microunits
+    )
     assert summary.completion_receipt_digest == completion.receipt_digest
     assert summary.output_storyboard_carrier_digest == (
         hiob_contracts.derive_factory_storyboard_carrier_digest_v1(
@@ -3275,6 +3310,7 @@ def test_scene_video_set_rejects_repeat_or_video_alias_tampering() -> None:
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(paid_receipt)
     )
+    verified = _verified_paid_authority_v2(paid_receipt)
     manifest = _manifest(
         draft,
         image_set,
@@ -3607,6 +3643,7 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(paid_receipt)
     )
+    verified = _verified_paid_authority_v2(paid_receipt)
     manifest = _manifest(
         draft,
         image_set,
@@ -3615,11 +3652,27 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
     )
     scene_video_set = _scene_video_set(manifest, authority)
     fan_in = _scene_fan_in(manifest, authority, scene_video_set)
-    factory = _factory_receipt_v3(
-        manifest,
-        authority,
+    verified_requests = _verified_scene_video_requests(manifest, verified)
+    scene_summary = hiob_contracts.StoryboardSceneVideoSetSummaryV1.from_receipt(
         scene_video_set,
-        fan_in,
+        manifest=manifest,
+        authority=verified,
+        operation_proofs=verified_requests,
+    )
+    factory_receipt = ReelsFactoryReceiptV3.model_validate(
+        _factory_receipt_v3(
+            manifest,
+            authority,
+            scene_video_set,
+            fan_in,
+        )
+    )
+    factory = hiob_contracts.ReelsFactoryCompletionSummaryV3.from_receipt(
+        factory_receipt,
+        scene_video_set_summary=scene_summary,
+        manifest=manifest,
+        authority=verified,
+        operation_proofs=verified_requests,
     )
     carrier = FactoryStoryboardCarrierV1.model_validate(
         {
@@ -3644,7 +3697,7 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
             "all_beat_count": 16,
             "storyboard_scene_count": 8,
             "paid_budget_authority_digest": authority.authority_digest,
-            "storyboard_scene_video_set_receipt": scene_video_set,
+            "storyboard_scene_video_set_summary": scene_summary,
         },
         "review_digest": None,
         "receipts": {
@@ -3655,7 +3708,21 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
             "paid_budget_authority": authority,
             "storyboard_phase_a_completion_summary": (
                 hiob_contracts.StoryboardPhaseACompletionSummaryV1.from_completion(
-                    phase_a_completion
+                    phase_a_completion,
+                    authority=_paid_resolution_v2(
+                        phase_a_completion.paid_budget_approval_receipt
+                    ),
+                    operation_proofs=tuple(
+                        _verified_historical_evidence(
+                            resolution=_paid_resolution_v2(
+                                phase_a_completion.paid_budget_approval_receipt
+                            ),
+                            receipt=receipt,
+                        )
+                        for receipt in (
+                            phase_a_completion.output_image_set_receipt.provider_receipts
+                        )
+                    ),
                 )
             ),
         },
@@ -3664,11 +3731,14 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
         "storyboard": carrier,
     }
     view = StarReelsViewV3.model_validate(payload)
-    assert isinstance(view.receipts.factory, ReelsFactoryReceiptV3)
-    assert view.budget.storyboard_scene_video_set_receipt == scene_video_set
+    assert isinstance(
+        view.receipts.factory,
+        hiob_contracts.ReelsFactoryCompletionSummaryV3,
+    )
+    assert view.budget.storyboard_scene_video_set_summary == scene_summary
 
     missing_set = deepcopy(payload)
-    missing_set["budget"]["storyboard_scene_video_set_receipt"] = None
+    missing_set["budget"]["storyboard_scene_video_set_summary"] = None
     with pytest.raises(ValidationError, match="scene video budget"):
         StarReelsViewV3.model_validate(missing_set)
 
@@ -4134,6 +4204,39 @@ def test_scene_fan_in_binds_exact_sixteen_approved_beat_captions() -> None:
     verified = _verified_paid_authority_v2(paid_receipt)
     requests = _verified_scene_video_requests(manifest, verified)
     assert not tampered.binds(manifest, verified, requests)
+
+
+def test_storyboard_card_separates_immutable_voice_and_caption_truth() -> None:
+    image_set = _image_set()
+    payload = _card(0, 0, image=image_set.images[0]).model_dump(mode="json")
+    payload.pop("beat_text")
+    payload["voice_text"] = "spoken dialogue for voice"
+    payload["caption_text"] = "short on-screen caption"
+    payload["beat_identity_digest"] = derive_storyboard_beat_identity_digest_v1(
+        PLAN_DIGEST,
+        0,
+        payload["voice_text"],
+        payload["caption_text"],
+    )
+    payload["card_digest"] = derive_storyboard_card_digest_v1(payload)
+
+    card = hiob_contracts.StoryboardCardV1.model_validate(payload)
+
+    assert card.voice_text != card.caption_text
+    assert "beat_text" not in card.model_fields
+    assert card.beat_identity_digest == derive_storyboard_beat_identity_digest_v1(
+        PLAN_DIGEST,
+        card.source_beat_index,
+        card.voice_text,
+        card.caption_text,
+    )
+
+    legacy = card.model_dump(mode="json")
+    legacy["beat_text"] = legacy.pop("voice_text")
+    legacy.pop("caption_text")
+    legacy["card_digest"] = derive_storyboard_card_digest_v1(legacy)
+    with pytest.raises(ValidationError, match="voice_text|caption_text|beat_text"):
+        hiob_contracts.StoryboardCardV1.model_validate(legacy)
 
 
 def test_canonical_digest_vector_is_stable_across_db_and_runtime_ports() -> None:
