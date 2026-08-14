@@ -23,6 +23,7 @@ from hiob_contracts import (
     StoryboardExecutionManifestV1,
     StoryboardImageArtifactRefV1,
     StoryboardImageSetReceiptV1,
+    StoryboardSceneV1,
     StoryboardSelectedArtifactV1,
     canonical_contract_digest_v1,
     derive_factory_paid_budget_approval_subject_digest_v2,
@@ -36,6 +37,8 @@ from hiob_contracts import (
     derive_storyboard_execution_manifest_digest_v1,
     derive_storyboard_image_artifact_digest_v1,
     derive_storyboard_image_set_receipt_digest_v1,
+    derive_storyboard_scene_digest_v1,
+    derive_storyboard_scenes_v1,
     registered_contracts,
     sha256_digest,
     validate_payload,
@@ -229,7 +232,11 @@ def _approval(
     return StoryboardApprovalReceiptV1.model_validate(sealed)
 
 
-def _calls(purpose: str, image_count: int = 16) -> dict[str, int]:
+def _calls(
+    purpose: str,
+    image_count: int = 16,
+    storyboard_scene_count: int = 8,
+) -> dict[str, int]:
     if purpose == "storyboard_draft":
         return {
             "script": 1,
@@ -255,7 +262,7 @@ def _calls(purpose: str, image_count: int = 16) -> dict[str, int]:
     return {
         "script": 0,
         "image": 0,
-        "video": 16,
+        "video": storyboard_scene_count,
         "voice": 16,
         "render": 1,
         "retries": 0,
@@ -275,6 +282,7 @@ def _authority(
             list(range(16)) if purpose == "storyboard_draft" else []
         )
     image_count = len(image_source_beat_indices)
+    storyboard_scene_count = 8 if purpose == "final_production" else None
     body: dict[str, Any] = {
         "contract_version": "FactoryPaidBudgetAuthority.v2",
         "workspace_id": WORKSPACE_ID,
@@ -282,7 +290,7 @@ def _authority(
         "factory_revision": 7,
         "all_beat_count": 16,
         "purpose": purpose,
-        "plan_digest": PLAN_DIGEST,
+        "plan_digest": None if purpose == "storyboard_draft" else PLAN_DIGEST,
         "storyboard_draft_digest": (
             None if purpose == "storyboard_draft" else sha256_digest({"draft": 1})
         ),
@@ -291,8 +299,13 @@ def _authority(
             if purpose == "final_production"
             else None
         ),
+        "storyboard_scene_count": storyboard_scene_count,
         "image_source_beat_indices": image_source_beat_indices,
-        "paid_calls": _calls(purpose, image_count),
+        "paid_calls": _calls(
+            purpose,
+            image_count,
+            storyboard_scene_count or 8,
+        ),
         "max_total_cost_microunits": 20_000_000,
         "currency": "USD",
         "cost_profile_digest": COST_PROFILE_DIGEST,
@@ -334,6 +347,7 @@ def _paid_approval_receipt_v2(
         "storyboard_approval_receipt_digest": authority[
             "storyboard_approval_receipt_digest"
         ],
+        "storyboard_scene_count": authority["storyboard_scene_count"],
         "image_source_beat_indices": authority["image_source_beat_indices"],
         "paid_calls": authority["paid_calls"],
         "max_total_cost_microunits": authority["max_total_cost_microunits"],
@@ -354,9 +368,7 @@ def _paid_approval_receipt_v2(
     body["approval_subject_digest"] = (
         derive_factory_paid_budget_approval_subject_digest_v2(body)
     )
-    body["receipt_digest"] = derive_factory_paid_budget_approval_receipt_digest_v2(
-        body
-    )
+    body["receipt_digest"] = derive_factory_paid_budget_approval_receipt_digest_v2(body)
     return FactoryPaidBudgetApprovalReceiptV2.model_validate(body)
 
 
@@ -367,9 +379,8 @@ def _authority_bound_to_receipt(
         receipt.purpose,
         image_source_beat_indices=list(receipt.image_source_beat_indices),
         storyboard_draft_digest=receipt.storyboard_draft_digest,
-        storyboard_approval_receipt_digest=(
-            receipt.storyboard_approval_receipt_digest
-        ),
+        storyboard_approval_receipt_digest=(receipt.storyboard_approval_receipt_digest),
+        storyboard_scene_count=receipt.storyboard_scene_count,
         max_total_cost_microunits=receipt.max_total_cost_microunits,
         currency=receipt.currency,
         cost_profile_digest=receipt.cost_profile_digest,
@@ -423,6 +434,10 @@ def _manifest(
         "final_production_authority_digest": FINAL_AUTHORITY_DIGEST,
         "cards": [card.model_dump(mode="json") for card in draft.cards],
         "images": [image.model_dump(mode="json") for image in image_set.images],
+        "scenes": [
+            scene.model_dump(mode="json")
+            for scene in derive_storyboard_scenes_v1(draft.cards)
+        ],
     }
     body.update(changes)
     sealed = _sealed(
@@ -473,6 +488,9 @@ def test_image_ref_rejects_url_absolute_or_credential_bearing_storage_keys(
         ("height", 1.5),
         ("mime", "video/mp4"),
         ("generation_nonce", "not-a-uuid"),
+        ("artifact_id", "x" * 241),
+        ("artifact_id", "https://signed.example/image.webp"),
+        ("artifact_id", " padded-artifact-id "),
     ],
 )
 def test_image_ref_rejects_noncanonical_fields(field: str, value: Any) -> None:
@@ -642,6 +660,40 @@ def test_draft_revision_requires_parent_and_current_image_set_binding() -> None:
     assert not draft.binds_image_set(alien_set)
 
 
+def test_draft_rejects_one_scene_id_split_across_noncontiguous_runs() -> None:
+    image_set = _image_set()
+    cards = _cards(image_set)
+    cards[4] = _card(
+        4,
+        4,
+        image=image_set.images[4],
+        scene_id="scene-00",
+    )
+
+    with pytest.raises(ValidationError, match="contiguous"):
+        _draft(image_set, cards=cards)
+
+
+def test_scene_projection_uses_first_card_as_deterministic_anchor() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    scenes = derive_storyboard_scenes_v1(draft.cards)
+
+    assert len(scenes) == 8
+    assert all(isinstance(scene, StoryboardSceneV1) for scene in scenes)
+    first = scenes[0]
+    assert first.scene_id == "scene-00"
+    assert first.sequence_index == 0
+    assert first.source_beat_indices == (0, 1)
+    assert first.anchor_selected_artifact == draft.cards[0].selected_artifact
+    assert first.scene_digest == derive_storyboard_scene_digest_v1(first)
+
+    tampered = first.model_dump(mode="json")
+    tampered["source_beat_indices"] = [1, 0]
+    with pytest.raises(ValidationError, match="scene_digest"):
+        StoryboardSceneV1.model_validate(tampered)
+
+
 def test_approval_binds_exact_current_draft_revision_and_image_set() -> None:
     image_set = _image_set()
     draft = _draft(image_set)
@@ -776,6 +828,23 @@ def test_paid_approval_receipt_v2_is_exact_phase_and_canonical_digest_bound() ->
         FactoryPaidBudgetApprovalReceiptV2.model_validate(wrong_policy)
 
 
+def test_paid_approval_receipt_v2_binds_final_scene_count_and_video_calls() -> None:
+    receipt = _paid_approval_receipt_v2("final_production")
+    assert receipt.storyboard_scene_count == 8
+    assert receipt.paid_calls.video == 8
+
+    payload = receipt.model_dump(mode="json")
+    payload["storyboard_scene_count"] = 7
+    payload["approval_subject_digest"] = (
+        derive_factory_paid_budget_approval_subject_digest_v2(payload)
+    )
+    payload["receipt_digest"] = (
+        derive_factory_paid_budget_approval_receipt_digest_v2(payload)
+    )
+    with pytest.raises(ValidationError, match="paid_calls"):
+        FactoryPaidBudgetApprovalReceiptV2.model_validate(payload)
+
+
 def test_v2_resolution_output_is_exact_and_binds_cost_profile_and_capability() -> None:
     profile = _cost_profile()
     receipt = _paid_approval_receipt_v2(
@@ -822,7 +891,7 @@ def test_v2_resolution_output_is_exact_and_binds_cost_profile_and_capability() -
         ("storyboard_draft", list(range(16)), (1, 16, 0, 0, 0)),
         ("storyboard_regen", [1], (0, 1, 0, 0, 0)),
         ("storyboard_regen", [1, 4, 9, 15], (0, 4, 0, 0, 0)),
-        ("final_production", [], (0, 0, 16, 16, 1)),
+        ("final_production", [], (0, 0, 8, 16, 1)),
     ],
 )
 def test_authority_v2_allows_only_exact_two_stage_or_regen_lanes(
@@ -839,6 +908,9 @@ def test_authority_v2_allows_only_exact_two_stage_or_regen_lanes(
         expected_calls
     )
     assert calls.retries == calls.fallbacks == calls.character_lock == 0
+    assert authority.storyboard_scene_count == (
+        8 if purpose == "final_production" else None
+    )
     assert authority.approval_subject_digest == (
         derive_factory_paid_budget_approval_subject_digest_v2(authority)
     )
@@ -859,7 +931,7 @@ def test_authority_v2_allows_only_exact_two_stage_or_regen_lanes(
         ("storyboard_regen", [1, 4], "image", 1),
         ("storyboard_regen", [1, 4], "render", 1),
         ("final_production", [], "image", 1),
-        ("final_production", [], "video", 15),
+        ("final_production", [], "video", 16),
         ("final_production", [], "voice", 15),
         ("final_production", [], "render", 0),
         ("final_production", [], "retries", 1),
@@ -890,8 +962,10 @@ def test_authority_v2_rejects_cross_phase_paid_call_smuggling(
     ("purpose", "indices", "changes"),
     [
         ("storyboard_draft", list(range(15)), {}),
+        ("storyboard_draft", list(range(16)), {"plan_digest": PLAN_DIGEST}),
         ("storyboard_draft", list(range(16)), {"storyboard_draft_digest": PLAN_DIGEST}),
         ("storyboard_regen", [], {}),
+        ("storyboard_regen", [1], {"plan_digest": None}),
         ("storyboard_regen", [1, 1], {}),
         ("storyboard_regen", [4, 1], {}),
         ("storyboard_regen", [16], {}),
@@ -902,6 +976,7 @@ def test_authority_v2_rejects_cross_phase_paid_call_smuggling(
             {"storyboard_approval_receipt_digest": PLAN_DIGEST},
         ),
         ("final_production", [1], {}),
+        ("final_production", [], {"plan_digest": None}),
         ("final_production", [], {"storyboard_draft_digest": None}),
         (
             "final_production",
@@ -924,12 +999,64 @@ def test_authority_v2_rejects_wrong_phase_bindings_or_regen_scope(
         FactoryPaidBudgetAuthorityV2.model_validate(payload)
 
 
+@pytest.mark.parametrize(
+    ("purpose", "scene_count"),
+    [
+        ("storyboard_draft", 8),
+        ("storyboard_regen", 8),
+        ("final_production", None),
+        ("final_production", 0),
+        ("final_production", 17),
+    ],
+)
+def test_authority_v2_rejects_scene_count_outside_final_production(
+    purpose: str,
+    scene_count: int | None,
+) -> None:
+    payload = _authority(
+        purpose,
+        storyboard_scene_count=scene_count,
+    )
+    with pytest.raises(ValidationError, match="storyboard_scene_count"):
+        FactoryPaidBudgetAuthorityV2.model_validate(payload)
+
+
+def test_final_authority_video_calls_equal_approved_storyboard_scene_count() -> None:
+    payload = _authority(
+        "final_production",
+        storyboard_scene_count=3,
+        paid_calls=_calls("final_production", storyboard_scene_count=3),
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(payload)
+    assert authority.storyboard_scene_count == 3
+    assert authority.paid_calls.video == 3
+
+    tampered = deepcopy(payload)
+    tampered["paid_calls"]["video"] = 4
+    tampered["approval_subject_digest"] = (
+        derive_factory_paid_budget_approval_subject_digest_v2(tampered)
+    )
+    tampered["idempotency_key"] = derive_factory_paid_budget_idempotency_key_v2(
+        tampered
+    )
+    tampered["authority_digest"] = derive_factory_paid_budget_authority_digest_v2(
+        tampered
+    )
+    with pytest.raises(ValidationError, match="paid_calls"):
+        FactoryPaidBudgetAuthorityV2.model_validate(tampered)
+
+
 @pytest.mark.parametrize("value", [True, 1.0, "0", -1])
 def test_zero_capable_paid_lanes_remain_strict_safe_integers(value: Any) -> None:
     payload = _authority("final_production")
     payload["paid_calls"]["image"] = value
     with pytest.raises(ValidationError):
         FactoryPaidBudgetAuthorityV2.model_validate(payload)
+
+
+def test_paid_call_helper_rejects_unknown_purpose_instead_of_falling_through() -> None:
+    with pytest.raises(ValueError, match="unsupported paid budget purpose"):
+        hiob_contracts.factory_paid_call_cardinality_v2("unknown")
 
 
 def test_execution_manifest_binds_approved_cards_images_and_final_authority() -> None:
@@ -963,6 +1090,11 @@ def test_execution_manifest_binds_approved_cards_images_and_final_authority() ->
         manifest
     )
     assert manifest.cards[0].motion_note is None
+    assert len(manifest.scenes) == 8
+    assert manifest.scenes[0].source_beat_indices == (0, 1)
+    assert manifest.scenes[0].anchor_selected_artifact == (
+        manifest.cards[0].selected_artifact
+    )
 
 
 def test_execution_manifest_rejects_selected_artifact_or_card_tamper() -> None:
@@ -975,15 +1107,31 @@ def test_execution_manifest_rejects_selected_artifact_or_card_tamper() -> None:
     with pytest.raises(ValidationError):
         _manifest(draft, image_set, approval, cards=cards)
 
+    scenes = [
+        scene.model_dump(mode="json")
+        for scene in derive_storyboard_scenes_v1(draft.cards)
+    ]
+    scenes[0]["anchor_selected_artifact"] = scenes[1][
+        "anchor_selected_artifact"
+    ]
+    scenes[0]["scene_digest"] = derive_storyboard_scene_digest_v1(scenes[0])
+    with pytest.raises(ValidationError, match="derived scenes"):
+        _manifest(draft, image_set, approval, scenes=scenes)
+
 
 def test_registry_and_root_exports_are_additive_and_v1_remains_unchanged() -> None:
     assert hiob_contracts.FactoryPaidBudgetAuthorityV1 is FactoryPaidBudgetAuthorityV1
     assert hiob_contracts.FactoryPaidBudgetAuthorityV2 is FactoryPaidBudgetAuthorityV2
+    assert (
+        hiob_contracts.FactoryPaidBudgetApprovalResolverV2
+        is FactoryPaidBudgetApprovalResolverV2
+    )
     assert hiob_contracts.StoryboardDraftV1 is StoryboardDraftV1
     assert {
         "FactoryPaidBudgetAuthority",
         "FactoryPaidBudgetAuthorityV2",
         "FactoryPaidBudgetApprovalReceiptV2",
+        "FactoryPaidBudgetResolutionV2",
         "StoryboardImageArtifactRef",
         "StoryboardImageSetReceipt",
         "StoryboardDraft",
@@ -1019,6 +1167,59 @@ def test_digest_derivations_use_exact_top_level_exclusion_only() -> None:
     assert (
         derive_factory_paid_budget_authority_digest_v2(changed)
         != authority["authority_digest"]
+    )
+
+
+def test_canonical_digest_vector_is_stable_across_db_and_runtime_ports() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+
+    assert (
+        image_set.receipt_digest
+        == "sha256:7ea540078dca90d90a33ef05c521c4dc3e1912775493a6bd6a60c80bff0940a6"
+    )
+    assert (
+        draft.draft_digest
+        == "sha256:74364b2bfd4525a7814db32287a214f0bf77ef334cf5397018e6aee5fe340210"
+    )
+    assert (
+        approval.receipt_digest
+        == "sha256:531862a7f569748145f029daa1243ced43a51830db6f6dc469d7b63368b4d9e9"
+    )
+    assert (
+        paid_receipt.approval_subject_digest
+        == "sha256:ac8ca4c2f346d578807f7f15b166964bf1870b7722e437e1a3147930426f5ff3"
+    )
+    assert (
+        paid_receipt.receipt_digest
+        == "sha256:4bd3dd1e3add081991139cb5f11ad0528589566550e08852650d47abb659ed7b"
+    )
+    assert (
+        authority.idempotency_key
+        == "sha256:4981b6883f7f35a7925edae9089f9b04d105549c4e4742d9a4c0209fbdcb604a"
+    )
+    assert (
+        authority.authority_digest
+        == "sha256:03ca747e538ff421f50c94ccd731d46f7e792b670f7c07e27822f421f48cdb7c"
+    )
+    assert (
+        manifest.manifest_digest
+        == "sha256:ad54a7ee59f53157b2382a857b877c144ea4cba5e9525adb92d77308620b92e3"
     )
 
 

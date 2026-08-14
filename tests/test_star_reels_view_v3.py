@@ -38,7 +38,7 @@ def _budget(purpose: str) -> dict[str, object]:
         "final_production": {
             "script": 0,
             "image": 0,
-            "video": 16,
+            "video": 8,
             "voice": 16,
             "render": 1,
         },
@@ -56,6 +56,9 @@ def _budget(purpose: str) -> dict[str, object]:
         "fallbacks": 0,
         "character_lock": 0,
         "all_beat_count": 16,
+        "storyboard_scene_count": (
+            8 if purpose == "final_production" else None
+        ),
         "paid_budget_authority_digest": DIGEST_A,
         "beat_artifact_set_receipt": None,
     }
@@ -127,6 +130,9 @@ def test_v3_budget_has_exact_purpose_discriminator_and_lane_mask(
 
     assert value.purpose == purpose
     assert value.image == image_count
+    assert value.storyboard_scene_count == (
+        8 if purpose == "final_production" else None
+    )
 
     tampered = _budget(purpose)
     tampered["voice"] = 1
@@ -144,6 +150,18 @@ def test_v3_budget_rejects_wrong_label_and_unknown_purpose() -> None:
     unknown["purpose"] = "storyboard"
     with pytest.raises(ValidationError):
         StarReelsBudgetV3.model_validate(unknown)
+
+
+def test_v3_final_budget_video_lane_equals_storyboard_scene_count() -> None:
+    payload = _budget("final_production")
+    payload["storyboard_scene_count"] = 3
+    payload["video"] = 3
+    value = StarReelsBudgetV3.model_validate(payload)
+    assert value.video == value.storyboard_scene_count == 3
+
+    payload["video"] = 4
+    with pytest.raises(ValidationError, match="paid call mask"):
+        StarReelsBudgetV3.model_validate(payload)
 
 
 def test_v3_production_gate_requires_approved_non_executable_pointer() -> None:
