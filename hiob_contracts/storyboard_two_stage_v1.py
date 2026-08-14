@@ -152,6 +152,11 @@ VoiceText = Annotated[
     StringConstraints(max_length=2_000),
     AfterValidator(_non_blank_limited),
 ]
+ScriptText = Annotated[
+    str,
+    StringConstraints(max_length=2_000),
+    AfterValidator(_non_blank_limited),
+]
 CaptionText = Annotated[str, StringConstraints(max_length=2_000)]
 PromptOverride = Annotated[
     str,
@@ -162,6 +167,10 @@ MotionNote = Annotated[
     str,
     StringConstraints(max_length=2_000),
     AfterValidator(_non_blank_limited),
+]
+StoryboardBeatDurationMs = Annotated[
+    int,
+    Field(strict=True, ge=1_000, le=15_000),
 ]
 ImageMime = Literal["image/png", "image/jpeg", "image/webp"]
 StoryboardCropMode = Literal["cover", "contain"]
@@ -1610,8 +1619,11 @@ class StoryboardCardV1(BaseModel):
     source_beat_index: StoryboardBeatIndex
     sequence_index: StoryboardBeatIndex
     scene_id: SceneId
+    script_text: ScriptText
     voice_text: VoiceText
     caption_text: CaptionText
+    duration_ms: StoryboardBeatDurationMs
+    image_prompt: PromptOverride
     beat_identity_digest: DigestStr
     prompt_override: PromptOverride | None
     crop_mode: StoryboardCropMode
@@ -1640,6 +1652,7 @@ class StoryboardSceneV1(BaseModel):
         min_length=1,
         max_length=16,
     )
+    duration_ms: StoryboardBeatDurationMs
     anchor_selected_artifact: StoryboardSelectedArtifactV1
     scene_digest: DigestStr
 
@@ -1930,8 +1943,11 @@ def _build_storyboard_scene_v1(
         "scene_id": anchor.scene_id,
         "sequence_index": scene_sequence_index,
         "source_beat_indices": [card.source_beat_index for card in cards],
+        "duration_ms": sum(card.duration_ms for card in cards),
         "anchor_selected_artifact": anchor.selected_artifact.model_dump(mode="json"),
     }
+    if body["duration_ms"] > 15_000:
+        raise ValueError("each contiguous storyboard scene must be 15 seconds or less")
     body["scene_digest"] = derive_storyboard_scene_digest_v1(body)
     return StoryboardSceneV1.model_validate(body)
 
@@ -2812,6 +2828,9 @@ def _assert_card_permutations(
     source_indices = [card.source_beat_index for card in cards]
     if sorted(source_indices) != list(range(_STORYBOARD_BEAT_COUNT)):
         raise ValueError("card source beat indices must be a permutation of 0..15")
+    total_duration_ms = sum(card.duration_ms for card in cards)
+    if not 45_000 <= total_duration_ms <= 55_000:
+        raise ValueError("storyboard duration must be between 45 and 55 seconds")
     selected_ids = [card.selected_artifact.artifact_id for card in cards]
     if len(selected_ids) != len(set(selected_ids)):
         raise ValueError("selected artifact ids must be unique across cards")
@@ -2896,17 +2915,6 @@ class StoryboardDraftV1(BaseModel):
         ):
             return False
 
-        current_by_source = {card.source_beat_index: card for card in self.cards}
-        previous_by_source = {card.source_beat_index: card for card in previous.cards}
-        for source_beat_index in range(_STORYBOARD_BEAT_COUNT):
-            current = current_by_source[source_beat_index]
-            prior = previous_by_source[source_beat_index]
-            if (
-                current.voice_text != prior.voice_text
-                or current.caption_text != prior.caption_text
-                or current.beat_identity_digest != prior.beat_identity_digest
-            ):
-                return False
         return True
 
 

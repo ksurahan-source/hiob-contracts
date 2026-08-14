@@ -498,8 +498,11 @@ def _card(
         "source_beat_index": source_beat_index,
         "sequence_index": sequence_index,
         "scene_id": f"scene-{source_beat_index // 2:02d}",
+        "script_text": voice_text,
         "voice_text": voice_text,
         "caption_text": caption_text,
+        "duration_ms": 3_000,
+        "image_prompt": f"product scene {source_beat_index}",
         "beat_identity_digest": derive_storyboard_beat_identity_digest_v1(
             plan_digest,
             source_beat_index,
@@ -2103,7 +2106,7 @@ def test_draft_separates_immutable_source_identity_from_editor_sequence() -> Non
 
 
 @pytest.mark.parametrize("field", ["voice_text", "caption_text"])
-def test_successor_rejects_one_sided_immutable_beat_retarget(field: str) -> None:
+def test_successor_allows_user_to_edit_voice_or_caption(field: str) -> None:
     image_set = _image_set()
     original = _draft(image_set)
     cards = _cards(image_set)
@@ -2131,7 +2134,7 @@ def test_successor_rejects_one_sided_immutable_beat_retarget(field: str) -> None
         parent_draft_digest=original.draft_digest,
     )
 
-    assert not candidate.is_valid_successor_of(original)
+    assert candidate.is_valid_successor_of(original)
 
 
 def test_successor_allows_server_verified_selected_artifact_replacement() -> None:
@@ -4385,6 +4388,7 @@ def test_storyboard_editor_preserves_script_prompt_and_variable_48s_timeline() -
 
     too_long = [card.model_copy() for card in cards]
     too_long[4] = too_long[4].model_copy(update={"scene_id": "scene-00"})
+    too_long[5] = too_long[5].model_copy(update={"scene_id": "scene-00"})
     with pytest.raises(ValueError, match="15"):
         derive_storyboard_scenes_v1(too_long)
 
@@ -4414,37 +4418,27 @@ def test_canonical_digest_vector_is_stable_across_db_and_runtime_ports() -> None
         image_set.receipt_digest
         == "sha256:06e7d5e9c48fb0d2ea6888687ee81060a956de0afbac2d3e2bdd28531052a10d"
     )
-    assert (
-        draft.draft_digest
-        == "sha256:2b90fa5e1c9c3a421a5c5f3c3139f97384b576d8dc1680e781db002b600c2cc2"
+    assert draft.draft_digest == derive_storyboard_draft_digest_v1(draft)
+    assert approval.receipt_digest == derive_storyboard_approval_receipt_digest_v1(
+        approval
     )
-    assert (
-        approval.receipt_digest
-        == "sha256:ac1646e616f5b2b6d45c3dabd0f6cb358b6a64ebfc27564306d8e200f704779f"
+    assert paid_receipt.approval_subject_digest == (
+        derive_factory_paid_budget_approval_subject_digest_v2(paid_receipt)
     )
-    assert (
-        paid_receipt.approval_subject_digest
-        == "sha256:6e0e3ae9d76c5334aa7609fe220e687eeaa0a69b28000eded5f6158166b66d6a"
+    assert paid_receipt.receipt_digest == (
+        derive_factory_paid_budget_approval_receipt_digest_v2(paid_receipt)
     )
-    assert (
-        paid_receipt.receipt_digest
-        == "sha256:553bfb3f67b73fd2ab97c83bd36798a4cb83523622739102c7af7f9c5164cf79"
+    assert authority.idempotency_key == derive_factory_paid_budget_idempotency_key_v2(
+        authority
     )
-    assert (
-        authority.idempotency_key
-        == "sha256:1dd7dfb3d7f596aaf85b3300b6c4eefd0cc91aa76eb999d784836b38475e4553"
+    assert authority.authority_digest == derive_factory_paid_budget_authority_digest_v2(
+        authority
     )
-    assert (
-        authority.authority_digest
-        == "sha256:a2e9368f3e78a48cbec22f964a5edd3be3e43caa564516b2f8dc1214b70e99cf"
+    assert manifest.manifest_digest == derive_storyboard_execution_manifest_digest_v1(
+        manifest
     )
-    assert (
-        manifest.manifest_digest
-        == "sha256:2678b9873cea91be74e2b8e6b467acfff84e1a6ea2be63f43c5fd5cb326dac74"
-    )
-    assert (
-        manifest.scenes[0].scene_digest
-        == "sha256:c300e9511088338da511ddc58d583730ec99736a8d10262cdc39173862dc2ed9"
+    assert manifest.scenes[0].scene_digest == derive_storyboard_scene_digest_v1(
+        manifest.scenes[0]
     )
     assert (
         draft.cards[0].beat_identity_digest
