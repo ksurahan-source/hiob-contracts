@@ -664,10 +664,8 @@ class StoryboardImageSetReceiptV1(BaseModel):
         unique_fields = (
             "artifact_id",
             "storage_key",
-            "sha256",
             "provider_receipt_digest",
             "generation_nonce",
-            "artifact_digest",
         )
         for field in unique_fields:
             values = [getattr(image, field) for image in self.images]
@@ -814,6 +812,7 @@ class StoryboardSceneVideoRequestV1(BaseModel):
         manifest: "StoryboardExecutionManifestV1",
         authority: object,
         at_utc: str,
+        resolver: "FactoryPaidBudgetApprovalResolverV2",
     ) -> "VerifiedStoryboardSceneVideoRequestV1":
         request = cls.model_validate(_as_json_dict(value))
         try:
@@ -833,6 +832,12 @@ class StoryboardSceneVideoRequestV1(BaseModel):
                 "cost profile digest, pricing policy revision, or output profile "
                 "does not bind"
             )
+        if not resolution.approval_receipt.authorizes(
+            resolution.paid_budget_authority,
+            at_utc=at_utc,
+            resolver=resolver,
+        ):
+            raise ValueError("scene provider call requires current durable approval")
         return VerifiedStoryboardSceneVideoRequestV1(
             request,
             _token=_VERIFIED_SCENE_VIDEO_REQUEST_TOKEN_V1,
@@ -1181,7 +1186,7 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
             values = [getattr(item, field) for item in scene_receipts]
             if len(values) != len(set(values)):
                 raise ValueError(f"scene video {field} values must be unique")
-        for field in ("artifact_id", "storage_key", "sha256", "artifact_digest"):
+        for field in ("artifact_id", "storage_key"):
             values = [getattr(item.artifact, field) for item in scene_receipts]
             if len(values) != len(set(values)):
                 raise ValueError(f"scene video artifact {field} values must be unique")
