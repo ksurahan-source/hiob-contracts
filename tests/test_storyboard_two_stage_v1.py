@@ -490,6 +490,32 @@ def _cost_profile() -> dict[str, Any]:
     }
 
 
+def _profile_worst_case_cost(
+    profile: dict[str, Any],
+    *,
+    purpose: str,
+    image_count: int = 0,
+    scene_count: int = 0,
+) -> int:
+    operations = profile["operations"]
+    if purpose == "storyboard_draft":
+        return (
+            operations["script"]["rate_microunits"]
+            + 16 * operations["image"]["rate_microunits"]
+        )
+    if purpose == "storyboard_regen":
+        return image_count * operations["image"]["rate_microunits"]
+    return (
+        scene_count
+        * operations["video"]["rate_microunits"]
+        * operations["video"]["max_units_per_operation"]
+        + 16
+        * operations["voice"]["rate_microunits"]
+        * operations["voice"]["max_units_per_operation"]
+        + operations["render"]["rate_microunits"]
+    )
+
+
 def _manifest(
     draft: StoryboardDraftV1,
     image_set: StoryboardImageSetReceiptV1,
@@ -631,8 +657,8 @@ def _scene_video_request(
             f"00000000-0000-4000-8000-{scene_sequence_index + 800:012d}"
         ),
         "duration_ms": 4_000,
-        "width": anchor_image.width,
-        "height": anchor_image.height,
+        "width": 720,
+        "height": 1_280,
         "provider": "piapi",
         "model": "kling-3.0-omni",
         "request_digest": derive_storyboard_scene_video_request_digest_v1(
@@ -1318,6 +1344,11 @@ def test_v2_resolution_output_is_exact_and_binds_cost_profile_and_capability() -
     receipt = _paid_approval_receipt_v2(
         "final_production",
         cost_profile_digest=profile["profile_digest"],
+        max_total_cost_microunits=_profile_worst_case_cost(
+            profile,
+            purpose="final_production",
+            scene_count=8,
+        ),
     )
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(receipt)
@@ -1383,6 +1414,11 @@ def test_v2_resolution_requires_full_typed_current_cost_profile() -> None:
     receipt = _paid_approval_receipt_v2(
         "final_production",
         cost_profile_digest=legacy_profile.profile_digest,
+        max_total_cost_microunits=_profile_worst_case_cost(
+            legacy_payload,
+            purpose="final_production",
+            scene_count=8,
+        ),
     )
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(receipt)
@@ -1405,6 +1441,11 @@ def test_v2_resolution_rejects_currency_or_validity_drift() -> None:
         "final_production",
         cost_profile_digest=eur_payload["profile_digest"],
         currency="USD",
+        max_total_cost_microunits=_profile_worst_case_cost(
+            eur_payload,
+            purpose="final_production",
+            scene_count=8,
+        ),
     )
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(receipt)
@@ -1426,6 +1467,11 @@ def test_v2_resolution_rejects_currency_or_validity_drift() -> None:
     receipt = _paid_approval_receipt_v2(
         "final_production",
         cost_profile_digest=expired_payload["profile_digest"],
+        max_total_cost_microunits=_profile_worst_case_cost(
+            expired_payload,
+            purpose="final_production",
+            scene_count=8,
+        ),
     )
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(receipt)
@@ -1441,6 +1487,48 @@ def test_v2_resolution_rejects_currency_or_validity_drift() -> None:
         resolution.from_verified(
             at_utc="2026-08-14T06:45:00Z",
             resolver=_ApprovalResolverV2(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("purpose", "indices", "scene_count"),
+    [
+        ("storyboard_draft", list(range(16)), None),
+        ("storyboard_regen", [2, 7, 11], None),
+        ("final_production", [], 8),
+    ],
+)
+def test_v2_resolution_recomputes_exact_customer_cost_cap(
+    purpose: str,
+    indices: list[int],
+    scene_count: int | None,
+) -> None:
+    profile = _cost_profile()
+    exact_cost = _profile_worst_case_cost(
+        profile,
+        purpose=purpose,
+        image_count=len(indices),
+        scene_count=scene_count or 0,
+    )
+    receipt = _paid_approval_receipt_v2(
+        purpose,
+        image_source_beat_indices=indices,
+        storyboard_scene_count=scene_count,
+        max_total_cost_microunits=exact_cost + 1,
+        cost_profile_digest=profile["profile_digest"],
+        pricing_policy_revision=profile["pricing_policy_revision"],
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(receipt)
+    )
+
+    with pytest.raises(ValidationError, match="cost cap"):
+        FactoryPaidBudgetResolutionV2.model_validate(
+            {
+                "approval_receipt": receipt,
+                "cost_profile": profile,
+                "paid_budget_authority": authority,
+            }
         )
 
 
@@ -1834,10 +1922,13 @@ def test_scene_video_request_requires_verified_exact_manifest_capability() -> No
     image_set = _image_set()
     draft = _draft(image_set)
     approval = _approval(draft, image_set)
+    profile = _cost_profile()
     paid_receipt = _paid_approval_receipt_v2(
         "final_production",
         storyboard_draft_digest=draft.draft_digest,
         storyboard_approval_receipt_digest=approval.receipt_digest,
+        cost_profile_digest=profile["profile_digest"],
+        pricing_policy_revision=profile["pricing_policy_revision"],
     )
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(paid_receipt)
@@ -1861,18 +1952,23 @@ def test_scene_video_request_requires_verified_exact_manifest_capability() -> No
             payload,
             manifest=manifest,
             authority=authority,
+            cost_profile=profile,
+            at_utc="2026-08-14T06:00:00Z",
         )
 
     capability = StoryboardSceneVideoRequestV1.from_verified(
         payload,
         manifest=manifest,
         authority=verified_authority,
+        cost_profile=profile,
+        at_utc="2026-08-14T06:00:00Z",
     )
     assert isinstance(capability, VerifiedStoryboardSceneVideoRequestV1)
     request = require_verified_storyboard_scene_video_request_v1(capability)
     assert request.request_digest == payload["request_digest"]
     assert request.idempotency_key == payload["idempotency_key"]
     assert request.anchor.source_beat_index == manifest.scenes[0].source_beat_indices[0]
+    assert (request.width, request.height) == (720, 1_280)
 
     with pytest.raises(TypeError, match="VerifiedStoryboardSceneVideoRequestV1"):
         require_verified_storyboard_scene_video_request_v1(request)
@@ -1882,10 +1978,13 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
     image_set = _image_set()
     draft = _draft(image_set)
     approval = _approval(draft, image_set)
+    profile = _cost_profile()
     paid_receipt = _paid_approval_receipt_v2(
         "final_production",
         storyboard_draft_digest=draft.draft_digest,
         storyboard_approval_receipt_digest=approval.receipt_digest,
+        cost_profile_digest=profile["profile_digest"],
+        pricing_policy_revision=profile["pricing_policy_revision"],
     )
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(paid_receipt)
@@ -1909,6 +2008,19 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
     with pytest.raises(ValidationError, match="idempotency_key"):
         StoryboardSceneVideoRequestV1.model_validate(provider_drift)
 
+    rehashed_provider_drift = deepcopy(provider_drift)
+    rehashed_provider_drift["idempotency_key"] = (
+        derive_storyboard_scene_video_idempotency_key_v1(rehashed_provider_drift)
+    )
+    with pytest.raises(ValueError, match="cost profile"):
+        StoryboardSceneVideoRequestV1.from_verified(
+            rehashed_provider_drift,
+            manifest=manifest,
+            authority=verified_authority,
+            cost_profile=profile,
+            at_utc="2026-08-14T06:00:00Z",
+        )
+
     alien_image = deepcopy(payload)
     alien_image["anchor_image"]["storage_key"] = (
         "workspaces/alien/runs/alien/storyboard/00.webp"
@@ -1921,7 +2033,18 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
             alien_image,
             manifest=manifest,
             authority=verified_authority,
+            cost_profile=profile,
+            at_utc="2026-08-14T06:00:00Z",
         )
+
+    wrong_output_profile = deepcopy(payload)
+    wrong_output_profile["width"] = 1_080
+    wrong_output_profile["height"] = 1_920
+    wrong_output_profile["idempotency_key"] = (
+        derive_storyboard_scene_video_idempotency_key_v1(wrong_output_profile)
+    )
+    with pytest.raises(ValidationError, match="width|height"):
+        StoryboardSceneVideoRequestV1.model_validate(wrong_output_profile)
 
     extra_non_anchor = deepcopy(payload)
     extra_non_anchor["non_anchor_prompts"] = [draft.cards[1].prompt_override]
