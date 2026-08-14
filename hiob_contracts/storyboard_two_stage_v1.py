@@ -172,6 +172,10 @@ StoryboardBeatDurationMs = Annotated[
     int,
     Field(strict=True, ge=1_000, le=15_000),
 ]
+StoryboardProviderDurationMs = Annotated[
+    int,
+    Field(strict=True, ge=4_000, le=15_000),
+]
 ImageMime = Literal["image/png", "image/jpeg", "image/webp"]
 StoryboardCropMode = Literal["cover", "contain"]
 FactoryPaidBudgetPurposeV2 = Literal[
@@ -1703,7 +1707,7 @@ class StoryboardSceneVideoRequestV1(BaseModel):
     anchor: StoryboardSceneVideoAnchorV1
     anchor_image: StoryboardImageArtifactRefV1
     generation_nonce: UuidStr
-    duration_ms: Literal[4_000]
+    duration_ms: StoryboardProviderDurationMs
     fps: Literal[24]
     width: Literal[720]
     height: Literal[1_280]
@@ -1727,6 +1731,8 @@ class StoryboardSceneVideoRequestV1(BaseModel):
             != self.anchor_image.artifact_digest
         ):
             raise ValueError("anchor image does not match selected artifact")
+        if self.duration_ms % 1_000 != 0:
+            raise ValueError("scene provider duration must use whole seconds")
         expected_request_digest = derive_storyboard_scene_video_request_digest_v1(self)
         if self.request_digest != expected_request_digest:
             raise ValueError("request_digest does not match approved anchor request")
@@ -1846,6 +1852,8 @@ class StoryboardSceneVideoRequestV1(BaseModel):
             == paid_authority.authority_digest
             and self.scene_id == scene.scene_id
             and self.scene_digest == scene.scene_digest
+            and self.duration_ms
+            == max(4_000, ((scene.duration_ms + 999) // 1_000) * 1_000)
             and self.anchor == expected_anchor
             and self.anchor_image == image_by_source[anchor_source]
         )
@@ -1962,7 +1970,7 @@ class StoryboardSceneVideoArtifactRefV1(BaseModel):
     sha256: DigestStr
     mime: Literal["video/mp4"]
     bytes_len: PositiveSafeInt
-    duration_ms: Literal[4_000]
+    duration_ms: StoryboardProviderDurationMs
     width: PositiveDimension
     height: PositiveDimension
     artifact_digest: DigestStr
@@ -2451,7 +2459,7 @@ class StoryboardBeatCaptionV1(BaseModel):
     source_beat_index: StoryboardBeatIndex
     sequence_index: StoryboardBeatIndex
     text_content: CaptionText
-    duration_ms: Literal[4_000]
+    duration_ms: StoryboardBeatDurationMs
     caption_digest: DigestStr
 
     @model_validator(mode="after")
@@ -2536,6 +2544,9 @@ class StoryboardSceneFanInManifestV1(BaseModel):
             self.captions
         ):
             raise ValueError("caption_set_digest must bind ordered captions")
+        total_duration_ms = sum(caption.duration_ms for caption in self.captions)
+        if not 45_000 <= total_duration_ms <= 55_000:
+            raise ValueError("fan-in duration must be between 45 and 55 seconds")
 
         expected_audio_mix_digest = canonical_contract_digest_v1(
             {
@@ -2573,14 +2584,14 @@ class StoryboardSceneFanInManifestV1(BaseModel):
                     "source_beat_index": card.source_beat_index,
                     "sequence_index": card.sequence_index,
                     "text_content": card.caption_text,
-                    "duration_ms": 4_000,
+                    "duration_ms": card.duration_ms,
                     "caption_digest": derive_storyboard_beat_caption_digest_v1(
                         {
                             "contract_version": "StoryboardBeatCaption.v1",
                             "source_beat_index": card.source_beat_index,
                             "sequence_index": card.sequence_index,
                             "text_content": card.caption_text,
-                            "duration_ms": 4_000,
+                            "duration_ms": card.duration_ms,
                         }
                     ),
                 }
@@ -3369,10 +3380,10 @@ _FACTORY_COST_OPERATION_POLICY_V1: dict[
     "image": ("seedream", ("seedream-5-pro",), "call", 1_000_000, 1),
     "video": (
         "piapi",
-        ("seedance-2-fast", "kling-3.0-omni"),
+        ("seedance-2",),
         "second",
-        160_000,
-        4,
+        250_000,
+        15,
     ),
     "voice": ("typecast", ("ssfm-v30",), "character", 90, 200),
     "render": (
@@ -3421,7 +3432,7 @@ class FactoryStoryboardDraftCostPolicyV1(BaseModel):
     script: Literal[1]
     image: Literal[16]
     video: Literal[0]
-    voice: Literal[0]
+    voice: Literal[16]
     render: Literal[0]
 
 
@@ -3441,7 +3452,7 @@ class FactoryFinalProductionCostPolicyV1(BaseModel):
     script: Literal[0]
     image: Literal[0]
     video: Literal["approved_scene_count"]
-    voice: Literal[16]
+    voice: Literal[0]
     render: Literal[1]
 
 
@@ -3934,9 +3945,9 @@ ReelsFactoryFailureStageV3 = Literal[
 
 
 _PROGRESS_STAGES_BY_PURPOSE_V3: dict[str, frozenset[str]] = {
-    "storyboard_draft": frozenset({"script", "image"}),
+    "storyboard_draft": frozenset({"script", "image", "voice"}),
     "storyboard_regen": frozenset({"image"}),
-    "final_production": frozenset({"video", "voice", "render"}),
+    "final_production": frozenset({"video", "render"}),
 }
 _FAILURE_STAGES_BY_PURPOSE_V3: dict[str, frozenset[str]] = {
     "storyboard_draft": frozenset(
@@ -3951,9 +3962,7 @@ _FAILURE_STAGES_BY_PURPOSE_V3: dict[str, frozenset[str]] = {
         }
     ),
     "storyboard_regen": frozenset({"authority", "scheduler", "image"}),
-    "final_production": frozenset(
-        {"authority", "scheduler", "video", "voice", "render"}
-    ),
+    "final_production": frozenset({"authority", "scheduler", "video", "render"}),
 }
 
 
@@ -3963,7 +3972,7 @@ def _v3_attempt_limits(
     storyboard_scene_count: int | None,
 ) -> dict[str, int]:
     if purpose == "storyboard_draft":
-        return {"script": 1, "image": 16, "video": 0, "voice": 0, "render": 0}
+        return {"script": 1, "image": 16, "video": 0, "voice": 16, "render": 0}
     if purpose == "storyboard_regen":
         return {"script": 0, "image": 16, "video": 0, "voice": 0, "render": 0}
     if storyboard_scene_count is None:
@@ -3972,7 +3981,7 @@ def _v3_attempt_limits(
         "script": 0,
         "image": 0,
         "video": storyboard_scene_count,
-        "voice": 16,
+        "voice": 0,
         "render": 1,
     }
 

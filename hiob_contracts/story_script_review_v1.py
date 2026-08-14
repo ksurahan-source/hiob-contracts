@@ -37,13 +37,9 @@ def story_voice_limits_v1(duration_ms: int) -> tuple[int, int, int]:
         raise TypeError("duration_ms must be an integer")
     if duration_ms < 1 or duration_ms > 55_000:
         raise ValueError("duration_ms must be between 1 and 55000")
-    minimum_chars = (
-        duration_ms * _MIN_VOICE_CHARS_PER_SECOND + 999
-    ) // 1_000
+    minimum_chars = (duration_ms * _MIN_VOICE_CHARS_PER_SECOND + 999) // 1_000
     maximum_chars = duration_ms * _MAX_VOICE_CHARS_PER_SECOND // 1_000
-    maximum_utf8_bytes = (
-        duration_ms * _MAX_VOICE_UTF8_BYTES_PER_SECOND // 1_000
-    )
+    maximum_utf8_bytes = duration_ms * _MAX_VOICE_UTF8_BYTES_PER_SECOND // 1_000
     return minimum_chars, maximum_chars, maximum_utf8_bytes
 
 
@@ -87,9 +83,7 @@ class StoryScriptRequestV1(BaseModel):
     contract_version: Literal["StoryScriptRequest.v1"]
     intake: StoryIntake13QV1
     target_duration_sec: int = Field(default=48, ge=45, le=55, strict=True)
-    paid_calls: StoryScriptPaidCallsV1 = Field(
-        default_factory=StoryScriptPaidCallsV1
-    )
+    paid_calls: StoryScriptPaidCallsV1 = Field(default_factory=StoryScriptPaidCallsV1)
     intake_digest: DigestStr
 
     @classmethod
@@ -295,12 +289,8 @@ class StoryScriptReviewBundleV1(BaseModel):
             ],
             "beats": [beat.model_dump(mode="json") for beat in beats],
             "paid_calls": request.paid_calls.model_dump(mode="json"),
-            "total_voice_char_count": sum(
-                beat.voice_char_count for beat in beats
-            ),
-            "total_voice_utf8_bytes": sum(
-                beat.voice_utf8_bytes for beat in beats
-            ),
+            "total_voice_char_count": sum(beat.voice_char_count for beat in beats),
+            "total_voice_utf8_bytes": sum(beat.voice_utf8_bytes for beat in beats),
         }
         return cls(
             **body,
@@ -324,13 +314,9 @@ class StoryScriptReviewBundleV1(BaseModel):
         total_chars = sum(beat.voice_char_count for beat in self.beats)
         total_utf8_bytes = sum(beat.voice_utf8_bytes for beat in self.beats)
         if self.total_voice_char_count != total_chars:
-            raise ValueError(
-                "total_voice_char_count does not match the timed script"
-            )
+            raise ValueError("total_voice_char_count does not match the timed script")
         if self.total_voice_utf8_bytes != total_utf8_bytes:
-            raise ValueError(
-                "total_voice_utf8_bytes does not match the timed script"
-            )
+            raise ValueError("total_voice_utf8_bytes does not match the timed script")
         minimum, maximum, utf8_maximum = story_voice_limits_v1(total_ms)
         if total_chars < minimum or total_chars > maximum:
             raise ValueError("total script exceeds timed speech character limits")

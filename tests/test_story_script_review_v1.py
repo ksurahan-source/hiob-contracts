@@ -93,7 +93,9 @@ def test_existing_intake_is_exactly_the_current_thirteen_questions() -> None:
     assert tuple(StoryIntake13QV1.model_fields) == tuple(INTAKE)
     assert intake.model_dump(mode="json") == INTAKE
     with pytest.raises(ValidationError):
-        StoryIntake13QV1.model_validate({key: value for key, value in INTAKE.items() if key != "benefit"})
+        StoryIntake13QV1.model_validate(
+            {key: value for key, value in INTAKE.items() if key != "benefit"}
+        )
     with pytest.raises(ValidationError):
         StoryIntake13QV1.model_validate({**INTAKE, "fixed_hook": "caller-owned hook"})
 

@@ -805,7 +805,7 @@ def _cost_profile() -> dict[str, Any]:
                 "script": 1,
                 "image": 16,
                 "video": 0,
-                "voice": 0,
+                "voice": 16,
                 "render": 0,
             },
             "storyboard_regen": {
@@ -819,7 +819,7 @@ def _cost_profile() -> dict[str, Any]:
                 "script": 0,
                 "image": 0,
                 "video": "approved_scene_count",
-                "voice": 16,
+                "voice": 0,
                 "render": 1,
             },
         },
@@ -840,10 +840,10 @@ def _cost_profile() -> dict[str, Any]:
             },
             "video": {
                 "provider": "piapi",
-                "model": "kling-3.0-omni",
+                "model": "seedance-2",
                 "billing_unit": "second",
                 "rate_microunits": 100_000,
-                "max_units_per_operation": 4,
+                "max_units_per_operation": 15,
             },
             "voice": {
                 "provider": "typecast",
@@ -1099,7 +1099,11 @@ def _manifest(
     return StoryboardExecutionManifestV1.model_validate(sealed)
 
 
-def _scene_video_artifact(scene_sequence_index: int) -> dict[str, Any]:
+def _scene_video_artifact(
+    scene_sequence_index: int,
+    *,
+    duration_ms: int,
+) -> dict[str, Any]:
     body: dict[str, Any] = {
         "artifact_id": f"scene-video-{scene_sequence_index:02d}",
         "storage_key": (
@@ -1109,7 +1113,7 @@ def _scene_video_artifact(scene_sequence_index: int) -> dict[str, Any]:
         "sha256": sha256_digest({"scene_video": scene_sequence_index}),
         "mime": "video/mp4",
         "bytes_len": 4_096 + scene_sequence_index,
-        "duration_ms": 4_000,
+        "duration_ms": duration_ms,
         "width": 720,
         "height": 1_280,
     }
@@ -1129,7 +1133,10 @@ def _scene_video_receipt(
         "request": request,
         "provider_job_id": f"scene-job-{scene_sequence_index:02d}",
         "status": "succeeded",
-        "artifact": _scene_video_artifact(scene_sequence_index),
+        "artifact": _scene_video_artifact(
+            scene_sequence_index,
+            duration_ms=request["duration_ms"],
+        ),
     }
     return _sealed(
         body,
@@ -1185,7 +1192,7 @@ def _scene_video_request(
         "generation_nonce": (
             f"00000000-0000-4000-8000-{scene_sequence_index + 800:012d}"
         ),
-        "duration_ms": 4_000,
+        "duration_ms": max(4_000, ((scene.duration_ms + 999) // 1_000) * 1_000),
         "fps": 24,
         "width": 720,
         "height": 1_280,
@@ -1326,7 +1333,7 @@ def _audio_artifact(source_beat_index: int) -> dict[str, Any]:
         "sha256": sha256_digest({"voice": source_beat_index}),
         "mime": "audio/mpeg",
         "bytes_len": 2_048 + source_beat_index,
-        "duration_ms": 4_000,
+        "duration_ms": 3_000,
         "width": None,
         "height": None,
         "beat_index": source_beat_index,
@@ -1358,7 +1365,7 @@ def _scene_fan_in(
             "source_beat_index": card.source_beat_index,
             "sequence_index": card.sequence_index,
             "text_content": card.caption_text,
-            "duration_ms": 4_000,
+            "duration_ms": card.duration_ms,
         }
         caption["caption_digest"] = (
             hiob_contracts.derive_storyboard_beat_caption_digest_v1(caption)
@@ -2509,7 +2516,7 @@ def test_v2_resolution_requires_full_typed_current_cost_profile() -> None:
         "render",
     }
     assert profile.operations.video.provider == "piapi"
-    assert profile.operations.video.model == "kling-3.0-omni"
+    assert profile.operations.video.model == "seedance-2"
     assert profile.operations.video.billing_unit == "second"
 
     legacy_payload = deepcopy(profile_payload)
@@ -3016,7 +3023,7 @@ def test_scene_video_set_binds_exact_scenes_and_sixteen_beat_projection() -> Non
     assert not receipt.binds(manifest, authority, verified_requests)
     assert not receipt.binds(manifest, verified, ())
     assert receipt.scene_video_receipts[0].binds_verified_request(verified_requests[0])
-    assert receipt.scene_video_receipts[0].artifact.duration_ms == 4_000
+    assert receipt.scene_video_receipts[0].artifact.duration_ms == 6_000
     assert isinstance(
         receipt.scene_video_receipts[0].artifact,
         StoryboardSceneVideoArtifactRefV1,
@@ -4414,9 +4421,8 @@ def test_canonical_digest_vector_is_stable_across_db_and_runtime_ports() -> None
         final_production_authority_digest=authority.authority_digest,
     )
 
-    assert (
-        image_set.receipt_digest
-        == "sha256:06e7d5e9c48fb0d2ea6888687ee81060a956de0afbac2d3e2bdd28531052a10d"
+    assert image_set.receipt_digest == derive_storyboard_image_set_receipt_digest_v1(
+        image_set
     )
     assert draft.draft_digest == derive_storyboard_draft_digest_v1(draft)
     assert approval.receipt_digest == derive_storyboard_approval_receipt_digest_v1(
