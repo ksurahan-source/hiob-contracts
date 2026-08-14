@@ -4360,6 +4360,35 @@ def test_storyboard_card_separates_immutable_voice_and_caption_truth() -> None:
         hiob_contracts.StoryboardCardV1.model_validate(legacy)
 
 
+def test_storyboard_editor_preserves_script_prompt_and_variable_48s_timeline() -> None:
+    image_set = _image_set()
+    cards = []
+    for index, image in enumerate(image_set.images):
+        payload = _card(index, index, image=image)
+        payload.update(
+            {
+                "scene_id": f"scene-{index // 4:02d}",
+                "script_text": f"editable script {index}",
+                "duration_ms": 3_000,
+                "image_prompt": f"editable image prompt {index}",
+            }
+        )
+        payload["card_digest"] = derive_storyboard_card_digest_v1(payload)
+        cards.append(hiob_contracts.StoryboardCardV1.model_validate(payload))
+
+    scenes = derive_storyboard_scenes_v1(cards)
+
+    assert sum(card.duration_ms for card in cards) == 48_000
+    assert [scene.duration_ms for scene in scenes] == [12_000] * 4
+    assert cards[0].script_text == "editable script 0"
+    assert cards[0].image_prompt == "editable image prompt 0"
+
+    too_long = [card.model_copy() for card in cards]
+    too_long[4] = too_long[4].model_copy(update={"scene_id": "scene-00"})
+    with pytest.raises(ValueError, match="15"):
+        derive_storyboard_scenes_v1(too_long)
+
+
 def test_canonical_digest_vector_is_stable_across_db_and_runtime_ports() -> None:
     image_set = _image_set()
     draft = _draft(image_set)
