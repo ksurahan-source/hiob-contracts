@@ -1929,6 +1929,11 @@ def test_scene_video_request_requires_verified_exact_manifest_capability() -> No
         storyboard_approval_receipt_digest=approval.receipt_digest,
         cost_profile_digest=profile["profile_digest"],
         pricing_policy_revision=profile["pricing_policy_revision"],
+        max_total_cost_microunits=_profile_worst_case_cost(
+            profile,
+            purpose="final_production",
+            scene_count=8,
+        ),
     )
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(paid_receipt)
@@ -1985,6 +1990,11 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
         storyboard_approval_receipt_digest=approval.receipt_digest,
         cost_profile_digest=profile["profile_digest"],
         pricing_policy_revision=profile["pricing_policy_revision"],
+        max_total_cost_microunits=_profile_worst_case_cost(
+            profile,
+            purpose="final_production",
+            scene_count=8,
+        ),
     )
     authority = FactoryPaidBudgetAuthorityV2.model_validate(
         _authority_bound_to_receipt(paid_receipt)
