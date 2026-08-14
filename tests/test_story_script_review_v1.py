@@ -196,6 +196,11 @@ def test_voice_metrics_and_limits_are_bound_to_each_beat_and_bundle_total() -> N
     with pytest.raises(ValidationError, match="voice_char_count"):
         StoryScriptReviewBundleV1.model_validate(wrong_metrics)
 
+    wrong_utf8_metrics = bundle.model_dump(mode="json")
+    wrong_utf8_metrics["beats"][1]["voice_utf8_bytes"] += 1
+    with pytest.raises(ValidationError, match="voice_utf8_bytes"):
+        StoryScriptReviewBundleV1.model_validate(wrong_utf8_metrics)
+
     too_short = bundle.model_dump(mode="json")
     too_short["beats"][1]["voice_text"] = "짧음"
     too_short["beats"][1]["voice_char_count"] = len("짧음")
