@@ -13,6 +13,8 @@ from hiob_contracts import (
     StoryScriptPaidCallsV1,
     StoryScriptRequestV1,
     StoryScriptReviewBundleV1,
+    story_voice_limits_v1,
+    voice_text_metrics_v1,
 )
 
 
@@ -47,6 +49,7 @@ def _beats(duration: int = 48, hook: str = "수경이 흐려 아이가 자꾸 �
     for index in range(16):
         beat_ms = base + (1 if index < remainder else 0)
         text = hook if index == 0 else f"13Q 근거 대본 {index}"
+        voice_char_count, voice_utf8_bytes = voice_text_metrics_v1(text)
         values.append(
             StoryScriptBeatV1(
                 beat_index=index,
@@ -54,6 +57,8 @@ def _beats(duration: int = 48, hook: str = "수경이 흐려 아이가 자꾸 �
                 voice_text=text,
                 caption_text=text,
                 duration_ms=beat_ms,
+                voice_char_count=voice_char_count,
+                voice_utf8_bytes=voice_utf8_bytes,
             )
         )
     return values
@@ -71,6 +76,11 @@ def _bundle(duration: int = 48) -> StoryScriptReviewBundleV1:
                 request.intake,
                 card_id="lead",
                 role="lead",
+                name="지우 엄마 서연",
+                age_range="30대 후반",
+                appearance="단정한 단발과 차분한 인상",
+                wardrobe="네이비 집업과 밝은 운동복",
+                visual_traits=("둥근 안경", "은색 수영 가방"),
             ),
         ),
         beats=_beats(duration, hook),
@@ -115,7 +125,18 @@ def test_review_bundle_is_hook_led_exactly_sixteen_beats_and_in_range(
     assert bundle.target_duration_sec == duration
     assert bundle.product_card.identity == INTAKE["identity"]
     assert bundle.character_cards[0].audience == INTAKE["audience"]
+    assert bundle.character_cards[0].name == "지우 엄마 서연"
+    assert bundle.character_cards[0].visual_traits == (
+        "둥근 안경",
+        "은색 수영 가방",
+    )
     assert bundle.source_intake_digest == _request(duration).intake_digest
+    assert bundle.total_voice_char_count == sum(
+        beat.voice_char_count for beat in bundle.beats
+    )
+    assert bundle.total_voice_utf8_bytes == sum(
+        beat.voice_utf8_bytes for beat in bundle.beats
+    )
 
 
 @pytest.mark.parametrize("duration", [44, 56])
@@ -138,7 +159,7 @@ def test_bundle_rejects_timing_hook_card_and_paid_call_drift() -> None:
         StoryScriptReviewBundleV1.model_validate(wrong_timing)
 
     wrong_card = bundle.model_dump(mode="json")
-    wrong_card["product_card"]["usp"] = "승인되지 않은 표현"
+    wrong_card["character_cards"][0]["wardrobe"] = "매 beat마다 바뀌는 의상"
     with pytest.raises(ValidationError, match="card_digest"):
         StoryScriptReviewBundleV1.model_validate(wrong_card)
 
@@ -160,3 +181,29 @@ def test_contracts_are_frozen_and_reject_extra_authority_fields() -> None:
         )
     with pytest.raises(ValidationError):
         bundle.hook = "mutated"
+
+
+def test_voice_metrics_and_limits_are_bound_to_each_beat_and_bundle_total() -> None:
+    bundle = _bundle()
+    beat = bundle.beats[1]
+    minimum, maximum, utf8_maximum = story_voice_limits_v1(beat.duration_ms)
+
+    assert minimum <= beat.voice_char_count <= maximum
+    assert beat.voice_utf8_bytes <= utf8_maximum
+
+    wrong_metrics = bundle.model_dump(mode="json")
+    wrong_metrics["beats"][1]["voice_char_count"] += 1
+    with pytest.raises(ValidationError, match="voice_char_count"):
+        StoryScriptReviewBundleV1.model_validate(wrong_metrics)
+
+    too_short = bundle.model_dump(mode="json")
+    too_short["beats"][1]["voice_text"] = "짧음"
+    too_short["beats"][1]["voice_char_count"] = len("짧음")
+    too_short["beats"][1]["voice_utf8_bytes"] = len("짧음".encode("utf-8"))
+    with pytest.raises(ValidationError, match="voice text|speech"):
+        StoryScriptReviewBundleV1.model_validate(too_short)
+
+    wrong_total = bundle.model_dump(mode="json")
+    wrong_total["total_voice_utf8_bytes"] += 1
+    with pytest.raises(ValidationError, match="total_voice_utf8_bytes"):
+        StoryScriptReviewBundleV1.model_validate(wrong_total)
