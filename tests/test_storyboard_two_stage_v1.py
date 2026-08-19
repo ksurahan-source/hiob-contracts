@@ -840,7 +840,7 @@ def _cost_profile() -> dict[str, Any]:
             },
             "video": {
                 "provider": "piapi",
-                "model": "seedance-2",
+                "model": "seedance-2.5",
                 "billing_unit": "second",
                 "rate_microunits": 100_000,
                 "max_units_per_operation": 15,
@@ -2516,7 +2516,8 @@ def test_v2_resolution_requires_full_typed_current_cost_profile() -> None:
         "render",
     }
     assert profile.operations.video.provider == "piapi"
-    assert profile.operations.video.model == "seedance-2"
+    assert profile.operations.video.model == "seedance-2.5"
+    assert profile.operations.video.rate_microunits == 350_000
     assert profile.operations.video.billing_unit == "second"
 
     legacy_payload = deepcopy(profile_payload)
@@ -3181,7 +3182,7 @@ def test_scene_video_request_requires_verified_exact_manifest_capability() -> No
     assert request.cost_profile_digest == profile["profile_digest"]
     assert request.pricing_policy_revision == profile["pricing_policy_revision"]
     assert derive_storyboard_scene_video_provider_prompt_v1(request.anchor) == (
-        "@image_1\n"
+        "@image1\n"
         "crop_mode: cover\n"
         "focal_x_basis_points: 5000\n"
         "focal_y_basis_points: 5000"
@@ -3343,7 +3344,7 @@ def test_scene_video_request_seals_transport_identity_and_rich_anchor_image() ->
 
     extra_image_ref = deepcopy(payload)
     extra_image_ref["anchor"]["motion_note"] = "pan from @image_2"
-    with pytest.raises(ValueError, match="sole.*@image_1"):
+    with pytest.raises(ValueError, match="sole.*@image1"):
         derive_storyboard_scene_video_provider_prompt_v1(extra_image_ref["anchor"])
 
     for field, value in (
