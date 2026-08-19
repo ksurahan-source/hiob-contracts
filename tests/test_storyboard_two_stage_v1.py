@@ -842,7 +842,7 @@ def _cost_profile() -> dict[str, Any]:
                 "provider": "piapi",
                 "model": "seedance-2.5",
                 "billing_unit": "second",
-                "rate_microunits": 100_000,
+                "rate_microunits": 350_000,
                 "max_units_per_operation": 15,
             },
             "voice": {

@@ -594,7 +594,7 @@ def derive_storyboard_scene_video_provider_prompt_v1(
 
     value = StoryboardSceneVideoAnchorV1.model_validate(_as_json_dict(anchor))
     lines = [
-        "@image_1",
+        "@image1",
         f"crop_mode: {value.crop_mode}",
         f"focal_x_basis_points: {value.focal_x_basis_points}",
         f"focal_y_basis_points: {value.focal_y_basis_points}",
@@ -606,7 +606,7 @@ def derive_storyboard_scene_video_provider_prompt_v1(
         if approved_text is None:
             continue
         if "@image_" in approved_text.casefold():
-            raise ValueError("provider prompt permits sole image reference @image_1")
+            raise ValueError("provider prompt permits sole image reference @image1")
         lines.extend((f"{field_name}:", approved_text))
     prompt = "\n".join(lines)
     if len(prompt) > STORYBOARD_SCENE_VIDEO_PROVIDER_PROMPT_MAX_CHARS_V1:
@@ -3383,9 +3383,9 @@ _FACTORY_COST_OPERATION_POLICY_V1: dict[
     "image": ("seedream", ("seedream-5-pro",), "call", 1_000_000, 1),
     "video": (
         "piapi",
-        ("seedance-2",),
+        ("seedance-2.5",),
         "second",
-        250_000,
+        350_000,
         15,
     ),
     "voice": ("typecast", ("ssfm-v30",), "character", 90, 200),
