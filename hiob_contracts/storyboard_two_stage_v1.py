@@ -2583,14 +2583,14 @@ class StoryboardSceneFanInManifestV1(BaseModel):
         expected_captions = tuple(
             StoryboardBeatCaptionV1.model_validate(
                 {
-                    "contract_version": "StoryboardBeatCaption.v1",
+                    "contract_version": STORYBOARD_BEAT_CAPTION_VERSION_V1,
                     "source_beat_index": card.source_beat_index,
                     "sequence_index": card.sequence_index,
                     "text_content": card.caption_text,
                     "duration_ms": card.duration_ms,
                     "caption_digest": derive_storyboard_beat_caption_digest_v1(
                         {
-                            "contract_version": "StoryboardBeatCaption.v1",
+                            "contract_version": STORYBOARD_BEAT_CAPTION_VERSION_V1,
                             "source_beat_index": card.source_beat_index,
                             "sequence_index": card.sequence_index,
                             "text_content": card.caption_text,

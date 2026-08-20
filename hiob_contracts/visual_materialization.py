@@ -285,6 +285,17 @@ class BeatFramePlanV1:
         value.pop("plan_digest", None)
         return value
 
+    def _reference_errors(self) -> list[str]:
+        errors: list[str] = []
+        keys = [ref.snapshot.storage_key for ref in self.ordered_refs]
+        if len(keys) != len(set(keys)):
+            errors.append("ordered_refs contains duplicate storage keys")
+        if any(ref.snapshot.workspace_id != self.workspace_id for ref in self.ordered_refs):
+            errors.append("cross-workspace reference")
+        for ref in self.ordered_refs:
+            errors.extend(f"{ref.role}: {error}" for error in ref.snapshot.validate())
+        return errors
+
     def validate(self) -> list[str]:
         errors: list[str] = []
         if not self.run_id or not self.workspace_id:
@@ -305,13 +316,7 @@ class BeatFramePlanV1:
             errors.append(f"max_refs must be 1..{SEEDREAM_V1_MAX_REFS}")
         if len(self.ordered_refs) > self.max_refs:
             errors.append("ordered_refs exceeds max_refs")
-        keys = [ref.snapshot.storage_key for ref in self.ordered_refs]
-        if len(keys) != len(set(keys)):
-            errors.append("ordered_refs contains duplicate storage keys")
-        if any(ref.snapshot.workspace_id != self.workspace_id for ref in self.ordered_refs):
-            errors.append("cross-workspace reference")
-        for ref in self.ordered_refs:
-            errors.extend(f"{ref.role}: {error}" for error in ref.snapshot.validate())
+        errors.extend(self._reference_errors())
         if self.plan_digest != sha256_digest(self.digest_payload()):
             errors.append("plan_digest does not match plan payload")
         return errors
@@ -586,6 +591,61 @@ class VisualMaterializationRequestV1:
         )
 
 
+_VISUAL_V2_REQUEST_FIELDS = frozenset(
+    {
+        "contract_version",
+        "plan",
+        "generation_nonce",
+        "requires_human_review",
+        "command_digest",
+        "provider_idempotency_key",
+        "idempotency_key",
+    }
+)
+
+
+def _assert_exact_visual_v2_request_fields(value: Mapping[str, Any]) -> None:
+    extra = set(value) - _VISUAL_V2_REQUEST_FIELDS
+    if extra:
+        raise ValueError(
+            "unexpected VisualMaterializationRequestV2 fields: "
+            + ", ".join(sorted(extra))
+        )
+    missing = _VISUAL_V2_REQUEST_FIELDS - set(value)
+    if missing:
+        raise ValueError(
+            "missing VisualMaterializationRequestV2 fields: "
+            + ", ".join(sorted(missing))
+        )
+
+
+def _parse_visual_v2_plan(value: Any) -> BeatFramePlanV2:
+    if isinstance(value, BeatFramePlanV1):
+        raise ValueError("V2 request rejects BeatFramePlanV1 downgrade")
+    if isinstance(value, BeatFramePlanV2):
+        return value
+    if not isinstance(value, Mapping):
+        raise ValueError("V2 request requires BeatFramePlanV2 plan")
+    if value.get("contract_version") != VISUAL_CONTRACT_VERSION_V2:
+        raise ValueError("V2 request rejects downgraded plan")
+    try:
+        return BeatFramePlanV2.from_dict(dict(value))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"invalid BeatFramePlanV2: {exc}") from exc
+
+
+def _assert_visual_v2_request_digests(
+    value: Mapping[str, Any],
+    request: "VisualMaterializationRequestV2",
+) -> None:
+    if value["provider_idempotency_key"] != request.provider_idempotency_key:
+        raise ValueError("provider_idempotency_key does not match V2 provider call")
+    if value["command_digest"] != request.command_digest:
+        raise ValueError("command_digest does not match full V2 command")
+    if value["idempotency_key"] != request.idempotency_key:
+        raise ValueError("idempotency_key does not match V2 paid command")
+
+
 @dataclass(frozen=True)
 class VisualMaterializationRequestV2:
     """Paid generation command that accepts only a sealed BeatFramePlanV2."""
@@ -660,47 +720,13 @@ class VisualMaterializationRequestV2:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "VisualMaterializationRequestV2":
-        accepted = {
-            "contract_version",
-            "plan",
-            "generation_nonce",
-            "requires_human_review",
-            "command_digest",
-            "provider_idempotency_key",
-            "idempotency_key",
-        }
-        extra = set(value) - accepted
-        if extra:
-            raise ValueError(
-                "unexpected VisualMaterializationRequestV2 fields: "
-                + ", ".join(sorted(extra))
-            )
-        missing = accepted - set(value)
-        if missing:
-            raise ValueError(
-                "missing VisualMaterializationRequestV2 fields: "
-                + ", ".join(sorted(missing))
-            )
+        _assert_exact_visual_v2_request_fields(value)
         if value.get("contract_version") != VISUAL_CONTRACT_VERSION_V2:
             raise ValueError("V2 request downgrade or missing contract_version")
-        plan_value = value.get("plan")
-        if isinstance(plan_value, BeatFramePlanV1):
-            raise ValueError("V2 request rejects BeatFramePlanV1 downgrade")
-        if isinstance(plan_value, BeatFramePlanV2):
-            plan = plan_value
-        elif isinstance(plan_value, Mapping):
-            if plan_value.get("contract_version") != VISUAL_CONTRACT_VERSION_V2:
-                raise ValueError("V2 request rejects downgraded plan")
-            try:
-                plan = BeatFramePlanV2.from_dict(dict(plan_value))
-            except (KeyError, TypeError, ValueError) as exc:
-                raise ValueError(f"invalid BeatFramePlanV2: {exc}") from exc
-        else:
-            raise ValueError("V2 request requires BeatFramePlanV2 plan")
         if type(value.get("requires_human_review", True)) is not bool:
             raise ValueError("requires_human_review must be a boolean")
         request = cls(
-            plan=plan,
+            plan=_parse_visual_v2_plan(value.get("plan")),
             generation_nonce=str(value.get("generation_nonce") or ""),
             requires_human_review=value.get("requires_human_review", True),
             contract_version=value["contract_version"],
@@ -710,14 +736,7 @@ class VisualMaterializationRequestV2:
             raise ValueError(
                 "invalid VisualMaterializationRequestV2: " + "; ".join(errors)
             )
-        if value["provider_idempotency_key"] != request.provider_idempotency_key:
-            raise ValueError(
-                "provider_idempotency_key does not match V2 provider call"
-            )
-        if value["command_digest"] != request.command_digest:
-            raise ValueError("command_digest does not match full V2 command")
-        if value["idempotency_key"] != request.idempotency_key:
-            raise ValueError("idempotency_key does not match V2 paid command")
+        _assert_visual_v2_request_digests(value, request)
         return request
 
 
@@ -777,6 +796,20 @@ class VisualMaterializationReceiptV1:
     failure_reason: Optional[str] = None
     degraded_reason: Optional[str] = None
 
+    def _committed_errors(self) -> list[str]:
+        errors: list[str] = []
+        if self.planned_refs != self.downloaded_refs or self.planned_refs != self.sent_refs:
+            errors.append("committed receipt requires exact reference lineage")
+        if not self.artifact_sha256 or not is_digest(self.artifact_sha256):
+            errors.append("committed receipt requires artifact_sha256")
+        if not self.actual_width or not self.actual_height:
+            errors.append("committed receipt requires decoded dimensions")
+        if self.semantic_validation.get("ok") is not True:
+            errors.append("committed receipt requires semantic_validation.ok=true")
+        if self.human_review_status not in {"approved", "not_required"}:
+            errors.append("committed receipt requires human approval or explicit not_required")
+        return errors
+
     def validate(self) -> list[str]:
         errors: list[str] = []
         if not is_digest(self.idempotency_key) or not is_digest(self.plan_digest):
@@ -791,16 +824,7 @@ class VisualMaterializationReceiptV1:
                 f"got {self.transport!r}"
             )
         if self.status == "committed":
-            if self.planned_refs != self.downloaded_refs or self.planned_refs != self.sent_refs:
-                errors.append("committed receipt requires exact reference lineage")
-            if not self.artifact_sha256 or not is_digest(self.artifact_sha256):
-                errors.append("committed receipt requires artifact_sha256")
-            if not self.actual_width or not self.actual_height:
-                errors.append("committed receipt requires decoded dimensions")
-            if self.semantic_validation.get("ok") is not True:
-                errors.append("committed receipt requires semantic_validation.ok=true")
-            if self.human_review_status not in {"approved", "not_required"}:
-                errors.append("committed receipt requires human approval or explicit not_required")
+            errors.extend(self._committed_errors())
         if self.degraded_reason:
             errors.append("degraded output is forbidden in V1")
         return errors

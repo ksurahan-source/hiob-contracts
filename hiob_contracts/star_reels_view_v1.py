@@ -448,6 +448,9 @@ class StarReelsViewV2(StarReelsViewV1):
         return self
 
 
+FACTORY_STORYBOARD_CARRIER_VERSION_V1 = "FactoryStoryboardCarrier.v1"
+
+
 class FactoryStoryboardCarrierV1(BaseModel):
     """Digest-only storyboard pointer safe for a Star read projection."""
 
@@ -651,7 +654,7 @@ class StoryboardPhaseACompletionReceiptV1(BaseModel):
         ):
             raise ValueError("paid source receipts do not match Phase-A authority")
         expected_carrier = FactoryStoryboardCarrierV1(
-            contract_version="FactoryStoryboardCarrier.v1",
+            contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V1,
             storyboard_revision=draft.revision,
             storyboard_digest=draft.draft_digest,
             image_set_receipt_digest=image_set.receipt_digest,
@@ -928,7 +931,7 @@ class StarReelsViewV3(BaseModel):
         contract_version = value.get("contract_version")
         if contract_version == "ProductElementLockDraft.v1":
             return ProductElementLockDraftV1.model_validate(value)
-        if contract_version == "FactoryStoryboardCarrier.v1":
+        if contract_version == FACTORY_STORYBOARD_CARRIER_VERSION_V1:
             return FactoryStoryboardCarrierV1.model_validate(value)
         return value
 
@@ -1248,7 +1251,7 @@ class StarReelsViewV3(BaseModel):
                 raise ValueError("Phase-A completion does not bind image authority")
             if pointer.storyboard_revision == summary.output_storyboard_revision:
                 unapproved_pointer = FactoryStoryboardCarrierV1(
-                    contract_version="FactoryStoryboardCarrier.v1",
+                    contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V1,
                     storyboard_revision=pointer.storyboard_revision,
                     storyboard_digest=pointer.storyboard_digest,
                     image_set_receipt_digest=pointer.image_set_receipt_digest,

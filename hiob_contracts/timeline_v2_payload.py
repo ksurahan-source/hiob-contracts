@@ -20,6 +20,7 @@ TIMELINE_V2_PAYLOAD_KEYS = frozenset({
     "approvedFinalRender",
     "_gatesApproved",
 })
+_RENDER_PATH = "/v1/render"
 
 
 def normalize_render_dispatch_url(url: str | None) -> str | None:
@@ -34,15 +35,15 @@ def normalize_render_dispatch_url(url: str | None) -> str | None:
         parts = urlsplit(u)
         if parts.scheme and parts.netloc:
             path = parts.path.rstrip("/")
-            if path != "/v1/render":
-                return urlunsplit((parts.scheme, parts.netloc, "/v1/render", parts.query, parts.fragment))
+            if path != _RENDER_PATH:
+                return urlunsplit((parts.scheme, parts.netloc, _RENDER_PATH, parts.query, parts.fragment))
             return u
     except Exception:  # noqa: BLE001
         pass
     u = u.rstrip("/")
-    if u.endswith("/v1/render"):
+    if u.endswith(_RENDER_PATH):
         return u
-    return f"{u}/v1/render"
+    return f"{u}{_RENDER_PATH}"
 
 
 def stable_snapshot_id(*, run_id: str, snapshot: dict[str, Any] | None = None, render_job_id: str = "") -> str:

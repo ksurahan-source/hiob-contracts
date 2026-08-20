@@ -39,6 +39,7 @@ from .factory_paid_budget_authority_v1 import (
 
 PositiveInt = Annotated[int, Field(gt=0, le=9_007_199_254_740_991)]
 NonNegativeInt = Annotated[int, Field(ge=0, le=9_007_199_254_740_991)]
+_INVALID_OUTPUT_URL = "output_url must be credential-free HTTPS with a valid host"
 
 ALL_BEAT_VIDEO_CONTRACT_VERSIONS = {
     "FactoryBeatManifest": "FactoryBeatManifest.v1",
@@ -141,12 +142,12 @@ def _assert_audio_artifact(artifact: "StrictAllBeatArtifactRefV1") -> None:
 
 def _assert_https_url(value: str) -> None:
     if any(char.isspace() for char in value):
-        raise ValueError("output_url must be credential-free HTTPS with a valid host")
+        raise ValueError(_INVALID_OUTPUT_URL)
     try:
         parsed = urlsplit(value)
         port = parsed.port
     except ValueError as exc:
-        raise ValueError("output_url must be credential-free HTTPS with a valid host") from exc
+        raise ValueError(_INVALID_OUTPUT_URL) from exc
     hostname = parsed.hostname
     hostname_valid = False
     if hostname:
@@ -167,7 +168,7 @@ def _assert_https_url(value: str) -> None:
         or parsed.password is not None
         or port is not None and not 1 <= port <= 65535
     ):
-        raise ValueError("output_url must be credential-free HTTPS with a valid host")
+        raise ValueError(_INVALID_OUTPUT_URL)
 
 
 class StrictAllBeatArtifactRefV1(BaseModel):

@@ -21,6 +21,11 @@ from typing import Any
 
 from pydantic import BaseModel
 
+_ALL_BEAT_VIDEO_MODULE = "hiob_contracts.all_beat_video"
+_STORYBOARD_TWO_STAGE_MODULE = "hiob_contracts.storyboard_two_stage_v1"
+_EDGE_TARGET_INPUTS_MODULE = "hiob_contracts.edge_target_inputs"
+_PLANET_ENVELOPES_MODULE = "hiob_contracts.planet_envelopes"
+
 # 계약명 → (모듈, 클래스). 런타임 경계에서 검증할 핵심 계약(파싱·validate 보유).
 _REGISTRY: dict[str, tuple[str, str]] = {
     # Core planet contracts
@@ -46,39 +51,39 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     "ElementLocks": ("hiob_contracts.element_locks", "ElementLocks"),
     # All-beat video V2/V3 factory chain.
     "FactoryBeatManifest": (
-        "hiob_contracts.all_beat_video",
+        _ALL_BEAT_VIDEO_MODULE,
         "FactoryBeatManifestV1",
     ),
     "BeatVideoRequest": (
-        "hiob_contracts.all_beat_video",
+        _ALL_BEAT_VIDEO_MODULE,
         "BeatVideoRequestV1",
     ),
     "BeatVideoReceipt": (
-        "hiob_contracts.all_beat_video",
+        _ALL_BEAT_VIDEO_MODULE,
         "BeatVideoReceiptV1",
     ),
     "BeatArtifactSetReceipt": (
-        "hiob_contracts.all_beat_video",
+        _ALL_BEAT_VIDEO_MODULE,
         "BeatArtifactSetReceiptV1",
     ),
     "AtroposFanInManifest": (
-        "hiob_contracts.all_beat_video",
+        _ALL_BEAT_VIDEO_MODULE,
         "AtroposFanInManifestV2",
     ),
     "AtroposFanInManifestV2": (
-        "hiob_contracts.all_beat_video",
+        _ALL_BEAT_VIDEO_MODULE,
         "AtroposFanInManifestV2",
     ),
     "AtroposFanInManifestV3": (
-        "hiob_contracts.all_beat_video",
+        _ALL_BEAT_VIDEO_MODULE,
         "AtroposFanInManifestV3",
     ),
     "HephaestusFinalRenderReceipt": (
-        "hiob_contracts.all_beat_video",
+        _ALL_BEAT_VIDEO_MODULE,
         "HephaestusFinalRenderReceiptV2",
     ),
     "ReelsFactoryReceiptV2": (
-        "hiob_contracts.all_beat_video",
+        _ALL_BEAT_VIDEO_MODULE,
         "ReelsFactoryReceiptV2",
     ),
     "FactoryPaidBudgetAuthority": (
@@ -90,51 +95,51 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "FactoryPaidBudgetApprovalReceiptV1",
     ),
     "FactoryPaidBudgetAuthorityV2": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "FactoryPaidBudgetAuthorityV2",
     ),
     "FactoryPaidBudgetApprovalReceiptV2": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "FactoryPaidBudgetApprovalReceiptV2",
     ),
     "FactoryPaidBudgetResolutionV2": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "FactoryPaidBudgetResolutionV2",
     ),
     "FactoryPaidOperationHistoricalEvidenceV2": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "FactoryPaidOperationHistoricalEvidenceV2",
     ),
     "FactoryCostProfile": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "FactoryCostProfileV1",
     ),
     "ReelsFactoryProgressReceiptV3": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "ReelsFactoryProgressReceiptV3",
     ),
     "ReelsFactoryFailureReceiptV3": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "ReelsFactoryFailureReceiptV3",
     ),
     "StoryboardImageArtifactRef": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardImageArtifactRefV1",
     ),
     "AthenaFramePlanReceipt": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "AthenaFramePlanReceiptV1",
     ),
     "StoryboardImageProviderRequest": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardImageProviderRequestV1",
     ),
     "StoryboardImageProviderReceipt": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardImageProviderReceiptV1",
     ),
     "StoryboardImageSetReceipt": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardImageSetReceiptV1",
     ),
     "StoryboardPhaseACompletionReceipt": (
@@ -146,51 +151,51 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "StoryboardPhaseACompletionSummaryV1",
     ),
     "StoryboardScene": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardSceneV1",
     ),
     "StoryboardSceneVideoReceipt": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardSceneVideoReceiptV1",
     ),
     "StoryboardSceneVideoRequest": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardSceneVideoRequestV1",
     ),
     "StoryboardSceneVideoSetReceipt": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardSceneVideoSetReceiptV1",
     ),
     "StoryboardSceneVideoSetSummary": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardSceneVideoSetSummaryV1",
     ),
     "StoryboardBeatCaption": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardBeatCaptionV1",
     ),
     "StoryboardSceneFanInManifest": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardSceneFanInManifestV1",
     ),
     "ReelsFactoryReceiptV3": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "ReelsFactoryReceiptV3",
     ),
     "ReelsFactoryCompletionSummaryV3": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "ReelsFactoryCompletionSummaryV3",
     ),
     "StoryboardDraft": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardDraftV1",
     ),
     "StoryboardApprovalReceipt": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardApprovalReceiptV1",
     ),
     "StoryboardExecutionManifest": (
-        "hiob_contracts.storyboard_two_stage_v1",
+        _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardExecutionManifestV1",
     ),
     # Phase-3 edge targets (j2p / p2a)
@@ -204,30 +209,30 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "AresP2ATargetProjectionV3",
     ),
     # LP1-7 residual edge targets (a2* / media / editorial / render)
-    "AthenaPlanInput": ("hiob_contracts.edge_target_inputs", "AthenaPlanInput"),
-    "OrpheusPlanInput": ("hiob_contracts.edge_target_inputs", "OrpheusPlanInput"),
-    "ApolloPlanInput": ("hiob_contracts.edge_target_inputs", "ApolloPlanInput"),
-    "AtroposDraftInput": ("hiob_contracts.edge_target_inputs", "AtroposDraftInput"),
-    "ArtemisReviewInput": ("hiob_contracts.edge_target_inputs", "ArtemisReviewInput"),
-    "AtroposApplyInput": ("hiob_contracts.edge_target_inputs", "AtroposApplyInput"),
+    "AthenaPlanInput": (_EDGE_TARGET_INPUTS_MODULE, "AthenaPlanInput"),
+    "OrpheusPlanInput": (_EDGE_TARGET_INPUTS_MODULE, "OrpheusPlanInput"),
+    "ApolloPlanInput": (_EDGE_TARGET_INPUTS_MODULE, "ApolloPlanInput"),
+    "AtroposDraftInput": (_EDGE_TARGET_INPUTS_MODULE, "AtroposDraftInput"),
+    "ArtemisReviewInput": (_EDGE_TARGET_INPUTS_MODULE, "ArtemisReviewInput"),
+    "AtroposApplyInput": (_EDGE_TARGET_INPUTS_MODULE, "AtroposApplyInput"),
     "HephaestusRenderInput": (
-        "hiob_contracts.edge_target_inputs",
+        _EDGE_TARGET_INPUTS_MODULE,
         "HephaestusRenderInput",
     ),
     # Planet envelopes (orpheus / apollo / hephaestus / metis)
-    "AudioRequest": ("hiob_contracts.planet_envelopes", "AudioRequest"),
-    "SFXRequest": ("hiob_contracts.planet_envelopes", "SFXRequest"),
-    "VisualRequest": ("hiob_contracts.planet_envelopes", "VisualRequest"),
-    "VisualContext": ("hiob_contracts.planet_envelopes", "VisualContext"),
-    "RenderJobRequest": ("hiob_contracts.planet_envelopes", "RenderJobRequest"),
-    "RenderJobResponse": ("hiob_contracts.planet_envelopes", "RenderJobResponse"),
+    "AudioRequest": (_PLANET_ENVELOPES_MODULE, "AudioRequest"),
+    "SFXRequest": (_PLANET_ENVELOPES_MODULE, "SFXRequest"),
+    "VisualRequest": (_PLANET_ENVELOPES_MODULE, "VisualRequest"),
+    "VisualContext": (_PLANET_ENVELOPES_MODULE, "VisualContext"),
+    "RenderJobRequest": (_PLANET_ENVELOPES_MODULE, "RenderJobRequest"),
+    "RenderJobResponse": (_PLANET_ENVELOPES_MODULE, "RenderJobResponse"),
     "ProcessInsightsRequest": (
-        "hiob_contracts.planet_envelopes",
+        _PLANET_ENVELOPES_MODULE,
         "ProcessInsightsRequest",
     ),
     # Hermes CAPI (was only in hiob-hermes — now contracts-owned for envelope checks)
-    "CAPIEvent": ("hiob_contracts.edge_target_inputs", "CAPIEvent"),
-    "CAPIPayload": ("hiob_contracts.edge_target_inputs", "CAPIPayload"),
+    "CAPIEvent": (_EDGE_TARGET_INPUTS_MODULE, "CAPIEvent"),
+    "CAPIPayload": (_EDGE_TARGET_INPUTS_MODULE, "CAPIPayload"),
 }
 
 # Alias: star F1 uses PlanVisualsInput name; registry edge uses AthenaPlanInput.

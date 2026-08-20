@@ -173,18 +173,26 @@ def _validate_json_value(value: Any, path: str = "canonical_order_payload") -> N
             raise ValueError(f"{path} contains a non-finite number")
         return
     if isinstance(value, list):
-        for index, item in enumerate(value):
-            _validate_json_value(item, f"{path}[{index}]")
+        _validate_json_sequence(value, path)
         return
     if isinstance(value, dict):
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise ValueError(f"{path} contains a non-string key")
-            if key in _EPHEMERAL_ORDER_FIELDS:
-                raise ValueError(f"{path} cannot contain ephemeral field {key!r}")
-            _validate_json_value(item, f"{path}.{key}")
+        _validate_json_mapping(value, path)
         return
     raise ValueError(f"{path} contains non-JSON value {type(value).__name__}")
+
+
+def _validate_json_sequence(value: list[Any], path: str) -> None:
+    for index, item in enumerate(value):
+        _validate_json_value(item, f"{path}[{index}]")
+
+
+def _validate_json_mapping(value: dict[Any, Any], path: str) -> None:
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ValueError(f"{path} contains a non-string key")
+        if key in _EPHEMERAL_ORDER_FIELDS:
+            raise ValueError(f"{path} cannot contain ephemeral field {key!r}")
+        _validate_json_value(item, f"{path}.{key}")
 
 
 def _validate_revisions(value: Mapping[str, str], field: str) -> Mapping[str, str]:
@@ -363,30 +371,9 @@ class PaidEffectAttemptV2(BaseModel):
         )
         if self.effect_key != expected:
             raise ValueError("effect_key does not match immutable paid-effect inputs")
-        if self.state != "PLANNED" and self.fencing_token < 1:
-            raise ValueError("claimed or terminal attempts require a positive fencing_token")
-        if self.state in {"CLAIMED", "PROVIDER_STARTING"} and (
-            self.lease_owner is None or self.lease_expires_at_utc is None
-        ):
-            raise ValueError("claimed/provider-starting attempts require an active lease")
-        if self.state in {"PROVIDER_STARTED", "SUCCEEDED"} and (
-            self.provider_job_id is None
-        ):
-            raise ValueError(f"{self.state} requires provider_job_id")
-        if self.state == "SUCCEEDED" and self.response_digest is None:
-            raise ValueError("SUCCEEDED requires response_digest")
-        if (self.cost_currency is None) != (self.cost_amount is None):
-            raise ValueError("cost_currency and cost_amount must be present together")
-        if self.cost_currency is not None and self.cost_currency != self.currency:
-            raise ValueError("cost_currency must match authorized currency")
-        if self.cost_amount is not None and self.cost_amount > self.spend_ceiling:
-            raise ValueError("cost_amount exceeds authorized spend_ceiling")
-        updated_at = _parse_utc_instant(self.updated_at_utc)
-        created_at = _parse_utc_instant(self.created_at_utc)
-        if updated_at is None or created_at is None:
-            raise ValueError("attempt timestamps must be valid UTC instants")
-        if updated_at < created_at:
-            raise ValueError("updated_at_utc cannot precede created_at_utc")
+        _validate_paid_attempt_state(self)
+        _validate_paid_attempt_cost(self)
+        _validate_paid_attempt_timestamps(self)
         return self
 
     def binds(self, intent: PaidEffectIntentV2) -> bool:
@@ -410,6 +397,37 @@ class PaidEffectAttemptV2(BaseModel):
         work or an explicitly terminal no/failed start may create an attempt.
         """
         return self.state in {"PLANNED", "FAILED_CONFIRMED", "NOT_STARTED_CONFIRMED"}
+
+
+def _validate_paid_attempt_state(attempt: PaidEffectAttemptV2) -> None:
+    if attempt.state != "PLANNED" and attempt.fencing_token < 1:
+        raise ValueError("claimed or terminal attempts require a positive fencing_token")
+    if attempt.state in {"CLAIMED", "PROVIDER_STARTING"} and (
+        attempt.lease_owner is None or attempt.lease_expires_at_utc is None
+    ):
+        raise ValueError("claimed/provider-starting attempts require an active lease")
+    if attempt.state in {"PROVIDER_STARTED", "SUCCEEDED"} and attempt.provider_job_id is None:
+        raise ValueError(f"{attempt.state} requires provider_job_id")
+    if attempt.state == "SUCCEEDED" and attempt.response_digest is None:
+        raise ValueError("SUCCEEDED requires response_digest")
+
+
+def _validate_paid_attempt_cost(attempt: PaidEffectAttemptV2) -> None:
+    if (attempt.cost_currency is None) != (attempt.cost_amount is None):
+        raise ValueError("cost_currency and cost_amount must be present together")
+    if attempt.cost_currency is not None and attempt.cost_currency != attempt.currency:
+        raise ValueError("cost_currency must match authorized currency")
+    if attempt.cost_amount is not None and attempt.cost_amount > attempt.spend_ceiling:
+        raise ValueError("cost_amount exceeds authorized spend_ceiling")
+
+
+def _validate_paid_attempt_timestamps(attempt: PaidEffectAttemptV2) -> None:
+    updated_at = _parse_utc_instant(attempt.updated_at_utc)
+    created_at = _parse_utc_instant(attempt.created_at_utc)
+    if updated_at is None or created_at is None:
+        raise ValueError("attempt timestamps must be valid UTC instants")
+    if updated_at < created_at:
+        raise ValueError("updated_at_utc cannot precede created_at_utc")
 
 
 class VerifiedRenderReceiptV2(BaseModel):

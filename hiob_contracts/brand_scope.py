@@ -9,6 +9,7 @@ from pydantic import AfterValidator
 
 from .ares_script_revision_v1 import NonBlankStr
 
+_INVALID_UNICODE_SCALARS = "text must contain valid Unicode scalar values"
 
 _CONTRACT_WHITESPACE = frozenset(
     {
@@ -65,23 +66,17 @@ def normalize_unicode_scalars(value: str) -> str:
         code = ord(value[index])
         if 0xD800 <= code <= 0xDBFF:
             if index + 1 >= len(value):
-                raise ValueError(
-                    "text must contain valid Unicode scalar values"
-                )
+                raise ValueError(_INVALID_UNICODE_SCALARS)
             low = ord(value[index + 1])
             if not 0xDC00 <= low <= 0xDFFF:
-                raise ValueError(
-                    "text must contain valid Unicode scalar values"
-                )
+                raise ValueError(_INVALID_UNICODE_SCALARS)
             normalized.append(
                 chr(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00))
             )
             index += 2
             continue
         if 0xDC00 <= code <= 0xDFFF:
-            raise ValueError(
-                "text must contain valid Unicode scalar values"
-            )
+            raise ValueError(_INVALID_UNICODE_SCALARS)
         normalized.append(value[index])
         index += 1
     return "".join(normalized)

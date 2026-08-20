@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from typing import Literal
 
 Criticality = Literal["required", "optional"]
+_SCRIPT_PACKAGE_BEAT_PLAN = "ScriptPackage+BeatPlan"
+_A2_MEDIA_POLICY = "policy.a2media"
 
 
 @dataclass(frozen=True)
@@ -57,18 +59,18 @@ EDGES: tuple[SemanticEdge, ...] = (
     ),
     # Media plan slice (Phase 3): Ares → {Athena, Orpheus, Apollo} plans.
     SemanticEdge(
-        "a2athena", "ares", "ScriptPackage+BeatPlan", "athena", "athena.plan",
-        "AthenaPlanInput", "policy.a2media", 30_000, "required",
+        "a2athena", "ares", _SCRIPT_PACKAGE_BEAT_PLAN, "athena", "athena.plan",
+        "AthenaPlanInput", _A2_MEDIA_POLICY, 30_000, "required",
         "Ares beats refined for Athena visual planning",
     ),
     SemanticEdge(
-        "a2orpheus", "ares", "ScriptPackage+BeatPlan", "orpheus", "orpheus.plan",
-        "OrpheusPlanInput", "policy.a2media", 30_000, "required",
+        "a2orpheus", "ares", _SCRIPT_PACKAGE_BEAT_PLAN, "orpheus", "orpheus.plan",
+        "OrpheusPlanInput", _A2_MEDIA_POLICY, 30_000, "required",
         "Ares beats refined for Orpheus voice/music planning (voice required)",
     ),
     SemanticEdge(
-        "a2apollo", "ares", "ScriptPackage+BeatPlan", "apollo", "apollo.plan",
-        "ApolloPlanInput", "policy.a2media", 30_000, "optional",
+        "a2apollo", "ares", _SCRIPT_PACKAGE_BEAT_PLAN, "apollo", "apollo.plan",
+        "ApolloPlanInput", _A2_MEDIA_POLICY, 30_000, "optional",
         "Ares beats refined for Apollo SFX planning (optional enhancement, §9.1)",
     ),
     # Fan-in (Phase 3/4): materialized media bundle → Atropos draft.

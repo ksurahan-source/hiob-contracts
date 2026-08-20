@@ -54,6 +54,32 @@ class VisualContext:
         )
 
 
+def _visual_beat_plan(value: Any) -> BeatPlan:
+    if isinstance(value, BeatPlan):
+        return value
+    if isinstance(value, list):
+        return BeatPlan.from_list(value)
+    if isinstance(value, dict):
+        return BeatPlan.from_list(value.get("beats") or [], spine=value.get("spine"))
+    return BeatPlan.from_list([])
+
+
+def _visual_context(value: Any) -> VisualContext:
+    return value if isinstance(value, VisualContext) else VisualContext.from_dict(
+        value if isinstance(value, dict) else {}
+    )
+
+
+def _visual_beat_personas(value: Any) -> BeatPersonas:
+    if isinstance(value, BeatPersonas):
+        return value
+    if isinstance(value, list):
+        return BeatPersonas.from_list(value)
+    if isinstance(value, dict) and "items" in value:
+        return BeatPersonas.from_list(value.get("items") or [])
+    return BeatPersonas()
+
+
 @dataclass(frozen=True)
 class VisualRequest:
     """Athena 노드 입력 = BeatPlan + VisualContext + (Ares→Athena seam) BeatPersonas·element_locks.
@@ -77,34 +103,10 @@ class VisualRequest:
     @classmethod
     def from_dict(cls, d: dict | None) -> "VisualRequest":
         d = d or {}
-        bp = d.get("beat_plan")
-        if isinstance(bp, BeatPlan):
-            beat_plan = bp
-        elif isinstance(bp, list):
-            beat_plan = BeatPlan.from_list(bp)
-        elif isinstance(bp, dict):
-            beats = bp.get("beats") or []
-            beat_plan = BeatPlan.from_list(beats, spine=bp.get("spine"))
-        else:
-            beat_plan = BeatPlan.from_list([])
-        ctx = d.get("context")
-        if isinstance(ctx, VisualContext):
-            context = ctx
-        else:
-            context = VisualContext.from_dict(ctx if isinstance(ctx, dict) else {})
-        personas = d.get("beat_personas")
-        if isinstance(personas, BeatPersonas):
-            beat_personas = personas
-        elif isinstance(personas, list):
-            beat_personas = BeatPersonas.from_list(personas)
-        elif isinstance(personas, dict) and "items" in personas:
-            beat_personas = BeatPersonas.from_list(personas.get("items") or [])
-        else:
-            beat_personas = BeatPersonas()
         return cls(
-            beat_plan=beat_plan,
-            context=context,
-            beat_personas=beat_personas,
+            beat_plan=_visual_beat_plan(d.get("beat_plan")),
+            context=_visual_context(d.get("context")),
+            beat_personas=_visual_beat_personas(d.get("beat_personas")),
             element_locks=dict(d.get("element_locks") or {}),
         )
 

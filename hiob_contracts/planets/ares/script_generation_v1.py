@@ -154,17 +154,18 @@ DigestText = Annotated[
     str,
     StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$"),
 ]
+_FACTORY_REVISION_INTEGER_ERROR = "factory_revision must be an integer"
 
 
 def _normalize_factory_revision(value: Any) -> Any:
     if isinstance(value, bool):
-        raise ValueError("factory_revision must be an integer")
+        raise ValueError(_FACTORY_REVISION_INTEGER_ERROR)
     if isinstance(value, float):
         if not value.is_integer():
-            raise ValueError("factory_revision must be an integer")
+            raise ValueError(_FACTORY_REVISION_INTEGER_ERROR)
         value = int(value)
     if not isinstance(value, int):
-        raise ValueError("factory_revision must be an integer")
+        raise ValueError(_FACTORY_REVISION_INTEGER_ERROR)
     if not 0 <= value <= 2_147_483_647:
         raise ValueError("factory_revision must be an int4 value")
     return value
