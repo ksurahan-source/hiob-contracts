@@ -19,6 +19,7 @@ export type {
 
 import { sha256Digest } from './factory/digest.js';
 import { KarmaEdgeReceiptSchema } from './factory/karma-edge.js';
+import { compareLocaleStrings } from './string-order.js';
 
 const NonBlankString = z.string().refine(
   (value) => value.trim().length > 0,
@@ -1087,13 +1088,13 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'identity',
       'product_facts',
       'scope',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     scope_fields: [
       'idempotency_key',
       'operation_id',
       'run_id',
       'workspace_id',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     authority_fields: [
       'accepted_p2a_receipt',
       'evidence_ref',
@@ -1101,7 +1102,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'identity_ref',
       'p2a_ref',
       'product_ref',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     authority_ref_fields: [
       'artifact_digest',
       'artifact_type',
@@ -1112,7 +1113,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'run_id',
       'source_output_digest',
       'workspace_id',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     identity_fields: [
       'audience_lock',
       'cast_sheet_digest',
@@ -1120,7 +1121,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'locale',
       'speakers',
       'voice_spec',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     product_fields: [
       'brand_display_name',
       'brand_slug',
@@ -1133,13 +1134,13 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'refund_policy_text',
       'regulation_notes',
       'usp_lines',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     evidence_fields: [
       'allowed_claim_ids',
       'claims',
       'evidence_bundle_digest',
       'voc_quotes',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     hook_fields: [
       'archetype_id',
       'directive_digest',
@@ -1147,7 +1148,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'hook_line',
       'hook_register',
       'rationale',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     constraints_fields: [
       'banned_phrases',
       'fixed_hook',
@@ -1160,7 +1161,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'required_phrases',
       'style_mode',
       'vertical_mode',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     ...aresIdentitySchemaDescriptorV2(),
   };
 }
@@ -1182,7 +1183,7 @@ export function aresCreateScriptResultV3SchemaDigest(): string {
       'semantic_beat_plan',
       'status',
       'usage',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     package_fields: [
       'caption_script',
       'contract_version',
@@ -1190,20 +1191,20 @@ export function aresCreateScriptResultV3SchemaDigest(): string {
       'package_digest',
       'pronunciation_overrides',
       'voice_script',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     semantic_plan_fields: [
       'beats',
       'contract_version',
       'plan_digest',
       'script_package_digest',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
     semantic_beat_fields: [
       'beat_index',
       'caption',
       'role_intents',
       'scene_intent',
       'text',
-    ].sort((left, right) => left.localeCompare(right)),
+    ].sort(compareLocaleStrings),
   });
 }
 
