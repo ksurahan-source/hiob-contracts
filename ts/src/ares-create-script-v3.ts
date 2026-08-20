@@ -6,7 +6,11 @@
  * camera, and render fields are structurally absent and rejected.
  */
 import { z } from 'zod';
-import { aresIdentitySchemaDescriptorV2 } from './ares-create-script-v2.js';
+import {
+  aresIdentitySchemaDescriptorV2,
+  aresSharedRequestSchemaDescriptorV2,
+  aresSharedResultSchemaDescriptorV2,
+} from './ares-create-script-v2.js';
 import { characterIdentityBindingErrorV1 } from './character-identity-v1.js';
 import { VoiceSpecV1Schema } from './voice-spec-v1.js';
 export {
@@ -1114,54 +1118,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'source_output_digest',
       'workspace_id',
     ].sort(compareLocaleStrings),
-    identity_fields: [
-      'audience_lock',
-      'cast_sheet_digest',
-      'identity_lock_digest',
-      'locale',
-      'speakers',
-      'voice_spec',
-    ].sort(compareLocaleStrings),
-    product_fields: [
-      'brand_display_name',
-      'brand_slug',
-      'facts_block',
-      'listing_pitch',
-      'listing_slug',
-      'price_text',
-      'product_name',
-      'product_truth_digest',
-      'refund_policy_text',
-      'regulation_notes',
-      'usp_lines',
-    ].sort(compareLocaleStrings),
-    evidence_fields: [
-      'allowed_claim_ids',
-      'claims',
-      'evidence_bundle_digest',
-      'voc_quotes',
-    ].sort(compareLocaleStrings),
-    hook_fields: [
-      'archetype_id',
-      'directive_digest',
-      'experiment_id',
-      'hook_line',
-      'hook_register',
-      'rationale',
-    ].sort(compareLocaleStrings),
-    constraints_fields: [
-      'banned_phrases',
-      'fixed_hook',
-      'format_mode',
-      'goal',
-      'human_instruction',
-      'n_beats',
-      'target_duration_sec',
-      'prior_script_package_digest',
-      'required_phrases',
-      'style_mode',
-      'vertical_mode',
-    ].sort(compareLocaleStrings),
+    ...aresSharedRequestSchemaDescriptorV2(),
     ...aresIdentitySchemaDescriptorV2(),
   };
 }
@@ -1184,14 +1141,7 @@ export function aresCreateScriptResultV3SchemaDigest(): string {
       'status',
       'usage',
     ].sort(compareLocaleStrings),
-    package_fields: [
-      'caption_script',
-      'contract_version',
-      'master_sales_script',
-      'package_digest',
-      'pronunciation_overrides',
-      'voice_script',
-    ].sort(compareLocaleStrings),
+    ...aresSharedResultSchemaDescriptorV2(),
     semantic_plan_fields: [
       'beats',
       'contract_version',

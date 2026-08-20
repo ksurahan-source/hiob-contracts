@@ -430,24 +430,8 @@ export function aresIdentitySchemaDescriptorV2() {
   };
 }
 
-/** Field-shape descriptors — keep keys sorted to match Python. */
-export function aresCreateScriptRequestSchemaDescriptorV2() {
+export function aresSharedRequestSchemaDescriptorV2() {
   return {
-    contract_version: 'AresCreateScriptRequest.v2',
-    fields: [
-      'authority',
-      'contract_version',
-      'creative_constraints',
-      'evidence_and_claims',
-      'hook_directive',
-      'identity',
-      'product_facts',
-    ].sort(compareLocaleStrings),
-    authority_fields: [
-      'accepted_p2a_receipt',
-      'identity_lock_digest',
-      'product_truth_digest',
-    ].sort(compareLocaleStrings),
     identity_fields: [
       'audience_lock',
       'cast_sheet_digest',
@@ -496,6 +480,41 @@ export function aresCreateScriptRequestSchemaDescriptorV2() {
       'style_mode',
       'vertical_mode',
     ].sort(compareLocaleStrings),
+  };
+}
+
+export function aresSharedResultSchemaDescriptorV2() {
+  return {
+    package_fields: [
+      'caption_script',
+      'contract_version',
+      'master_sales_script',
+      'package_digest',
+      'pronunciation_overrides',
+      'voice_script',
+    ].sort(compareLocaleStrings),
+  };
+}
+
+/** Field-shape descriptors — keep keys sorted to match Python. */
+export function aresCreateScriptRequestSchemaDescriptorV2() {
+  return {
+    contract_version: 'AresCreateScriptRequest.v2',
+    fields: [
+      'authority',
+      'contract_version',
+      'creative_constraints',
+      'evidence_and_claims',
+      'hook_directive',
+      'identity',
+      'product_facts',
+    ].sort(compareLocaleStrings),
+    authority_fields: [
+      'accepted_p2a_receipt',
+      'identity_lock_digest',
+      'product_truth_digest',
+    ].sort(compareLocaleStrings),
+    ...aresSharedRequestSchemaDescriptorV2(),
     ...aresIdentitySchemaDescriptorV2(),
   };
 }
@@ -518,14 +537,7 @@ export function aresCreateScriptResultSchemaDigest(): string {
       'status',
       'usage',
     ].sort(compareLocaleStrings),
-    package_fields: [
-      'caption_script',
-      'contract_version',
-      'master_sales_script',
-      'package_digest',
-      'pronunciation_overrides',
-      'voice_script',
-    ].sort(compareLocaleStrings),
+    ...aresSharedResultSchemaDescriptorV2(),
     plan_fields: [
       'beat_role_intents',
       'beats',
