@@ -32,11 +32,23 @@ function assertFinite(value: unknown): void {
   }
 }
 
+function compareCodePoints(left: string, right: string): number {
+  const leftPoints = Array.from(left, (character) => character.codePointAt(0) as number);
+  const rightPoints = Array.from(right, (character) => character.codePointAt(0) as number);
+  const sharedLength = Math.min(leftPoints.length, rightPoints.length);
+  for (let index = 0; index < sharedLength; index += 1) {
+    if (leftPoints[index] !== rightPoints[index]) {
+      return leftPoints[index] - rightPoints[index];
+    }
+  }
+  return leftPoints.length - rightPoints.length;
+}
+
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === 'object') {
     const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    for (const key of Object.keys(value as Record<string, unknown>).sort(compareCodePoints)) {
       sorted[key] = canonicalize((value as Record<string, unknown>)[key]);
     }
     return sorted;

@@ -193,7 +193,7 @@ function claimFingerprint(claim: ArtemisClaimV1): string {
   return sha256Digest([
     claim.text,
     claim.kind,
-    [...claim.source_observation_ids].sort(),
+    [...claim.source_observation_ids].sort((left, right) => left.localeCompare(right)),
     claim.evidence_sha256,
     claim.provenance.source_record_id,
     claim.provenance.quote,

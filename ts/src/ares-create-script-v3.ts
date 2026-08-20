@@ -1087,13 +1087,13 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'identity',
       'product_facts',
       'scope',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     scope_fields: [
       'idempotency_key',
       'operation_id',
       'run_id',
       'workspace_id',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     authority_fields: [
       'accepted_p2a_receipt',
       'evidence_ref',
@@ -1101,7 +1101,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'identity_ref',
       'p2a_ref',
       'product_ref',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     authority_ref_fields: [
       'artifact_digest',
       'artifact_type',
@@ -1112,7 +1112,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'run_id',
       'source_output_digest',
       'workspace_id',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     identity_fields: [
       'audience_lock',
       'cast_sheet_digest',
@@ -1120,7 +1120,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'locale',
       'speakers',
       'voice_spec',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     product_fields: [
       'brand_display_name',
       'brand_slug',
@@ -1133,13 +1133,13 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'refund_policy_text',
       'regulation_notes',
       'usp_lines',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     evidence_fields: [
       'allowed_claim_ids',
       'claims',
       'evidence_bundle_digest',
       'voc_quotes',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     hook_fields: [
       'archetype_id',
       'directive_digest',
@@ -1147,7 +1147,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'hook_line',
       'hook_register',
       'rationale',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     constraints_fields: [
       'banned_phrases',
       'fixed_hook',
@@ -1160,7 +1160,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'required_phrases',
       'style_mode',
       'vertical_mode',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     ...aresIdentitySchemaDescriptorV2(),
   };
 }
@@ -1182,7 +1182,7 @@ export function aresCreateScriptResultV3SchemaDigest(): string {
       'semantic_beat_plan',
       'status',
       'usage',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     package_fields: [
       'caption_script',
       'contract_version',
@@ -1190,20 +1190,20 @@ export function aresCreateScriptResultV3SchemaDigest(): string {
       'package_digest',
       'pronunciation_overrides',
       'voice_script',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     semantic_plan_fields: [
       'beats',
       'contract_version',
       'plan_digest',
       'script_package_digest',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
     semantic_beat_fields: [
       'beat_index',
       'caption',
       'role_intents',
       'scene_intent',
       'text',
-    ].sort(),
+    ].sort((left, right) => left.localeCompare(right)),
   });
 }
 

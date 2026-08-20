@@ -35,6 +35,12 @@ const POLICY = 'sha256:d289baef8930ccf2337a7120b9a492e1fa869c36ed6a802c4bedc6e20
 test('canonicalJson sorts keys recursively (parity)', () => {
   assert(canonicalJson({ a: 1, b: { y: 2, x: 1 } }) === '{"a":1,"b":{"x":1,"y":2}}', 'canonicalJson mismatch');
 });
+test('canonicalJson sorts astral keys by Unicode code point like Python', () => {
+  assert(
+    canonicalJson({ '\ue000': 1, '😀': 2 }) === '{"":1,"😀":2}',
+    'astral key order drifted from Python',
+  );
+});
 test('sha256Digest ASCII parity with Python', () => {
   assert(
     sha256Digest({ a: 1, b: { y: 2, x: 1 } }) ===
