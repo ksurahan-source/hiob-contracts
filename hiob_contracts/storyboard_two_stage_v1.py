@@ -46,6 +46,7 @@ from .ares_script_revision_v1 import (
     _parse_utc,
     canonical_contract_digest_v1,
 )
+from .url_policy import starts_with_forbidden_artifact_reference
 
 
 STORYBOARD_IMAGE_ARTIFACT_REF_VERSION_V1 = "StoryboardImageArtifactRef.v1"
@@ -848,7 +849,7 @@ def _assert_storage_key(value: str) -> None:
     if (
         not value
         or value != value.strip()
-        or lowered.startswith(("http://", "https://", "data:", "file:"))
+        or starts_with_forbidden_artifact_reference(lowered)
         or value.startswith("/")
         or "\\" in value
         or "?" in value
@@ -864,9 +865,7 @@ def _assert_storage_key(value: str) -> None:
 
 
 def _assert_opaque_artifact_id(value: str) -> None:
-    if value != value.strip() or value.lower().startswith(
-        ("http://", "https://", "data:", "file:")
-    ):
+    if value != value.strip() or starts_with_forbidden_artifact_reference(value):
         raise ValueError("artifact_id must be opaque, not a URL")
 
 

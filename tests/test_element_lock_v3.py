@@ -60,6 +60,24 @@ def test_request_rejects_digest_or_reference_drift():
             )
 
 
+@pytest.mark.parametrize(
+    "artifact_id",
+    (
+        "HTTP://example.com/source.png",
+        "https://example.com/source.png",
+        "data:image/png;base64,abc",
+        "file:/tmp/source.png",
+    ),
+)
+def test_artifact_id_rejects_external_or_embedded_references(artifact_id: str):
+    with pytest.raises(ValueError, match="opaque server id"):
+        ElementArtifactRefV1(
+            artifact_id=artifact_id,
+            sha256=sha256_digest(artifact_id),
+            role="source",
+        )
+
+
 def test_package_requires_review_artifact_and_human_approval():
     artifact = ElementArtifactRefV1(
         artifact_id="asset-sheet-1",
