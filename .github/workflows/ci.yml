@@ -26,9 +26,9 @@ jobs:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff # v6
       - name: Install locked Python dependencies
-        run: uv sync --frozen --dev
+        run: uv sync --frozen --dev --no-build --no-install-project
       - name: Run Python tests
-        run: uv run --frozen --dev --no-sync python -m pytest tests/ -q
+        run: uv run --frozen --dev --no-sync --no-build python -m pytest tests/ -q
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
