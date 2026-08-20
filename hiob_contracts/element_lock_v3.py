@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .factory.digest import Digest, assert_digest, sha256_digest
+from .url_policy import starts_with_forbidden_artifact_reference, starts_with_web_url
 
 _FROZEN = {"frozen": True, "extra": "forbid"}
 ElementRole = Literal["source", "character_sheet"]
@@ -24,7 +25,7 @@ class ElementArtifactRefV1(BaseModel):
     @field_validator("artifact_id")
     @classmethod
     def _reject_url_id(cls, value: str) -> str:
-        if value.strip().lower().startswith(("http://", "https://", "data:", "file:")):
+        if starts_with_forbidden_artifact_reference(value, trim=True):
             raise ValueError("artifact_id must be an opaque server id, not a URL")
         return value
 
@@ -134,7 +135,7 @@ def _contains_url(value: Any) -> bool:
         )
     if isinstance(value, (list, tuple)):
         return any(_contains_url(item) for item in value)
-    return isinstance(value, str) and value.lower().startswith(("http://", "https://"))
+    return isinstance(value, str) and starts_with_web_url(value)
 
 
 __all__ = [

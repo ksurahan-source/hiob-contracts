@@ -18,3 +18,8 @@ include = ["hiob_contracts*"]
 
 [tool.setuptools.package-data]
 hiob_contracts = ["runtime_node_manifest.json"]
+
+[dependency-groups]
+dev = [
+    "pytest==9.0.2",
+]
