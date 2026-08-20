@@ -791,7 +791,7 @@ def _authority_bound_to_receipt(
     return body
 
 
-def _cost_profile() -> dict[str, Any]:
+def _cost_profile(*, video_max_units: int = 15) -> dict[str, Any]:
     body: dict[str, Any] = {
         "contract_version": "FactoryCostProfile.v1",
         "profile_id": "storyboard-profile-v1",
@@ -843,7 +843,7 @@ def _cost_profile() -> dict[str, Any]:
                 "model": "seedance-2.5",
                 "billing_unit": "second",
                 "rate_microunits": 350_000,
-                "max_units_per_operation": 15,
+                "max_units_per_operation": video_max_units,
             },
             "voice": {
                 "provider": "typecast",
@@ -4392,7 +4392,7 @@ def test_storyboard_editor_preserves_script_prompt_and_variable_48s_timeline() -
         payload = _card(index, index, image=image)
         payload.update(
             {
-                "scene_id": f"scene-{index // 4:02d}",
+                "scene_id": f"scene-{index // 8:02d}",
                 "script_text": f"editable script {index}",
                 "duration_ms": 3_000,
                 "image_prompt": f"editable image prompt {index}",
@@ -4404,15 +4404,67 @@ def test_storyboard_editor_preserves_script_prompt_and_variable_48s_timeline() -
     scenes = derive_storyboard_scenes_v1(cards)
 
     assert sum(card.duration_ms for card in cards) == 48_000
-    assert [scene.duration_ms for scene in scenes] == [12_000] * 4
+    assert [scene.duration_ms for scene in scenes] == [24_000, 24_000]
     assert cards[0].script_text == "editable script 0"
     assert cards[0].image_prompt == "editable image prompt 0"
 
     too_long = [card.model_copy() for card in cards]
-    too_long[4] = too_long[4].model_copy(update={"scene_id": "scene-00"})
-    too_long[5] = too_long[5].model_copy(update={"scene_id": "scene-00"})
-    with pytest.raises(ValueError, match="15"):
+    for index in range(8, 11):
+        too_long[index] = too_long[index].model_copy(update={"scene_id": "scene-00"})
+    with pytest.raises(ValueError, match="30"):
         derive_storyboard_scenes_v1(too_long)
+
+
+def test_seedance25_scene_request_accepts_native_720p_for_twenty_four_seconds() -> None:
+    image_set = _image_set()
+    cards = []
+    for index, image in enumerate(image_set.images):
+        payload = _card(index, index, image=image)
+        payload.update(
+            {
+                "scene_id": f"scene-{index // 8:02d}",
+                "duration_ms": 3_000,
+            }
+        )
+        payload["card_digest"] = derive_storyboard_card_digest_v1(payload)
+        cards.append(payload)
+    draft = _draft(image_set, cards=cards)
+    approval = _approval(draft, image_set)
+    profile = _cost_profile(video_max_units=30)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+        storyboard_scene_count=2,
+        paid_calls=_calls("final_production", storyboard_scene_count=2),
+        cost_profile_digest=profile["profile_digest"],
+        pricing_policy_revision=profile["pricing_policy_revision"],
+        max_total_cost_microunits=_profile_worst_case_cost(
+            profile,
+            purpose="final_production",
+            scene_count=2,
+        ),
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+
+    request = StoryboardSceneVideoRequestV1.model_validate(
+        _scene_video_request(
+            manifest,
+            authority,
+            cost_profile=profile,
+        )
+    )
+
+    assert request.duration_ms == 24_000
+    assert (request.width, request.height) == (720, 1_280)
 
 
 def test_canonical_digest_vector_is_stable_across_db_and_runtime_ports() -> None:
