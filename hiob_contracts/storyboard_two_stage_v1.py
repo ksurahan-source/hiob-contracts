@@ -174,7 +174,11 @@ StoryboardBeatDurationMs = Annotated[
 ]
 StoryboardProviderDurationMs = Annotated[
     int,
-    Field(strict=True, ge=4_000, le=15_000),
+    Field(strict=True, ge=4_000, le=30_000),
+]
+StoryboardSceneDurationMs = Annotated[
+    int,
+    Field(strict=True, ge=1_000, le=30_000),
 ]
 ImageMime = Literal["image/png", "image/jpeg", "image/webp"]
 StoryboardCropMode = Literal["cover", "contain"]
@@ -1656,7 +1660,7 @@ class StoryboardSceneV1(BaseModel):
         min_length=1,
         max_length=16,
     )
-    duration_ms: StoryboardBeatDurationMs
+    duration_ms: StoryboardSceneDurationMs
     anchor_selected_artifact: StoryboardSelectedArtifactV1
     scene_digest: DigestStr
 
@@ -1954,8 +1958,8 @@ def _build_storyboard_scene_v1(
         "duration_ms": sum(card.duration_ms for card in cards),
         "anchor_selected_artifact": anchor.selected_artifact.model_dump(mode="json"),
     }
-    if body["duration_ms"] > 15_000:
-        raise ValueError("each contiguous storyboard scene must be 15 seconds or less")
+    if body["duration_ms"] > 30_000:
+        raise ValueError("each contiguous storyboard scene must be 30 seconds or less")
     body["scene_digest"] = derive_storyboard_scene_digest_v1(body)
     return StoryboardSceneV1.model_validate(body)
 
@@ -3386,7 +3390,7 @@ _FACTORY_COST_OPERATION_POLICY_V1: dict[
         ("seedance-2.5",),
         "second",
         350_000,
-        15,
+        30,
     ),
     "voice": ("typecast", ("ssfm-v30",), "character", 90, 200),
     "render": (
@@ -3420,7 +3424,13 @@ class FactoryCostOperationsV1(BaseModel):
                 or operation.model not in models
                 or operation.billing_unit != unit
                 or operation.rate_microunits > maximum_rate
-                or operation.max_units_per_operation != maximum_units
+                or (
+                    operation.max_units_per_operation != maximum_units
+                    and not (
+                        track == "video"
+                        and operation.max_units_per_operation == 15
+                    )
+                )
             ):
                 raise ValueError(
                     f"{track} operation pricing identity is not an allowed "
