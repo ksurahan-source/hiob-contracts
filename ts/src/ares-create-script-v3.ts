@@ -6,7 +6,11 @@
  * camera, and render fields are structurally absent and rejected.
  */
 import { z } from 'zod';
-import { aresIdentitySchemaDescriptorV2 } from './ares-create-script-v2.js';
+import {
+  aresIdentitySchemaDescriptorV2,
+  aresSharedRequestSchemaDescriptorV2,
+  aresSharedResultSchemaDescriptorV2,
+} from './ares-create-script-v2.js';
 import { characterIdentityBindingErrorV1 } from './character-identity-v1.js';
 import { VoiceSpecV1Schema } from './voice-spec-v1.js';
 export {
@@ -19,6 +23,7 @@ export type {
 
 import { sha256Digest } from './factory/digest.js';
 import { KarmaEdgeReceiptSchema } from './factory/karma-edge.js';
+import { compareLocaleStrings } from './string-order.js';
 
 const NonBlankString = z.string().refine(
   (value) => value.trim().length > 0,
@@ -1087,13 +1092,13 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'identity',
       'product_facts',
       'scope',
-    ].sort(),
+    ].sort(compareLocaleStrings),
     scope_fields: [
       'idempotency_key',
       'operation_id',
       'run_id',
       'workspace_id',
-    ].sort(),
+    ].sort(compareLocaleStrings),
     authority_fields: [
       'accepted_p2a_receipt',
       'evidence_ref',
@@ -1101,7 +1106,7 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'identity_ref',
       'p2a_ref',
       'product_ref',
-    ].sort(),
+    ].sort(compareLocaleStrings),
     authority_ref_fields: [
       'artifact_digest',
       'artifact_type',
@@ -1112,55 +1117,8 @@ export function aresCreateScriptRequestV3SchemaDescriptor() {
       'run_id',
       'source_output_digest',
       'workspace_id',
-    ].sort(),
-    identity_fields: [
-      'audience_lock',
-      'cast_sheet_digest',
-      'identity_lock_digest',
-      'locale',
-      'speakers',
-      'voice_spec',
-    ].sort(),
-    product_fields: [
-      'brand_display_name',
-      'brand_slug',
-      'facts_block',
-      'listing_pitch',
-      'listing_slug',
-      'price_text',
-      'product_name',
-      'product_truth_digest',
-      'refund_policy_text',
-      'regulation_notes',
-      'usp_lines',
-    ].sort(),
-    evidence_fields: [
-      'allowed_claim_ids',
-      'claims',
-      'evidence_bundle_digest',
-      'voc_quotes',
-    ].sort(),
-    hook_fields: [
-      'archetype_id',
-      'directive_digest',
-      'experiment_id',
-      'hook_line',
-      'hook_register',
-      'rationale',
-    ].sort(),
-    constraints_fields: [
-      'banned_phrases',
-      'fixed_hook',
-      'format_mode',
-      'goal',
-      'human_instruction',
-      'n_beats',
-      'target_duration_sec',
-      'prior_script_package_digest',
-      'required_phrases',
-      'style_mode',
-      'vertical_mode',
-    ].sort(),
+    ].sort(compareLocaleStrings),
+    ...aresSharedRequestSchemaDescriptorV2(),
     ...aresIdentitySchemaDescriptorV2(),
   };
 }
@@ -1182,28 +1140,21 @@ export function aresCreateScriptResultV3SchemaDigest(): string {
       'semantic_beat_plan',
       'status',
       'usage',
-    ].sort(),
-    package_fields: [
-      'caption_script',
-      'contract_version',
-      'master_sales_script',
-      'package_digest',
-      'pronunciation_overrides',
-      'voice_script',
-    ].sort(),
+    ].sort(compareLocaleStrings),
+    ...aresSharedResultSchemaDescriptorV2(),
     semantic_plan_fields: [
       'beats',
       'contract_version',
       'plan_digest',
       'script_package_digest',
-    ].sort(),
+    ].sort(compareLocaleStrings),
     semantic_beat_fields: [
       'beat_index',
       'caption',
       'role_intents',
       'scene_intent',
       'text',
-    ].sort(),
+    ].sort(compareLocaleStrings),
   });
 }
 

@@ -14,6 +14,8 @@
  */
 import { createHash } from 'node:crypto';
 
+import { compareUnicodeCodePoints } from '../string-order.js';
+
 /** ``sha256:<64 lowercase hex>`` — Python `Digest`와 동일한 문자열 형태. */
 export type Digest = string;
 
@@ -36,7 +38,7 @@ function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value && typeof value === 'object') {
     const sorted: Record<string, unknown> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+    for (const key of Object.keys(value as Record<string, unknown>).sort(compareUnicodeCodePoints)) {
       sorted[key] = canonicalize((value as Record<string, unknown>)[key]);
     }
     return sorted;

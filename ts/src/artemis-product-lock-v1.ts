@@ -8,6 +8,7 @@
 import { z } from 'zod';
 
 import { sha256Digest } from './factory/digest.js';
+import { compareLocaleStrings } from './string-order.js';
 
 const TextSchema = z
   .string()
@@ -193,7 +194,7 @@ function claimFingerprint(claim: ArtemisClaimV1): string {
   return sha256Digest([
     claim.text,
     claim.kind,
-    [...claim.source_observation_ids].sort(),
+    [...claim.source_observation_ids].sort(compareLocaleStrings),
     claim.evidence_sha256,
     claim.provenance.source_record_id,
     claim.provenance.quote,

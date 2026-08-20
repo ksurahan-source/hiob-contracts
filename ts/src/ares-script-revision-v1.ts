@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 
 import { sha256Digest } from './factory/digest.js';
+import { compareUnicodeCodePoints } from './string-order.js';
 
 const NonEmptyString = z.string().trim().min(1);
 const NonBlankString = z.string().refine(
@@ -247,18 +248,6 @@ function assertValidUnicode(value: string, path: string): void {
   }
 }
 
-function compareCodePoints(left: string, right: string): number {
-  const leftPoints = Array.from(left, (char) => char.codePointAt(0) as number);
-  const rightPoints = Array.from(right, (char) => char.codePointAt(0) as number);
-  const count = Math.min(leftPoints.length, rightPoints.length);
-  for (let index = 0; index < count; index += 1) {
-    if (leftPoints[index] !== rightPoints[index]) {
-      return leftPoints[index] - rightPoints[index];
-    }
-  }
-  return leftPoints.length - rightPoints.length;
-}
-
 export function canonicalContractJsonV1(value: unknown, path = 'contract'): string {
   if (value === null) return 'null';
   if (typeof value === 'boolean') return value ? 'true' : 'false';
@@ -303,7 +292,7 @@ export function canonicalContractJsonV1(value: unknown, path = 'contract'): stri
       throw new TypeError(`${path} contains a symbol key`);
     }
     const record = value as Record<string, unknown>;
-    const keys = Object.getOwnPropertyNames(record).sort(compareCodePoints);
+    const keys = Object.getOwnPropertyNames(record).sort(compareUnicodeCodePoints);
     return `{${keys.map((key) => {
       const descriptor = Object.getOwnPropertyDescriptor(record, key);
       if (!descriptor?.enumerable || !('value' in descriptor)) {
