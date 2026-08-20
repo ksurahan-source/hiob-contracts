@@ -82,6 +82,45 @@ def _normalized_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.lower())
 
 
+def _reject_unsealed_mapping_keys(
+    value: Mapping[Any, Any],
+    *,
+    path: str,
+    allow_story_brief: bool,
+) -> None:
+    for key, item in value.items():
+        normalized = _normalized_key(str(key))
+        if normalized in _FORBIDDEN_RAW_13Q_KEYS:
+            raise ValueError("raw 13Q is forbidden in a producer seal")
+        if normalized in _FORBIDDEN_TRUST_KEYS:
+            raise ValueError(
+                "caller-provided verified/trusted flags are forbidden in a producer seal"
+            )
+        if not allow_story_brief and normalized in _RAW_STORY_SHORTCUT_KEYS:
+            raise ValueError(
+                "raw story beat/count shortcut is forbidden outside Karma story_brief"
+            )
+        _reject_unsealed_payload_keys(
+            item,
+            path=f"{path}.{key}",
+            allow_story_brief=allow_story_brief,
+        )
+
+
+def _reject_unsealed_sequence_keys(
+    value: list[Any] | tuple[Any, ...],
+    *,
+    path: str,
+    allow_story_brief: bool,
+) -> None:
+    for index, item in enumerate(value):
+        _reject_unsealed_payload_keys(
+            item,
+            path=f"{path}[{index}]",
+            allow_story_brief=allow_story_brief,
+        )
+
+
 def _reject_unsealed_payload_keys(
     value: Any,
     *,
@@ -91,31 +130,17 @@ def _reject_unsealed_payload_keys(
     """Reject raw inputs and caller trust claims at every JSON depth."""
 
     if isinstance(value, Mapping):
-        for key, item in value.items():
-            normalized = _normalized_key(str(key))
-            field_path = f"{path}.{key}"
-            if normalized in _FORBIDDEN_RAW_13Q_KEYS:
-                raise ValueError("raw 13Q is forbidden in a producer seal")
-            if normalized in _FORBIDDEN_TRUST_KEYS:
-                raise ValueError(
-                    "caller-provided verified/trusted flags are forbidden in a producer seal"
-                )
-            if not allow_story_brief and normalized in _RAW_STORY_SHORTCUT_KEYS:
-                raise ValueError(
-                    "raw story beat/count shortcut is forbidden outside Karma story_brief"
-                )
-            _reject_unsealed_payload_keys(
-                item,
-                path=field_path,
-                allow_story_brief=allow_story_brief,
-            )
+        _reject_unsealed_mapping_keys(
+            value,
+            path=path,
+            allow_story_brief=allow_story_brief,
+        )
     elif isinstance(value, (list, tuple)):
-        for index, item in enumerate(value):
-            _reject_unsealed_payload_keys(
-                item,
-                path=f"{path}[{index}]",
-                allow_story_brief=allow_story_brief,
-            )
+        _reject_unsealed_sequence_keys(
+            value,
+            path=path,
+            allow_story_brief=allow_story_brief,
+        )
 
 
 def story_producer_artifact_pair_v4(

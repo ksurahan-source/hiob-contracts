@@ -380,9 +380,11 @@ class TargetProfile:
     def from_dict(cls, d: Optional[dict]) -> "TargetProfile":
         """JSON 역직렬화."""
         d = d or {}
+        raw_age = d.get("age")
         return cls(
             persona_id=str(d.get("persona_id") or ""),
-            name=str(d.get("name") or ""), age=int(d["age"]) if d.get("age") is not None else None,
+            name=str(d.get("name") or ""),
+            age=int(raw_age) if raw_age is not None else None,
             age_band=str(d.get("age_band") or ""),
             gender=str(d.get("gender") or ""), region=str(d.get("region") or ""),
             profile_image_placeholder=str(d.get("profile_image_placeholder") or ""),

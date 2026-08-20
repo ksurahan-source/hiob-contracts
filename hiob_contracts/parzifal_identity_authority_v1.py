@@ -29,6 +29,7 @@ from .ares_script_revision_v1 import (
     _validate_json,
 )
 from .character_lock_v1 import PositiveVersion
+from .brand_scope import normalize_unicode_scalars
 from .factory.digest import sha256_digest
 
 
@@ -48,31 +49,8 @@ _UTC_OFFSET_TIMESTAMP_RE = re.compile(
 )
 
 
-def _normalize_unicode_scalars(value: str) -> str:
-    normalized: list[str] = []
-    index = 0
-    while index < len(value):
-        code = ord(value[index])
-        if 0xD800 <= code <= 0xDBFF:
-            if index + 1 >= len(value):
-                raise ValueError("text must contain valid Unicode scalar values")
-            low = ord(value[index + 1])
-            if not 0xDC00 <= low <= 0xDFFF:
-                raise ValueError("text must contain valid Unicode scalar values")
-            normalized.append(
-                chr(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00))
-            )
-            index += 2
-            continue
-        if 0xDC00 <= code <= 0xDFFF:
-            raise ValueError("text must contain valid Unicode scalar values")
-        normalized.append(value[index])
-        index += 1
-    return "".join(normalized)
-
-
 def _canonical_text(value: str) -> str:
-    normalized = _normalize_unicode_scalars(value).strip()
+    normalized = normalize_unicode_scalars(value).strip()
     if not normalized:
         raise ValueError("string must not be blank")
     return normalized

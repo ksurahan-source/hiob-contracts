@@ -118,6 +118,86 @@ class BackgroundLock:
         return self.hero_cut.validate() if self.hero_cut is not None else []
 
 
+def _character_constraint_parts(character: Optional[CharacterLock]) -> list[str]:
+    if character is None:
+        return []
+    parts: list[str] = []
+    forbidden = [item for item in (character.wardrobe.get("forbidden") or []) if _s(item)]
+    outfit = _s(character.wardrobe.get("outfit"))
+    if outfit:
+        parts.append(f"복색 락: {outfit} 착장을 유지.")
+    if forbidden:
+        parts.append("금지 착장: " + ", ".join(_s(item) for item in forbidden) + ".")
+    return parts
+
+
+def _product_constraint_parts(product: Optional[ProductLock]) -> list[str]:
+    if product is None:
+        return []
+    parts: list[str] = []
+    constraints = [item for item in product.constraints if _s(item)]
+    if product.hero_cut and product.hero_cut.has_image():
+        parts.append("제품 락: 참조 제품 이미지의 실물을 그대로 유지 — 형태·라벨·색을 발명하거나 변형하지 말 것.")
+    if constraints:
+        parts.append("제품 제약: " + "; ".join(_s(item) for item in constraints) + ".")
+    return parts
+
+
+def _background_constraint_parts(background: Optional[BackgroundLock]) -> list[str]:
+    if background is None:
+        return []
+    if background.hero_cut and background.hero_cut.has_image():
+        return ["배경 락: 참조 배경 이미지의 장소·조명·톤과 일치시킬 것(경쟁사·타 브랜드 요소 금지)."]
+    text_lock = _s(background.text_lock)
+    return [f"배경 락: {text_lock}"] if text_lock else []
+
+
+def _has_hero_cut(lock: CharacterLock | ProductLock | BackgroundLock | None) -> bool:
+    return bool(lock and lock.hero_cut and lock.hero_cut.has_image())
+
+
+def _character_locks_from_dict(value: dict[str, Any]) -> dict[str, CharacterLock]:
+    characters: dict[str, CharacterLock] = {}
+    for persona_id, raw_character in (value.get("characters") or {}).items():
+        character = raw_character or {}
+        sheet = character.get("sheet") or {}
+        characters[persona_id] = CharacterLock(
+            persona_id=_s(persona_id),
+            hero_cut=_ref_from(character.get("hero_cut"), "character"),
+            voice_persona=_s(character.get("voice_persona")) or None,
+            face_id=_s(character.get("face_id")) or None,
+            voice_id=_s(character.get("voice_id")) or None,
+            identity_binding_digest=_s(character.get("identity_binding_digest")) or None,
+            sheet=dict(sheet),
+            wardrobe=dict(sheet.get("wardrobe") or character.get("wardrobe") or {}),
+        )
+    return characters
+
+
+def _product_lock_from_dict(value: dict[str, Any]) -> Optional[ProductLock]:
+    product = value.get("product")
+    if not product:
+        return None
+    sheet = product.get("sheet") or {}
+    constraints = sheet.get("constraints") or product.get("constraints") or ()
+    return ProductLock(
+        hero_cut=_ref_from(product.get("hero_cut"), "product"),
+        sheet=dict(sheet),
+        constraints=tuple(item for item in constraints if _s(item)),
+    )
+
+
+def _background_lock_from_dict(value: dict[str, Any]) -> Optional[BackgroundLock]:
+    background = value.get("background")
+    if not background:
+        return None
+    return BackgroundLock(
+        hero_cut=_ref_from(background.get("hero_cut"), "background"),
+        text_lock=_s(background.get("text_lock")),
+        sheet=dict(background.get("sheet") or {}),
+    )
+
+
 @dataclass(frozen=True)
 class ElementLocks:
     """리스팅 스코프 정체성 락 묶음. status='approved'만 소비.
@@ -213,26 +293,9 @@ class ElementLocks:
         if workspace_id or brand_slug:
             if not self.matches_scope(workspace_id, brand_slug):
                 return ""
-        parts: list[str] = []
-        ch = self.character(persona_id)
-        if ch:
-            forb = [x for x in (ch.wardrobe.get("forbidden") or []) if _s(x)]
-            outfit = _s(ch.wardrobe.get("outfit"))
-            if outfit:
-                parts.append(f"복색 락: {outfit} 착장을 유지.")
-            if forb:
-                parts.append("금지 착장: " + ", ".join(_s(x) for x in forb) + ".")
-        if self.product:
-            cons = [x for x in (self.product.constraints or ()) if _s(x)]
-            if self.product.hero_cut and self.product.hero_cut.has_image():
-                parts.append("제품 락: 참조 제품 이미지의 실물을 그대로 유지 — 형태·라벨·색을 발명하거나 변형하지 말 것.")
-            if cons:
-                parts.append("제품 제약: " + "; ".join(_s(x) for x in cons) + ".")
-        if self.background:
-            if self.background.hero_cut and self.background.hero_cut.has_image():
-                parts.append("배경 락: 참조 배경 이미지의 장소·조명·톤과 일치시킬 것(경쟁사·타 브랜드 요소 금지).")
-            elif _s(self.background.text_lock):
-                parts.append(f"배경 락: {_s(self.background.text_lock)}")
+        parts = _character_constraint_parts(self.character(persona_id))
+        parts.extend(_product_constraint_parts(self.product))
+        parts.extend(_background_constraint_parts(self.background))
         return (" " + " ".join(parts)) if parts else ""
 
     def validate(self) -> list[str]:
@@ -249,11 +312,14 @@ class ElementLocks:
         if self.background is not None:
             errs.extend(self.background.validate())
         # 승인본은 최소 1개 element 히어로컷을 가져야 의미가 있다
+        character_hero_cut = any(
+            isinstance(character, CharacterLock) and _has_hero_cut(character)
+            for character in (self.characters or {}).values()
+        )
         if self.is_approved and not (
-            any(isinstance(c, CharacterLock) and c.hero_cut and c.hero_cut.has_image()
-                for c in (self.characters or {}).values())
-            or (self.product and self.product.hero_cut and self.product.hero_cut.has_image())
-            or (self.background and self.background.hero_cut and self.background.hero_cut.has_image())
+            character_hero_cut
+            or _has_hero_cut(self.product)
+            or _has_hero_cut(self.background)
         ):
             errs.append("approved인데 히어로컷 이미지 0 (락 소스 부재)")
         return errs
@@ -262,44 +328,15 @@ class ElementLocks:
     @classmethod
     def from_dict(cls, d: Optional[dict]) -> "ElementLocks":
         d = d or {}
-        chars: dict = {}
-        for pid, cd in (d.get("characters") or {}).items():
-            cd = cd or {}
-            chars[pid] = CharacterLock(
-                persona_id=_s(pid),
-                hero_cut=_ref_from(cd.get("hero_cut"), "character"),
-                voice_persona=_s(cd.get("voice_persona")) or None,
-                face_id=_s(cd.get("face_id")) or None,
-                voice_id=_s(cd.get("voice_id")) or None,
-                identity_binding_digest=_s(cd.get("identity_binding_digest")) or None,
-                sheet=dict(cd.get("sheet") or {}),
-                wardrobe=dict((cd.get("sheet") or {}).get("wardrobe") or cd.get("wardrobe") or {}),
-            )
-        prod = None
-        if d.get("product"):
-            pd = d["product"]
-            prod = ProductLock(
-                hero_cut=_ref_from(pd.get("hero_cut"), "product"),
-                sheet=dict(pd.get("sheet") or {}),
-                constraints=tuple(x for x in ((pd.get("sheet") or {}).get("constraints") or pd.get("constraints") or ()) if _s(x)),
-            )
-        bg = None
-        if d.get("background"):
-            bd = d["background"]
-            bg = BackgroundLock(
-                hero_cut=_ref_from(bd.get("hero_cut"), "background"),
-                text_lock=_s(bd.get("text_lock")),
-                sheet=dict(bd.get("sheet") or {}),
-            )
         return cls(
             version=_safe_int(d.get("version"), 0),
             status=_s(d.get("status")) or "draft",
             authored_by=_s(d.get("authored_by")),
             workspace_id=_s(d.get("workspace_id")),
             brand_slug=_s(d.get("brand_slug")),
-            characters=chars,
-            product=prod,
-            background=bg,
+            characters=_character_locks_from_dict(d),
+            product=_product_lock_from_dict(d),
+            background=_background_lock_from_dict(d),
             version_history=tuple(d.get("version_history") or ()),
         )
 

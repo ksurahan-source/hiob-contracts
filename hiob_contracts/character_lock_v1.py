@@ -7,7 +7,11 @@ from typing import Annotated, Any, Literal, Mapping
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .ares_script_revision_v1 import DigestStr, NonBlankStr
-from .brand_scope import CanonicalBrandSlug, canonical_brand_slug
+from .brand_scope import (
+    CanonicalBrandSlug,
+    canonical_brand_slug,
+    normalize_unicode_scalars,
+)
 from .factory.digest import sha256_digest
 
 _STRICT_FROZEN = ConfigDict(
@@ -45,29 +49,6 @@ _DIGEST_FIELDS = (
 )
 
 
-def _normalize_unicode_scalars(value: str) -> str:
-    normalized: list[str] = []
-    index = 0
-    while index < len(value):
-        code = ord(value[index])
-        if 0xD800 <= code <= 0xDBFF:
-            if index + 1 >= len(value):
-                raise ValueError("text must contain valid Unicode scalar values")
-            low = ord(value[index + 1])
-            if not 0xDC00 <= low <= 0xDFFF:
-                raise ValueError("text must contain valid Unicode scalar values")
-            normalized.append(
-                chr(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00))
-            )
-            index += 2
-            continue
-        if 0xDC00 <= code <= 0xDFFF:
-            raise ValueError("text must contain valid Unicode scalar values")
-        normalized.append(value[index])
-        index += 1
-    return "".join(normalized)
-
-
 def derive_character_lock_digest_v1(
     value: Mapping[str, Any] | BaseModel,
 ) -> str:
@@ -84,7 +65,7 @@ def derive_character_lock_digest_v1(
             payload[field] = (
                 canonical_brand_slug(item)
                 if field == "brand_slug"
-                else _normalize_unicode_scalars(item)
+                else normalize_unicode_scalars(item)
             )
     return sha256_digest(payload)
 
@@ -115,7 +96,7 @@ class CharacterLockV1(BaseModel):
     )
     @classmethod
     def _valid_unicode(cls, value: str) -> str:
-        return _normalize_unicode_scalars(value)
+        return normalize_unicode_scalars(value)
 
     @model_validator(mode="after")
     def _validate_digest(self) -> "CharacterLockV1":

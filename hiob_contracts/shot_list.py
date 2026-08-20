@@ -79,6 +79,30 @@ class ShotMetadata:
     policy_flags: tuple[str, ...] = ()    # child_reel_safe|vegan_only|... 렌더 전제 조건
 
 
+def _shot_validation_errors(shot: ShotMetadata) -> list[str]:
+    errors: list[str] = []
+    if shot.beat_index is None:
+        errors.append("shot.beat_index 없음 (정렬 결박 필수)")
+    elif not isinstance(shot.beat_index, int):
+        errors.append(f"shot.beat_index 정수 아님: {shot.beat_index!r}")
+    if shot.duration_ms is not None and shot.duration_ms <= 0:
+        errors.append(f"beat {shot.beat_index}: duration_ms must be positive")
+    if shot.lens == "macro" and shot.shot_size not in {"ecu", "cu", "insert"}:
+        errors.append(
+            f"beat {shot.beat_index}: macro lens conflicts with shot_size={shot.shot_size}"
+        )
+    if shot.shot_size == "wide" and shot.lens in {"85", "macro"}:
+        errors.append(
+            f"beat {shot.beat_index}: wide shot conflicts with lens={shot.lens}"
+        )
+    cue = str(shot.continuity_cue or "").lower()
+    if shot.direction == "camera_left" and "from_right" in cue:
+        errors.append(f"beat {shot.beat_index}: direction conflicts with continuity cue")
+    if shot.direction == "camera_right" and "from_left" in cue:
+        errors.append(f"beat {shot.beat_index}: direction conflicts with continuity cue")
+    return errors
+
+
 @dataclass(frozen=True)
 class ShotList:
     """비트별 타입 샷 시퀀스 — BeatPlan과 beat_index로 1:1 정렬.
@@ -104,25 +128,7 @@ class ShotList:
         """완정성 검증."""
         errs: list[str] = []
         for shot in self.shots:
-            if shot.beat_index is None:
-                errs.append("shot.beat_index 없음 (정렬 결박 필수)")
-            elif not isinstance(shot.beat_index, int):
-                errs.append(f"shot.beat_index 정수 아님: {shot.beat_index!r}")
-            if shot.duration_ms is not None and shot.duration_ms <= 0:
-                errs.append(f"beat {shot.beat_index}: duration_ms must be positive")
-            if shot.lens == "macro" and shot.shot_size not in {"ecu", "cu", "insert"}:
-                errs.append(
-                    f"beat {shot.beat_index}: macro lens conflicts with shot_size={shot.shot_size}"
-                )
-            if shot.shot_size == "wide" and shot.lens in {"85", "macro"}:
-                errs.append(
-                    f"beat {shot.beat_index}: wide shot conflicts with lens={shot.lens}"
-                )
-            cue = str(shot.continuity_cue or "").lower()
-            if shot.direction == "camera_left" and "from_right" in cue:
-                errs.append(f"beat {shot.beat_index}: direction conflicts with continuity cue")
-            if shot.direction == "camera_right" and "from_left" in cue:
-                errs.append(f"beat {shot.beat_index}: direction conflicts with continuity cue")
+            errs.extend(_shot_validation_errors(shot))
 
         idxs = [s.beat_index for s in self.shots if s.beat_index is not None]
         if len(idxs) != len(set(idxs)):
