@@ -67,6 +67,48 @@ function isPlainJsonObject(value: object): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+function assertNoSymbolKeys(value: object, path: string): void {
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    throw new TypeError(`${path} contains a symbol key`);
+  }
+}
+
+function ownArrayValues(value: unknown[], path: string): unknown[] {
+  assertNoSymbolKeys(value, path);
+  const expectedNames = new Set([
+    ...Array.from({ length: value.length }, (_, index) => String(index)),
+    'length',
+  ]);
+  if (Object.getOwnPropertyNames(value).some((name) => !expectedNames.has(name))) {
+    throw new TypeError(`${path} contains a non-JSON array property`);
+  }
+  const values: unknown[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor) throw new TypeError(`${path} contains a sparse array hole`);
+    if (!descriptor.enumerable || !('value' in descriptor)) {
+      throw new TypeError(`${path}[${index}] is not an enumerable JSON data property`);
+    }
+    values.push(descriptor.value);
+  }
+  return values;
+}
+
+function ownObjectEntries(
+  value: Record<string, unknown>,
+  path: string,
+): [string, unknown][] {
+  assertNoSymbolKeys(value, path);
+  return Object.getOwnPropertyNames(value).map((key) => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor?.enumerable || !('value' in descriptor)) {
+      throw new TypeError(`${path}.${key} is not an enumerable JSON data property`);
+    }
+    assertValidUnicode(key, `${path}.key`);
+    return [key, descriptor.value];
+  });
+}
+
 function cloneJsonValue(value: unknown, path = 'json'): JsonValue {
   if (value === null || typeof value === 'boolean') return value;
   if (typeof value === 'string') {
@@ -80,45 +122,17 @@ function cloneJsonValue(value: unknown, path = 'json'): JsonValue {
     return value;
   }
   if (Array.isArray(value)) {
-    if (Object.getOwnPropertySymbols(value).length > 0) {
-      throw new TypeError(`${path} contains a symbol key`);
-    }
-    const expectedNames = new Set([
-      ...Array.from({ length: value.length }, (_, index) => String(index)),
-      'length',
-    ]);
-    if (Object.getOwnPropertyNames(value).some((name) => !expectedNames.has(name))) {
-      throw new TypeError(`${path} contains a non-JSON array property`);
-    }
-    const clone: JsonValue[] = [];
-    for (let index = 0; index < value.length; index += 1) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-      if (!descriptor) {
-        throw new TypeError(`${path} contains a sparse array hole`);
-      }
-      if (!descriptor.enumerable || !('value' in descriptor)) {
-        throw new TypeError(`${path}[${index}] is not an enumerable JSON data property`);
-      }
-      clone.push(cloneJsonValue(descriptor.value, `${path}[${index}]`));
-    }
-    return clone;
+    return ownArrayValues(value, path).map(
+      (item, index) => cloneJsonValue(item, `${path}[${index}]`),
+    );
   }
   if (typeof value === 'object' && isPlainJsonObject(value)) {
-    const symbols = Object.getOwnPropertySymbols(value);
-    if (symbols.length > 0) {
-      throw new TypeError(`${path} contains a symbol key`);
-    }
     const clone = Object.create(null) as Record<string, JsonValue>;
-    for (const key of Object.getOwnPropertyNames(value)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (!descriptor?.enumerable || !('value' in descriptor)) {
-        throw new TypeError(`${path}.${key} is not an enumerable JSON data property`);
-      }
-      assertValidUnicode(key, `${path}.key`);
+    for (const [key, item] of ownObjectEntries(value, path)) {
       Object.defineProperty(clone, key, {
         configurable: true,
         enumerable: true,
-        value: cloneJsonValue(descriptor.value, `${path}.${key}`),
+        value: cloneJsonValue(item, `${path}.${key}`),
         writable: true,
       });
     }
@@ -264,43 +278,18 @@ export function canonicalContractJsonV1(value: unknown, path = 'contract'): stri
     return String(value);
   }
   if (Array.isArray(value)) {
-    if (Object.getOwnPropertySymbols(value).length > 0) {
-      throw new TypeError(`${path} contains a symbol key`);
-    }
-    const expectedNames = new Set([
-      ...Array.from({ length: value.length }, (_, index) => String(index)),
-      'length',
-    ]);
-    if (Object.getOwnPropertyNames(value).some((name) => !expectedNames.has(name))) {
-      throw new TypeError(`${path} contains a non-JSON array property`);
-    }
-    const items: string[] = [];
-    for (let index = 0; index < value.length; index += 1) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-      if (!descriptor) {
-        throw new TypeError(`${path} contains a sparse array hole`);
-      }
-      if (!descriptor.enumerable || !('value' in descriptor)) {
-        throw new TypeError(`${path}[${index}] is not an enumerable JSON data property`);
-      }
-      items.push(canonicalContractJsonV1(descriptor.value, `${path}[${index}]`));
-    }
+    const items = ownArrayValues(value, path).map(
+      (item, index) => canonicalContractJsonV1(item, `${path}[${index}]`),
+    );
     return `[${items.join(',')}]`;
   }
   if (typeof value === 'object' && isPlainJsonObject(value)) {
-    if (Object.getOwnPropertySymbols(value).length > 0) {
-      throw new TypeError(`${path} contains a symbol key`);
-    }
-    const record = value as Record<string, unknown>;
-    const keys = Object.getOwnPropertyNames(record).sort(compareUnicodeCodePoints);
-    return `{${keys.map((key) => {
-      const descriptor = Object.getOwnPropertyDescriptor(record, key);
-      if (!descriptor?.enumerable || !('value' in descriptor)) {
-        throw new TypeError(`${path}.${key} is not an enumerable JSON data property`);
-      }
-      assertValidUnicode(key, `${path}.key`);
-      return `${JSON.stringify(key)}:${canonicalContractJsonV1(descriptor.value, `${path}.${key}`)}`;
-    }).join(',')}}`;
+    const entries = ownObjectEntries(value, path).sort(
+      ([left], [right]) => compareUnicodeCodePoints(left, right),
+    );
+    return `{${entries.map(([key, item]) => (
+      `${JSON.stringify(key)}:${canonicalContractJsonV1(item, `${path}.${key}`)}`
+    )).join(',')}}`;
   }
   throw new TypeError(`${path} contains non-JSON value`);
 }
@@ -691,6 +680,82 @@ export function approvalCommandBindsRevisionV1(
     && command.factory_revision === revision.factory_revision;
 }
 
+type ApprovalReceiptCandidate = Record<string, unknown> & {
+  receipt_id: string;
+  transaction_audit_id: string;
+  approval_kind: 'script' | 'production_plan';
+  artifact_digest: string;
+  target_profile_digest: string;
+  identity_lock_digest: string;
+  script_package_digest: string;
+  beat_plan_digest: string | null;
+  g1_subject_digest: string | null;
+  approved_at_utc: string;
+  expires_at_utc: string;
+  revoked_at_utc: string | null;
+};
+
+type ReceiptIssue = (message: string) => void;
+
+function appendProductionArtifactIssues(
+  value: ApprovalReceiptCandidate,
+  issue: ReceiptIssue,
+): void {
+  if (value.beat_plan_digest === null || value.g1_subject_digest === null) {
+    issue('production receipt requires BeatPlan and G1 subject digests');
+    return;
+  }
+  let expectedG1: string;
+  try {
+    expectedG1 = deriveAresG1SubjectDigestV1(
+      value.target_profile_digest,
+      value.identity_lock_digest,
+      value.script_package_digest,
+      value.beat_plan_digest,
+    );
+  } catch {
+    issue('production receipt contains an invalid G1 constituent digest');
+    return;
+  }
+  if (value.g1_subject_digest !== expectedG1 || value.artifact_digest !== expectedG1) {
+    issue('production receipt artifact must equal the four-digest G1 subject');
+  }
+}
+
+function appendReceiptArtifactIssues(
+  value: ApprovalReceiptCandidate,
+  issue: ReceiptIssue,
+): void {
+  if (value.approval_kind === 'script') {
+    if (
+      value.artifact_digest !== value.script_package_digest
+      || value.beat_plan_digest !== null
+      || value.g1_subject_digest !== null
+    ) {
+      issue('script receipt must bind only the ScriptPackage artifact');
+    }
+    return;
+  }
+  appendProductionArtifactIssues(value, issue);
+}
+
+function appendReceiptTimestampIssues(
+  value: ApprovalReceiptCandidate,
+  issue: ReceiptIssue,
+): void {
+  try {
+    const approved = utcMicros(value.approved_at_utc);
+    const expires = utcMicros(value.expires_at_utc);
+    if (expires <= approved) issue('expires_at_utc must follow approved_at_utc');
+    if (value.revoked_at_utc === null) return;
+    const revoked = utcMicros(value.revoked_at_utc);
+    if (revoked < approved) issue('revoked_at_utc cannot precede approved_at_utc');
+    if (revoked > expires) issue('revoked_at_utc cannot follow expires_at_utc');
+  } catch {
+    issue('receipt timestamps must be valid UTC values');
+  }
+}
+
 export const AresApprovalReceiptV1Schema = z
   .object({
     contract_version: z.literal('AresApprovalReceipt.v1'),
@@ -727,47 +792,8 @@ export const AresApprovalReceiptV1Schema = z
     if (value.transaction_audit_id !== value.receipt_id) {
       issue('transaction_audit_id must equal receipt_id');
     }
-    if (value.approval_kind === 'script') {
-      if (
-        value.artifact_digest !== value.script_package_digest
-        || value.beat_plan_digest !== null
-        || value.g1_subject_digest !== null
-      ) {
-        issue('script receipt must bind only the ScriptPackage artifact');
-      }
-    } else if (value.beat_plan_digest === null || value.g1_subject_digest === null) {
-      issue('production receipt requires BeatPlan and G1 subject digests');
-    } else {
-      let expectedG1: string | null = null;
-      try {
-        expectedG1 = deriveAresG1SubjectDigestV1(
-          value.target_profile_digest,
-          value.identity_lock_digest,
-          value.script_package_digest,
-          value.beat_plan_digest,
-        );
-      } catch {
-        issue('production receipt contains an invalid G1 constituent digest');
-      }
-      if (expectedG1 !== null && (
-        value.g1_subject_digest !== expectedG1
-        || value.artifact_digest !== expectedG1
-      )) {
-        issue('production receipt artifact must equal the four-digest G1 subject');
-      }
-    }
-    try {
-      const approved = utcMicros(value.approved_at_utc);
-      const expires = utcMicros(value.expires_at_utc);
-      if (expires <= approved) issue('expires_at_utc must follow approved_at_utc');
-      if (value.revoked_at_utc !== null) {
-        const revoked = utcMicros(value.revoked_at_utc);
-        if (revoked < approved) issue('revoked_at_utc cannot precede approved_at_utc');
-        if (revoked > expires) issue('revoked_at_utc cannot follow expires_at_utc');
-      }
-    } catch {
-      issue('receipt timestamps must be valid UTC values');
-    }
+    appendReceiptArtifactIssues(value, issue);
+    appendReceiptTimestampIssues(value, issue);
     if (!digestMatchesV1(value, 'receipt_digest')) {
       issue('receipt_digest mismatch');
     }

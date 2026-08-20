@@ -52,6 +52,11 @@ PERSONA_FIELDS = (
     "gender_axis", "gaze_mode"
 )
 
+
+def _text_value(data: dict, key: str, default: str = "") -> str:
+    return str(data.get(key) or default)
+
+
 # === L4: Visual은 CharacterMasterSheet에 위임 (angles, expressions, wardrobe) ===
 
 
@@ -382,20 +387,23 @@ class TargetProfile:
         d = d or {}
         raw_age = d.get("age")
         return cls(
-            persona_id=str(d.get("persona_id") or ""),
-            name=str(d.get("name") or ""),
+            persona_id=_text_value(d, "persona_id"),
+            name=_text_value(d, "name"),
             age=int(raw_age) if raw_age is not None else None,
-            age_band=str(d.get("age_band") or ""),
-            gender=str(d.get("gender") or ""), region=str(d.get("region") or ""),
-            profile_image_placeholder=str(d.get("profile_image_placeholder") or ""),
-            pain_points=str(d.get("pain_points") or ""),
-            blocker=str(d.get("blocker") or ""),
-            jtbd=str(d.get("jtbd") or ""),
-            narrative_arc=str(d.get("narrative_arc") or ""),
-            voice_persona=str(d.get("voice_persona") or ""),
-            speaking_style=str(d.get("speaking_style") or ""),
+            age_band=_text_value(d, "age_band"),
+            gender=_text_value(d, "gender"),
+            region=_text_value(d, "region"),
+            profile_image_placeholder=_text_value(
+                d, "profile_image_placeholder"
+            ),
+            pain_points=_text_value(d, "pain_points"),
+            blocker=_text_value(d, "blocker"),
+            jtbd=_text_value(d, "jtbd"),
+            narrative_arc=_text_value(d, "narrative_arc"),
+            voice_persona=_text_value(d, "voice_persona"),
+            speaking_style=_text_value(d, "speaking_style"),
             source_tags=[SourceTag.from_dict(st) for st in (d.get("source_tags") or [])],
-            approval_status=str(d.get("approval_status") or "approved")
+            approval_status=_text_value(d, "approval_status", "approved"),
         )
 
 

@@ -404,6 +404,106 @@ def _parse_iso(ts: str) -> datetime | None:
         return None
 
 
+def _append_karma_target_errors(obj: Any, edge: Any, errors: list[str]) -> None:
+    target_contract = obj.target_contract
+    if target_contract.name != edge.target_contract:
+        errors.append(
+            "target_contract.name mismatch: "
+            f"expected {edge.target_contract!r}, got {target_contract.name!r}"
+        )
+    if obj.edge_id != "p2a":
+        return
+    from hiob_contracts.ares_create_script_v3 import (
+        ares_p2a_target_projection_v3_schema_digest,
+    )
+
+    if target_contract.version != "v3":
+        errors.append(
+            "target_contract.version mismatch: "
+            f"expected 'v3', got {target_contract.version!r}"
+        )
+    expected_schema_digest = ares_p2a_target_projection_v3_schema_digest()
+    if target_contract.schema_digest != expected_schema_digest:
+        errors.append(
+            "target_contract.schema_digest mismatch: "
+            f"expected {expected_schema_digest!r}, "
+            f"got {target_contract.schema_digest!r}"
+        )
+
+
+def _append_karma_mapper_errors(obj: Any, errors: list[str]) -> None:
+    mapper = obj.mapper
+    planet = getattr(mapper, "planet", None)
+    node_id = getattr(mapper, "node_id", None)
+    if planet != "karma":
+        errors.append(f"mapper.origin planet must be 'karma', got {planet!r}")
+    if node_id != _KARMA_MAPPER_NODE:
+        errors.append(
+            f"mapper.node_id must be {_KARMA_MAPPER_NODE!r}, got {node_id!r}"
+        )
+
+
+def _append_source_digest_errors(
+    obj: Any,
+    expected_source_digests: tuple[str, ...] | None,
+    errors: list[str],
+) -> None:
+    if expected_source_digests is None:
+        return
+    got = tuple(obj.source_output_digests)
+    expected = tuple(expected_source_digests)
+    if got == expected:
+        return
+    missing = [digest for digest in expected if digest not in got]
+    if missing:
+        errors.append(f"source_output_digests missing expected: {missing}")
+    else:
+        errors.append("source_output_digests order/set mismatch vs expected")
+
+
+def _normalized_now(now: datetime | str | None) -> datetime:
+    if now is None:
+        return datetime.now(timezone.utc)
+    if isinstance(now, datetime):
+        return now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+    return _parse_iso(str(now)) or datetime.now(timezone.utc)
+
+
+def _append_freshness_errors(
+    obj: Any,
+    *,
+    max_age_seconds: float | None,
+    now: datetime | str | None,
+    errors: list[str],
+) -> None:
+    if max_age_seconds is None:
+        return
+    created = _parse_iso(obj.created_at)
+    if created is None:
+        errors.append(f"created_at unparseable: {obj.created_at!r}")
+        return
+    age = (_normalized_now(now) - created).total_seconds()
+    if age > float(max_age_seconds):
+        errors.append(
+            f"receipt stale: age={age:.0f}s > max_age_seconds={max_age_seconds}"
+        )
+    if age < -60:
+        errors.append(f"receipt created_at in the future (age={age:.0f}s)")
+
+
+def _append_accepted_target_errors(obj: Any, edge: Any, errors: list[str]) -> None:
+    if obj.decision != "accepted":
+        return
+    if not obj.target_input:
+        errors.append("accepted receipt missing target_input")
+        return
+    if edge is None:
+        return
+    result = validate_payload(edge.target_contract, obj.target_input)
+    if not result.ok:
+        errors.extend(f"target_input: {error}" for error in result.errors)
+
+
 def verify_karma_edge_receipt(
     receipt: Any,
     *,
@@ -449,80 +549,21 @@ def verify_karma_edge_receipt(
     if edge is None:
         errs.append(f"unknown edge_id: {obj.edge_id}")
     else:
-        target_contract = obj.target_contract
-        if target_contract.name != edge.target_contract:
-            errs.append(
-                "target_contract.name mismatch: "
-                f"expected {edge.target_contract!r}, got {target_contract.name!r}"
-            )
-        if obj.edge_id == "p2a":
-            from hiob_contracts.ares_create_script_v3 import (
-                ares_p2a_target_projection_v3_schema_digest,
-            )
-
-            if target_contract.version != "v3":
-                errs.append(
-                    "target_contract.version mismatch: "
-                    f"expected 'v3', got {target_contract.version!r}"
-                )
-            expected_schema_digest = ares_p2a_target_projection_v3_schema_digest()
-            if target_contract.schema_digest != expected_schema_digest:
-                errs.append(
-                    "target_contract.schema_digest mismatch: "
-                    f"expected {expected_schema_digest!r}, "
-                    f"got {target_contract.schema_digest!r}"
-                )
+        _append_karma_target_errors(obj, edge, errs)
     if expected_edge_id is not None and obj.edge_id != expected_edge_id:
         errs.append(
             f"edge_id mismatch: expected {expected_edge_id!r}, got {obj.edge_id!r}"
         )
 
-    mapper = obj.mapper
-    planet = getattr(mapper, "planet", None)
-    node_id = getattr(mapper, "node_id", None)
-    if planet != "karma":
-        errs.append(f"mapper.origin planet must be 'karma', got {planet!r}")
-    if node_id != _KARMA_MAPPER_NODE:
-        errs.append(f"mapper.node_id must be {_KARMA_MAPPER_NODE!r}, got {node_id!r}")
-
-    if expected_source_digests is not None:
-        got = tuple(obj.source_output_digests)
-        expected = tuple(expected_source_digests)
-        if got != expected:
-            # Containment: every expected digest must appear (order-sensitive equality preferred)
-            missing = [d for d in expected if d not in got]
-            if missing:
-                errs.append(f"source_output_digests missing expected: {missing}")
-            elif got != expected:
-                errs.append("source_output_digests order/set mismatch vs expected")
-
-    if max_age_seconds is not None:
-        created = _parse_iso(obj.created_at)
-        if created is None:
-            errs.append(f"created_at unparseable: {obj.created_at!r}")
-        else:
-            if now is None:
-                now_dt = datetime.now(timezone.utc)
-            elif isinstance(now, datetime):
-                now_dt = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
-            else:
-                now_dt = _parse_iso(str(now)) or datetime.now(timezone.utc)
-            age = (now_dt - created).total_seconds()
-            if age > float(max_age_seconds):
-                errs.append(
-                    f"receipt stale: age={age:.0f}s > max_age_seconds={max_age_seconds}"
-                )
-            if age < -60:
-                errs.append(f"receipt created_at in the future (age={age:.0f}s)")
-
-    if obj.decision == "accepted":
-        if not obj.target_input:
-            errs.append("accepted receipt missing target_input")
-        elif edge is not None:
-            # Also run target schema validation when we can
-            tr = validate_payload(edge.target_contract, obj.target_input)
-            if not tr.ok:
-                errs.extend(f"target_input: {e}" for e in tr.errors)
+    _append_karma_mapper_errors(obj, errs)
+    _append_source_digest_errors(obj, expected_source_digests, errs)
+    _append_freshness_errors(
+        obj,
+        max_age_seconds=max_age_seconds,
+        now=now,
+        errors=errs,
+    )
+    _append_accepted_target_errors(obj, edge, errs)
 
     return ValidationResult(not errs, contract, tuple(errs), obj)
 

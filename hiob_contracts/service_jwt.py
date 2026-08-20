@@ -253,29 +253,37 @@ def _service_scopes(value: Any) -> tuple[str, ...]:
     return tuple(str(scope) for scope in (value or []))
 
 
+def _text_claim(data: dict[str, Any], name: str, default: str = "") -> str:
+    return str(data.get(name) or default)
+
+
+def _integer_claim(data: dict[str, Any], name: str) -> int:
+    return int(data.get(name) or 0)
+
+
 def _service_claims(
     data: dict[str, Any],
     *,
     expected_audience: str,
     expected_kid: str,
 ) -> ServiceClaims:
-    payload_kid = str(data.get("kid") or "")
+    payload_kid = _text_claim(data, "kid")
     return ServiceClaims(
-        iss=str(data.get("iss") or ""),
-        sub=str(data.get("sub") or ""),
-        aud=str(data.get("aud") or expected_audience),
+        iss=_text_claim(data, "iss"),
+        sub=_text_claim(data, "sub"),
+        aud=_text_claim(data, "aud", expected_audience),
         scope=_service_scopes(data.get("scope")),
-        workspace_id=str(data.get("workspace_id") or ""),
-        exp=int(data.get("exp") or 0),
-        iat=int(data.get("iat") or 0),
-        jti=str(data.get("jti") or ""),
-        run_id=str(data.get("run_id") or ""),
-        node_id=str(data.get("node_id") or ""),
-        operation_id=str(data.get("operation_id") or ""),
-        idempotency_key=str(data.get("idempotency_key") or ""),
-        request_digest=str(data.get("request_digest") or ""),
-        execution_digest=str(data.get("execution_digest") or ""),
-        dispatch_capability=str(data.get("dispatch_capability") or ""),
+        workspace_id=_text_claim(data, "workspace_id"),
+        exp=_integer_claim(data, "exp"),
+        iat=_integer_claim(data, "iat"),
+        jti=_text_claim(data, "jti"),
+        run_id=_text_claim(data, "run_id"),
+        node_id=_text_claim(data, "node_id"),
+        operation_id=_text_claim(data, "operation_id"),
+        idempotency_key=_text_claim(data, "idempotency_key"),
+        request_digest=_text_claim(data, "request_digest"),
+        execution_digest=_text_claim(data, "execution_digest"),
+        dispatch_capability=_text_claim(data, "dispatch_capability"),
         kid=payload_kid or expected_kid,
     )
 

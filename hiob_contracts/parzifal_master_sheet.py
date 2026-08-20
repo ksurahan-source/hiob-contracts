@@ -56,21 +56,49 @@ class SheetPanel:
         return errs
 
 
+def _panel_from_dict(value: dict) -> SheetPanel:
+    digest = (
+        value.get("content_digest") or value.get("sha256") or value.get("digest")
+    )
+    if digest and not str(digest).startswith("sha256:"):
+        digest = f"sha256:{digest}"
+    return SheetPanel(
+        slot=str(value.get("slot") or "angle"),
+        label=str(value.get("label") or ""),
+        storage_key=value.get("storage_key"),
+        url=value.get("url"),
+        engine=str(value.get("engine") or ""),
+        derived_from=str(value.get("derived_from") or ""),
+        content_digest=str(digest) if digest else None,
+    )
+
+
 def _panels(raw) -> list[SheetPanel]:
     out: list[SheetPanel] = []
-    for p in raw or []:
-        if isinstance(p, SheetPanel):
-            out.append(p)
-        elif isinstance(p, dict):
-            digest = p.get("content_digest") or p.get("sha256") or p.get("digest")
-            if digest and not str(digest).startswith("sha256:"):
-                digest = f"sha256:{digest}"
-            out.append(SheetPanel(
-                slot=str(p.get("slot") or "angle"), label=str(p.get("label") or ""),
-                storage_key=p.get("storage_key"), url=p.get("url"),
-                engine=str(p.get("engine") or ""), derived_from=str(p.get("derived_from") or ""),
-                content_digest=str(digest) if digest else None))
+    for panel in raw or []:
+        if isinstance(panel, SheetPanel):
+            out.append(panel)
+        elif isinstance(panel, dict):
+            out.append(_panel_from_dict(panel))
     return out
+
+
+def _panels_to_dict(raw, *, include_digest: bool) -> list[dict]:
+    rows = []
+    for panel in _panels(raw):
+        row = {
+            "slot": panel.slot,
+            "label": panel.label,
+            "storage_key": panel.storage_key,
+            "url": panel.url,
+            "engine": panel.engine,
+            "derived_from": panel.derived_from,
+        }
+        if include_digest and panel.content_digest:
+            row["content_digest"] = panel.content_digest
+            row["sha256"] = panel.content_digest
+        rows.append(row)
+    return rows
 
 
 @dataclass(frozen=True)
@@ -123,13 +151,10 @@ class CharacterMasterSheet:
         """JSON 직렬화 — TargetSheet.to_dict()가 visual 층으로 호출하는 계약
         (2026-07-11 실사고: 이 메서드 부재로 생산 경로의 4층 SSOT persist가
         AttributeError → fail-soft에 삼켜져 전량 조용히 실패했다)."""
-        def _pl(panels):
-            return [{"slot": p.slot, "label": p.label, "storage_key": p.storage_key,
-                     "url": p.url, "engine": p.engine, "derived_from": p.derived_from}
-                    for p in _panels(panels)]
         out = {"persona_id": self.persona_id, "identity": dict(self.identity or {}),
                "narrow_target": dict(self.narrow_target or {}),
-               "angles": _pl(self.angles), "expressions": _pl(self.expressions),
+               "angles": _panels_to_dict(self.angles, include_digest=False),
+               "expressions": _panels_to_dict(self.expressions, include_digest=False),
                "wardrobe": dict(self.wardrobe or {})}
         if self.role:
             out["role"] = str(self.role)
@@ -168,6 +193,69 @@ class ProductMasterSheet:
     def to_product_lock(self) -> ProductLock:
         hero = self.hero_panel()
         return ProductLock(hero_cut=hero.to_ref("product") if hero else None, sheet=dict(self.sheet or {}))
+
+
+def _character_to_dict(character: CharacterMasterSheet) -> dict:
+    row = {
+        "persona_id": character.persona_id,
+        "identity": character.identity,
+        "narrow_target": character.narrow_target,
+        "angles": _panels_to_dict(character.angles, include_digest=True),
+        "expressions": _panels_to_dict(character.expressions, include_digest=True),
+        "wardrobe": character.wardrobe,
+    }
+    if character.role:
+        row["role"] = str(character.role)
+    if character.kind:
+        row["kind"] = str(character.kind)
+    return row
+
+
+def _characters_to_dict(characters: dict) -> dict:
+    return {
+        persona_id: _character_to_dict(character)
+        for persona_id, character in characters.items()
+        if isinstance(character, CharacterMasterSheet)
+    }
+
+
+def _characters_from_dict(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    characters = {}
+    for persona_id, raw_character in value.items():
+        character = raw_character if isinstance(raw_character, dict) else {}
+        characters[str(persona_id)] = CharacterMasterSheet(
+            persona_id=str(character.get("persona_id") or persona_id),
+            identity=character.get("identity") or {},
+            narrow_target=character.get("narrow_target") or {},
+            angles=_panels(character.get("angles")),
+            expressions=_panels(character.get("expressions")),
+            wardrobe=character.get("wardrobe") or {},
+            role=str(character.get("role") or ""),
+            kind=str(character.get("kind") or ""),
+        )
+    return characters
+
+
+def _product_to_dict(product: ProductMasterSheet | None) -> dict | None:
+    if product is None:
+        return None
+    return {
+        "sku": product.sku,
+        "angles": _panels_to_dict(product.angles, include_digest=True),
+        "sheet": product.sheet,
+    }
+
+
+def _product_from_dict(value: object) -> ProductMasterSheet | None:
+    if not isinstance(value, dict):
+        return None
+    return ProductMasterSheet(
+        sku=str(value.get("sku") or ""),
+        angles=_panels(value.get("angles")),
+        sheet=value.get("sheet") or {},
+    )
 
 
 @dataclass(frozen=True)
@@ -272,39 +360,12 @@ class ParzifalMasterSheet:
         return errs
 
     def to_dict(self) -> dict:
-        def _pl(panels):
-            rows = []
-            for p in _panels(panels):
-                row = {
-                    "slot": p.slot, "label": p.label, "storage_key": p.storage_key,
-                    "url": p.url, "engine": p.engine, "derived_from": p.derived_from,
-                }
-                if p.content_digest:
-                    row["content_digest"] = p.content_digest
-                    row["sha256"] = p.content_digest
-                rows.append(row)
-            return rows
-        chars_out: dict = {}
-        for pid, c in self.characters.items():
-            if not isinstance(c, CharacterMasterSheet):
-                continue
-            row = {
-                "persona_id": c.persona_id, "identity": c.identity,
-                "narrow_target": c.narrow_target, "angles": _pl(c.angles),
-                "expressions": _pl(c.expressions), "wardrobe": c.wardrobe,
-            }
-            if c.role:
-                row["role"] = str(c.role)
-            if c.kind:
-                row["kind"] = str(c.kind)
-            chars_out[pid] = row
         out = {
             "listing_slug": self.listing_slug, "master_id": self.master_id,
             "version": self.version, "status": self.status, "authored_by": self.authored_by,
             "engine": self.engine,
-            "characters": chars_out,
-            "product": ({"sku": self.product.sku, "angles": _pl(self.product.angles),
-                         "sheet": self.product.sheet} if self.product is not None else None),
+            "characters": _characters_to_dict(self.characters),
+            "product": _product_to_dict(self.product),
             "background": _bg_to_dict(self.background),
             "version_history": list(self.version_history or []),
         }
@@ -317,24 +378,13 @@ class ParzifalMasterSheet:
     @classmethod
     def from_dict(cls, d: Optional[dict]) -> "ParzifalMasterSheet":
         d = d or {}
-        chars = {}
-        for pid, c in (d.get("characters") or {}).items():
-            c = c or {}
-            chars[str(pid)] = CharacterMasterSheet(
-                persona_id=str(c.get("persona_id") or pid), identity=c.get("identity") or {},
-                narrow_target=c.get("narrow_target") or {}, angles=_panels(c.get("angles")),
-                expressions=_panels(c.get("expressions")), wardrobe=c.get("wardrobe") or {},
-                role=str(c.get("role") or ""), kind=str(c.get("kind") or ""))
-        prod = None
-        if isinstance(d.get("product"), dict):
-            pr = d["product"]
-            prod = ProductMasterSheet(sku=str(pr.get("sku") or ""), angles=_panels(pr.get("angles")),
-                                      sheet=pr.get("sheet") or {})
         return cls(
             listing_slug=str(d.get("listing_slug") or ""), master_id=str(d.get("master_id") or ""),
             version=int(d.get("version") or 0), status=str(d.get("status") or "draft"),
             authored_by=str(d.get("authored_by") or ""), engine=str(d.get("engine") or ""),
-            characters=chars, product=prod, background=_bg_from_dict(d.get("background")),
+            characters=_characters_from_dict(d.get("characters")),
+            product=_product_from_dict(d.get("product")),
+            background=_bg_from_dict(d.get("background")),
             version_history=list(d.get("version_history") or []),
             workspace_id=str(d.get("workspace_id") or ""),
             run_id=str(d.get("run_id") or ""))

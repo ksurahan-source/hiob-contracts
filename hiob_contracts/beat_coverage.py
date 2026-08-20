@@ -174,14 +174,15 @@ class BeatLaneTerminalReceiptV1:
             ) from exc
         return candidate.assert_valid()
 
-    def validate(self) -> list[str]:
-        errors: list[str] = []
+    def _validate_identity(self, errors: list[str]) -> None:
         for name in ("run_id", "workspace_id", "lane"):
             value = getattr(self, name)
             if not isinstance(value, str):
                 errors.append(f"{name} must be a string")
             elif not _nonblank(value):
                 errors.append(f"{name} is required")
+
+    def _validate_contract_and_index(self, errors: list[str]) -> None:
         if (
             not isinstance(self.contract_version, str)
             or self.contract_version
@@ -192,6 +193,8 @@ class BeatLaneTerminalReceiptV1:
             errors.append("beat_index must be an integer")
         elif self.beat_index < 0:
             errors.append("beat_index must be non-negative")
+
+    def _validate_payload_digests(self, errors: list[str]) -> None:
         for name in ("package_digest", "plan_digest"):
             value = getattr(self, name)
             if not isinstance(value, str) or not is_digest(value):
@@ -200,10 +203,14 @@ class BeatLaneTerminalReceiptV1:
             not isinstance(self.output_digest, str) or not is_digest(self.output_digest)
         ):
             errors.append("output_digest must be a sha256 digest when present")
+
+    def _validate_terminal_status(self, errors: list[str]) -> None:
         if not isinstance(self.status, str) or self.status not in TERMINAL_BEAT_LANE_STATUSES_V1:
             errors.append(f"status is not terminal: {self.status!r}")
         elif self.status != "succeeded":
             errors.append("lane receipt status must be succeeded")
+
+    def _validate_receipt_digest(self, errors: list[str]) -> None:
         if not isinstance(self.receipt_digest, str) or not is_digest(self.receipt_digest):
             errors.append("receipt_digest must be a sha256 digest")
         else:
@@ -214,6 +221,14 @@ class BeatLaneTerminalReceiptV1:
             else:
                 if self.receipt_digest != expected_digest:
                     errors.append("receipt_digest does not match lane receipt payload")
+
+    def validate(self) -> list[str]:
+        errors: list[str] = []
+        self._validate_identity(errors)
+        self._validate_contract_and_index(errors)
+        self._validate_payload_digests(errors)
+        self._validate_terminal_status(errors)
+        self._validate_receipt_digest(errors)
         return errors
 
     def assert_valid(self) -> "BeatLaneTerminalReceiptV1":
@@ -384,8 +399,7 @@ class BeatCoverageV1:
             raise ValueError("BeatCoverageV1.create input cannot be canonically serialized") from exc
         return candidate.assert_valid()
 
-    def validate(self) -> list[str]:
-        errors: list[str] = []
+    def _validate_scope(self, errors: list[str]) -> None:
         for name in ("run_id", "workspace_id"):
             value = getattr(self, name)
             if not isinstance(value, str):
@@ -401,6 +415,8 @@ class BeatCoverageV1:
             value = getattr(self, name)
             if not isinstance(value, str) or not is_digest(value):
                 errors.append(f"{name} must be a sha256 digest")
+
+    def _valid_expected_count(self, errors: list[str]) -> int:
         if (
             isinstance(self.expected_n_beats, bool)
             or not isinstance(self.expected_n_beats, int)
@@ -411,13 +427,19 @@ class BeatCoverageV1:
                 "expected_n_beats must be an integer between 1 and "
                 f"{MAX_BEAT_COVERAGE_BEATS_V1}"
             )
-        valid_n = (
+        return (
             self.expected_n_beats
             if isinstance(self.expected_n_beats, int)
             and not isinstance(self.expected_n_beats, bool)
             and 0 < self.expected_n_beats <= MAX_BEAT_COVERAGE_BEATS_V1
             else 0
         )
+
+    def _validate_expected_indices(
+        self,
+        errors: list[str],
+        valid_n: int,
+    ) -> list[int]:
         expected = list(range(valid_n))
         if not _is_array(self.expected_beat_indices):
             errors.append("expected_beat_indices must be an array")
@@ -435,7 +457,9 @@ class BeatCoverageV1:
                 "expected_beat_indices must be exactly 0..N-1 without duplicates, "
                 "holes, or out-of-range values"
             )
+        return expected
 
+    def _validate_required_lanes(self, errors: list[str]) -> tuple[Any, ...]:
         if not _is_array(self.required_lanes):
             errors.append("required_lanes must be an array")
             required: tuple[Any, ...] = ()
@@ -450,41 +474,79 @@ class BeatCoverageV1:
         for required_lane in DEFAULT_BEAT_COVERAGE_LANES_V1:
             if required_lane not in required:
                 errors.append(f"required_lanes must include {required_lane}")
+        return required
 
-        seen: set[tuple[int, str]] = set()
+    def _append_receipt_scope_errors(
+        self,
+        errors: list[str],
+        receipt: BeatLaneTerminalReceiptV1,
+    ) -> None:
+        bindings = (
+            (receipt.run_id, self.run_id, "run_id"),
+            (receipt.workspace_id, self.workspace_id, "workspace_id"),
+            (receipt.package_digest, self.package_digest, "package_digest"),
+            (receipt.plan_digest, self.plan_digest, "plan_digest"),
+        )
+        for observed, expected, name in bindings:
+            if observed != expected:
+                errors.append(f"lane receipt {name} does not match coverage")
+
+    def _append_receipt_key(
+        self,
+        errors: list[str],
+        receipt: BeatLaneTerminalReceiptV1,
+        *,
+        valid_n: int,
+        seen: set[tuple[int, str]],
+    ) -> None:
+        has_key = (
+            isinstance(receipt.beat_index, int)
+            and not isinstance(receipt.beat_index, bool)
+            and isinstance(receipt.lane, str)
+        )
+        if not has_key:
+            return
+        key = (receipt.beat_index, receipt.lane)
+        if key in seen:
+            errors.append(f"duplicate lane receipt for beat {key[0]} lane {key[1]!r}")
+        seen.add(key)
+        if receipt.beat_index < 0 or receipt.beat_index >= valid_n:
+            errors.append(f"lane receipt beat_index {receipt.beat_index} out of range")
+
+    def _validate_lane_receipts(
+        self,
+        errors: list[str],
+        valid_n: int,
+    ) -> tuple[set[tuple[int, str]], tuple[Any, ...]]:
         if not _is_array(self.lane_receipts):
             errors.append("lane_receipts must be an array")
             lane_receipts: tuple[Any, ...] = ()
         else:
             lane_receipts = tuple(self.lane_receipts)
+        seen: set[tuple[int, str]] = set()
         for receipt in lane_receipts:
             if not isinstance(receipt, BeatLaneTerminalReceiptV1):
                 errors.append("lane_receipts must contain BeatLaneTerminalReceiptV1")
                 continue
             errors.extend(f"lane receipt: {error}" for error in receipt.validate())
-            has_key = isinstance(receipt.beat_index, int) and not isinstance(
-                receipt.beat_index, bool
-            ) and isinstance(receipt.lane, str)
-            if has_key:
-                key = (receipt.beat_index, receipt.lane)
-                if key in seen:
-                    errors.append(
-                        f"duplicate lane receipt for beat {key[0]} lane {key[1]!r}"
-                    )
-                seen.add(key)
-            if receipt.run_id != self.run_id:
-                errors.append("lane receipt run_id does not match coverage")
-            if receipt.workspace_id != self.workspace_id:
-                errors.append("lane receipt workspace_id does not match coverage")
-            if receipt.package_digest != self.package_digest:
-                errors.append("lane receipt package_digest does not match coverage")
-            if receipt.plan_digest != self.plan_digest:
-                errors.append("lane receipt plan_digest does not match coverage")
-            if not has_key:
-                continue
-            if receipt.beat_index < 0 or receipt.beat_index >= valid_n:
-                errors.append(f"lane receipt beat_index {receipt.beat_index} out of range")
+            self._append_receipt_scope_errors(errors, receipt)
+            self._append_receipt_key(
+                errors,
+                receipt,
+                valid_n=valid_n,
+                seen=seen,
+            )
+        return seen, lane_receipts
 
+    @staticmethod
+    def _validate_complete_pairs(
+        errors: list[str],
+        *,
+        expected: list[int],
+        required: tuple[Any, ...],
+        seen: set[tuple[int, str]],
+        receipt_count: int,
+    ) -> None:
         expected_pairs = (
             {
                 (beat_index, lane)
@@ -497,11 +559,12 @@ class BeatCoverageV1:
         missing = sorted(expected_pairs - seen)
         if missing:
             errors.append(f"missing lane receipts: {missing}")
-        if len(seen) != len(lane_receipts):
+        if len(seen) != receipt_count:
             # Keep the duplicate diagnostic above, but ensure malformed entries
             # cannot make the terminal receipt appear complete.
             errors.append("lane receipt coverage contains duplicate keys")
 
+    def _validate_coverage_digest(self, errors: list[str]) -> None:
         if not isinstance(self.coverage_digest, str) or not is_digest(self.coverage_digest):
             errors.append("coverage_digest must be a sha256 digest")
         else:
@@ -512,6 +575,22 @@ class BeatCoverageV1:
             else:
                 if self.coverage_digest != expected_digest:
                     errors.append("coverage_digest does not match coverage payload")
+
+    def validate(self) -> list[str]:
+        errors: list[str] = []
+        self._validate_scope(errors)
+        valid_n = self._valid_expected_count(errors)
+        expected = self._validate_expected_indices(errors, valid_n)
+        required = self._validate_required_lanes(errors)
+        seen, lane_receipts = self._validate_lane_receipts(errors, valid_n)
+        self._validate_complete_pairs(
+            errors,
+            expected=expected,
+            required=required,
+            seen=seen,
+            receipt_count=len(lane_receipts),
+        )
+        self._validate_coverage_digest(errors)
         return errors
 
     def assert_valid(self) -> "BeatCoverageV1":

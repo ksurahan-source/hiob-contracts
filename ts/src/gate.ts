@@ -17,6 +17,42 @@ export interface RenderReadiness {
   warnings: string[];
 }
 
+function appendAudioContractViolations(
+  audioList: AudioClip[],
+  violations: string[],
+): void {
+  for (const clip of audioList) {
+    if (
+      (clip.track === 'voice' || clip.track === 'sfx')
+      && (clip.beat_index === undefined || clip.beat_index === null)
+    ) {
+      violations.push(
+        `P1 위반: audio ${clip.track} beat_index=null (orphan 클립, 침묵 위험)`,
+      );
+    }
+  }
+}
+
+function appendMediaContractViolations(
+  mediaList: MediaArtifact[],
+  violations: string[],
+): void {
+  for (const mediaItem of mediaList) {
+    if (mediaItem.beat_index === undefined || mediaItem.beat_index === null) {
+      violations.push('media beat_index=null (orphan 클립)');
+    }
+  }
+}
+
+function missingBeatIndices(
+  expected: Set<number>,
+  observed: Set<number>,
+): number[] {
+  return Array.from(expected)
+    .filter((beatIndex) => !observed.has(beatIndex))
+    .sort((left, right) => left - right);
+}
+
 /**
  * assert_render_ready — 전 비트가 보이스(P1)·자막(P13)·비주얼을 갖췄는지 증명
  *
@@ -49,23 +85,8 @@ export function assertRenderReady(
     };
   }
 
-  // 개별 계약 자체 위반 먼저 (P1 결박)
-  for (const clip of audioList) {
-    if (clip.track === 'voice' || clip.track === 'sfx') {
-      if (clip.beat_index === undefined || clip.beat_index === null) {
-        violations.push(
-          `P1 위반: audio ${clip.track} beat_index=null (orphan 클립, 침묵 위험)`
-        );
-      }
-    }
-  }
-
-  // MediaArtifact beat_index 커버리지
-  for (const mediaItem of mediaList) {
-    if (mediaItem.beat_index === undefined || mediaItem.beat_index === null) {
-      violations.push(`media beat_index=null (orphan 클립)`);
-    }
-  }
+  appendAudioContractViolations(audioList, violations);
+  appendMediaContractViolations(mediaList, violations);
 
   // 보이스 커버리지 (P1 — 보이스 미발화)
   const voiceBeatIndices = new Set(
@@ -75,9 +96,7 @@ export function assertRenderReady(
   );
 
   if (requireVoicePerBeat) {
-    const missingVoice = Array.from(beatIndices)
-      .filter(b => !voiceBeatIndices.has(b))
-      .sort((a, b) => a - b);
+    const missingVoice = missingBeatIndices(beatIndices, voiceBeatIndices);
     if (missingVoice.length > 0) {
       violations.push(`P1 보이스 없는 비트 ${JSON.stringify(missingVoice)} (음소거 위험)`);
     }
@@ -90,9 +109,7 @@ export function assertRenderReady(
       .map(m => m.beat_index as number)
   );
 
-  const missingMedia = Array.from(beatIndices)
-    .filter(b => !mediaBeatIndicesSet.has(b))
-    .sort((a, b) => a - b);
+  const missingMedia = missingBeatIndices(beatIndices, mediaBeatIndicesSet);
   if (missingMedia.length > 0) {
     violations.push(`비주얼 없는 비트 ${JSON.stringify(missingMedia)}`);
   }
@@ -105,9 +122,7 @@ export function assertRenderReady(
   );
 
   if (requireCaptionPerBeat) {
-    const missingCaption = Array.from(beatIndices)
-      .filter(b => !captionBeatIndices.has(b))
-      .sort((a, b) => a - b);
+    const missingCaption = missingBeatIndices(beatIndices, captionBeatIndices);
     if (missingCaption.length > 0) {
       warnings.push(`P13 자막 없는 비트 ${JSON.stringify(missingCaption)} (dead air 위험)`);
     }
