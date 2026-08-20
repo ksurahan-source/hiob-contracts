@@ -340,17 +340,20 @@ class StarReelsViewV1(BaseModel):
         if self.stage_output is None or self.review_digest is None:
             raise ValueError("review state requires stage_output and review_digest")
         if product_review:
-            if not isinstance(self.stage_output, ProductElementLockDraftV1):
-                raise ValueError("product review requires typed product draft")
-            if self.review_digest != derive_star_product_lock_review_digest_v1(
-                self.stage_output
-            ):
-                raise ValueError("product review digest does not bind the draft")
-            if self.provider_call != "none" or self.error is not None:
-                raise ValueError("product review cannot carry provider work or error")
+            self._assert_product_review_shape()
             return
         if self.provider_call != "confirmed" or self.error is not None:
             raise ValueError("review state requires one confirmed script call")
+
+    def _assert_product_review_shape(self) -> None:
+        if not isinstance(self.stage_output, ProductElementLockDraftV1):
+            raise ValueError("product review requires typed product draft")
+        if self.review_digest != derive_star_product_lock_review_digest_v1(
+            self.stage_output
+        ):
+            raise ValueError("product review digest does not bind the draft")
+        if self.provider_call != "none" or self.error is not None:
+            raise ValueError("product review cannot carry provider work or error")
 
     def _assert_error_and_factory_shape(self, *, lock_gate: bool) -> None:
         factory = self.receipts.factory

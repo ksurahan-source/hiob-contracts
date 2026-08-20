@@ -3749,28 +3749,44 @@ class FactoryPaidOperationHistoricalEvidenceV2(BaseModel):
         authority: FactoryPaidBudgetAuthorityV2,
     ) -> None:
         if self.operation == "image":
-            if (
-                authority.purpose not in {"storyboard_draft", "storyboard_regen"}
-                or self.source_index is None
-                or self.source_index not in authority.image_source_beat_indices
-            ):
-                raise ValueError("historical image evidence is outside paid scope")
-        elif self.operation == "video":
-            if (
-                authority.purpose != "final_production"
-                or authority.storyboard_scene_count is None
-                or self.source_index is None
-                or self.source_index >= authority.storyboard_scene_count
-            ):
-                raise ValueError("historical video evidence is outside paid scope")
-        elif self.operation == "voice":
+            self._bind_historical_image_scope(authority)
+            return
+        if self.operation == "video":
+            self._bind_historical_video_scope(authority)
+            return
+        if self.operation == "voice":
             if authority.purpose != "final_production" or self.source_index is None:
                 raise ValueError("historical voice evidence is outside paid scope")
-        elif self.operation == "script":
+            return
+        if self.operation == "script":
             if authority.purpose != "storyboard_draft" or self.source_index is not None:
                 raise ValueError("historical script evidence is outside paid scope")
-        elif authority.purpose != "final_production" or self.source_index is not None:
+            return
+        if authority.purpose != "final_production" or self.source_index is not None:
             raise ValueError("historical render evidence is outside paid scope")
+
+    def _bind_historical_image_scope(
+        self,
+        authority: FactoryPaidBudgetAuthorityV2,
+    ) -> None:
+        if (
+            authority.purpose not in {"storyboard_draft", "storyboard_regen"}
+            or self.source_index is None
+            or self.source_index not in authority.image_source_beat_indices
+        ):
+            raise ValueError("historical image evidence is outside paid scope")
+
+    def _bind_historical_video_scope(
+        self,
+        authority: FactoryPaidBudgetAuthorityV2,
+    ) -> None:
+        if (
+            authority.purpose != "final_production"
+            or authority.storyboard_scene_count is None
+            or self.source_index is None
+            or self.source_index >= authority.storyboard_scene_count
+        ):
+            raise ValueError("historical video evidence is outside paid scope")
 
     def _bind_historical_timeline(
         self,
