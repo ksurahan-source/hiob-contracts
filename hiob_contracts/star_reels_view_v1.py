@@ -304,8 +304,7 @@ class StarReelsViewV1(BaseModel):
             return ProductElementLockDraftV1.model_validate(value)
         return value
 
-    @model_validator(mode="after")
-    def _bind_view_shape_to_state(self) -> "StarReelsViewV1":
+    def _assert_section_status_pair(self) -> None:
         valid_pair = (
             (
                 self.section == "LockGate"
@@ -333,6 +332,94 @@ class StarReelsViewV1(BaseModel):
         if not valid_pair:
             raise ValueError("section does not match durable status")
 
+    def _assert_review_shape(self, *, reviewing: bool, product_review: bool) -> None:
+        if not reviewing and not product_review:
+            if self.stage_output is not None or self.review_digest is not None:
+                raise ValueError("non-review state cannot carry review-only fields")
+            return
+        if self.stage_output is None or self.review_digest is None:
+            raise ValueError("review state requires stage_output and review_digest")
+        if product_review:
+            if not isinstance(self.stage_output, ProductElementLockDraftV1):
+                raise ValueError("product review requires typed product draft")
+            if self.review_digest != derive_star_product_lock_review_digest_v1(
+                self.stage_output
+            ):
+                raise ValueError("product review digest does not bind the draft")
+            if self.provider_call != "none" or self.error is not None:
+                raise ValueError("product review cannot carry provider work or error")
+            return
+        if self.provider_call != "confirmed" or self.error is not None:
+            raise ValueError("review state requires one confirmed script call")
+
+    def _assert_error_and_factory_shape(self, *, lock_gate: bool) -> None:
+        factory = self.receipts.factory
+        if lock_gate:
+            if self.provider_call != "none" or factory is not None:
+                raise ValueError("LockGate cannot carry provider work")
+            lock_has_no_error = self.status in {
+                "ready",
+                "awaiting_product_approval",
+            }
+            if lock_has_no_error != (self.error is None):
+                raise ValueError("LockGate error does not match lock state")
+            return
+        if self.status == "failed":
+            if self.error is None or not isinstance(
+                factory,
+                (ReelsFactoryFailureReceiptV1, ReelsFactoryFailureReceiptV2),
+            ):
+                raise ValueError("failed state requires error and failure receipt")
+        elif self.error is not None:
+            raise ValueError("non-failed state cannot carry an error")
+
+    def _assert_run_receipt_shape(
+        self,
+        *,
+        reviewing: bool,
+        product_review: bool,
+    ) -> None:
+        factory = self.receipts.factory
+        if self.status in {"pending", "rendering"} and not isinstance(
+            factory,
+            (ReelsFactoryProgressReceiptV1, ReelsFactoryProgressReceiptV2),
+        ):
+            raise ValueError("active state requires progress receipt")
+        if (
+            self.section == "RunStatus"
+            and self.status == "ready"
+            and not isinstance(
+                factory,
+                (_ReelsFactoryReadyReceiptV1, ReelsFactoryReceiptV2),
+            )
+        ):
+            raise ValueError("ready state requires final factory receipt")
+        if (reviewing or product_review) and factory is not None:
+            raise ValueError("review state cannot carry factory receipt")
+
+    @staticmethod
+    def _factory_provider_call(factory: Any) -> str | None:
+        if isinstance(
+            factory,
+            (ReelsFactoryFailureReceiptV1, ReelsFactoryFailureReceiptV2),
+        ):
+            return factory.provider_call
+        if isinstance(
+            factory,
+            (ReelsFactoryProgressReceiptV1, ReelsFactoryProgressReceiptV2),
+        ):
+            return (
+                "confirmed"
+                if sum(factory.provider_attempts.model_dump().values()) > 0
+                else "none"
+            )
+        if isinstance(factory, (_ReelsFactoryReadyReceiptV1, ReelsFactoryReceiptV2)):
+            return "confirmed"
+        return None
+
+    @model_validator(mode="after")
+    def _bind_view_shape_to_state(self) -> "StarReelsViewV1":
+        self._assert_section_status_pair()
         reviewing = self.section in {
             "ScriptReview",
             "PlanReview",
@@ -341,84 +428,16 @@ class StarReelsViewV1(BaseModel):
             self.section == "LockGate" and self.status == "awaiting_product_approval"
         )
         lock_gate = self.section == "LockGate"
-        if reviewing or product_review:
-            if self.stage_output is None or self.review_digest is None:
-                raise ValueError("review state requires stage_output and review_digest")
-            if product_review:
-                if not isinstance(
-                    self.stage_output,
-                    ProductElementLockDraftV1,
-                ):
-                    raise ValueError("product review requires typed product draft")
-                if self.review_digest != (
-                    derive_star_product_lock_review_digest_v1(self.stage_output)
-                ):
-                    raise ValueError("product review digest does not bind the draft")
-                if self.provider_call != "none" or self.error is not None:
-                    raise ValueError(
-                        "product review cannot carry provider work or error"
-                    )
-            elif self.provider_call != "confirmed" or self.error is not None:
-                raise ValueError("review state requires one confirmed script call")
-        elif self.stage_output is not None or self.review_digest is not None:
-            raise ValueError("non-review state cannot carry review-only fields")
-
-        if lock_gate:
-            if self.provider_call != "none" or self.receipts.factory is not None:
-                raise ValueError("LockGate cannot carry provider work")
-            lock_has_no_error = self.status in {
-                "ready",
-                "awaiting_product_approval",
-            }
-            if lock_has_no_error != (self.error is None):
-                raise ValueError("LockGate error does not match lock state")
-        elif self.status == "failed":
-            if self.error is None or not isinstance(
-                self.receipts.factory,
-                (ReelsFactoryFailureReceiptV1, ReelsFactoryFailureReceiptV2),
-            ):
-                raise ValueError("failed state requires error and failure receipt")
-        elif self.error is not None:
-            raise ValueError("non-failed state cannot carry an error")
-
-        if self.status in {"pending", "rendering"} and not isinstance(
-            self.receipts.factory,
-            (ReelsFactoryProgressReceiptV1, ReelsFactoryProgressReceiptV2),
-        ):
-            raise ValueError("active state requires progress receipt")
-        if (
-            self.section == "RunStatus"
-            and self.status == "ready"
-            and not isinstance(
-                self.receipts.factory,
-                (_ReelsFactoryReadyReceiptV1, ReelsFactoryReceiptV2),
-            )
-        ):
-            raise ValueError("ready state requires final factory receipt")
-        if (reviewing or product_review) and self.receipts.factory is not None:
-            raise ValueError("review state cannot carry factory receipt")
-        factory = self.receipts.factory
-        if isinstance(
-            factory,
-            (ReelsFactoryFailureReceiptV1, ReelsFactoryFailureReceiptV2),
-        ):
-            expected_provider_call = factory.provider_call
-        elif isinstance(
-            factory,
-            (ReelsFactoryProgressReceiptV1, ReelsFactoryProgressReceiptV2),
-        ):
-            expected_provider_call = (
-                "confirmed"
-                if sum(factory.provider_attempts.model_dump().values()) > 0
-                else "none"
-            )
-        elif isinstance(
-            factory,
-            (_ReelsFactoryReadyReceiptV1, ReelsFactoryReceiptV2),
-        ):
-            expected_provider_call = "confirmed"
-        else:
-            expected_provider_call = None
+        self._assert_review_shape(
+            reviewing=reviewing,
+            product_review=product_review,
+        )
+        self._assert_error_and_factory_shape(lock_gate=lock_gate)
+        self._assert_run_receipt_shape(
+            reviewing=reviewing,
+            product_review=product_review,
+        )
+        expected_provider_call = self._factory_provider_call(self.receipts.factory)
         if (
             expected_provider_call is not None
             and self.provider_call != expected_provider_call
@@ -539,12 +558,9 @@ class StoryboardPhaseACompletionReceiptV1(BaseModel):
     def _tuple_fields(cls, value: Any) -> Any:
         return tuple(value) if isinstance(value, list) else value
 
-    @model_validator(mode="after")
-    def _bind_completion(self) -> "StoryboardPhaseACompletionReceiptV1":
+    def _assert_completion_authority_scope(self) -> None:
         approval = self.paid_budget_approval_receipt
         authority = self.paid_budget_authority
-        image_set = self.output_image_set_receipt
-        draft = self.output_storyboard_draft
         script_revision = self.ares_script_revision
         plan_revision = self.ares_beat_plan_revision
         if (
@@ -566,6 +582,36 @@ class StoryboardPhaseACompletionReceiptV1(BaseModel):
             or len(plan_revision.beat_plan.beats) != 16
         ):
             raise ValueError("Phase-A paid authority does not bind completion scope")
+
+    def _assert_regen_cards_unchanged(
+        self,
+        previous: StoryboardDraftV1,
+        current: StoryboardDraftV1,
+    ) -> None:
+        previous_by_source = {
+            card.source_beat_index: card for card in previous.cards
+        }
+        current_by_source = {card.source_beat_index: card for card in current.cards}
+        paid_sources = set(self.paid_source_beat_indices)
+        for source in range(16):
+            before = previous_by_source[source]
+            after = current_by_source[source]
+            before_data = before.model_dump(mode="json")
+            after_data = after.model_dump(mode="json")
+            before_data.pop("card_digest")
+            after_data.pop("card_digest")
+            if source in paid_sources:
+                before_data.pop("selected_artifact")
+                after_data.pop("selected_artifact")
+            if before_data != after_data or (
+                source not in paid_sources
+                and before.selected_artifact != after.selected_artifact
+            ):
+                raise ValueError("regen changed an unpaid storyboard card")
+
+    def _assert_purpose_lineage(self) -> None:
+        authority = self.paid_budget_authority
+        draft = self.output_storyboard_draft
         if self.purpose == "storyboard_draft":
             if (
                 authority.plan_digest is not None
@@ -576,42 +622,29 @@ class StoryboardPhaseACompletionReceiptV1(BaseModel):
                 or draft.parent_draft_digest is not None
             ):
                 raise ValueError("storyboard_draft completion requires initial output")
-        else:
-            previous = self.input_storyboard_draft
-            previous_image_set = self.input_image_set_receipt
-            if (
-                previous is None
-                or previous_image_set is None
-                or not previous.binds_image_set(previous_image_set)
-                or authority.plan_digest != self.plan_digest
-                or authority.storyboard_draft_digest != previous.draft_digest
-                or not draft.is_valid_successor_of(
-                    previous,
-                    replacement_image_set=image_set,
-                )
-            ):
-                raise ValueError("storyboard_regen input does not bind valid successor")
-            previous_by_source = {
-                card.source_beat_index: card for card in previous.cards
-            }
-            current_by_source = {card.source_beat_index: card for card in draft.cards}
-            paid_sources = set(self.paid_source_beat_indices)
-            for source in range(16):
-                before = previous_by_source[source]
-                after = current_by_source[source]
-                before_data = before.model_dump(mode="json")
-                after_data = after.model_dump(mode="json")
-                for mutable_digest_field in ("card_digest",):
-                    before_data.pop(mutable_digest_field)
-                    after_data.pop(mutable_digest_field)
-                if source in paid_sources:
-                    before_data.pop("selected_artifact")
-                    after_data.pop("selected_artifact")
-                if before_data != after_data or (
-                    source not in paid_sources
-                    and before.selected_artifact != after.selected_artifact
-                ):
-                    raise ValueError("regen changed an unpaid storyboard card")
+            return
+        previous = self.input_storyboard_draft
+        previous_image_set = self.input_image_set_receipt
+        if (
+            previous is None
+            or previous_image_set is None
+            or not previous.binds_image_set(previous_image_set)
+            or authority.plan_digest != self.plan_digest
+            or authority.storyboard_draft_digest != previous.draft_digest
+            or not draft.is_valid_successor_of(
+                previous,
+                replacement_image_set=self.output_image_set_receipt,
+            )
+        ):
+            raise ValueError("storyboard_regen input does not bind valid successor")
+        self._assert_regen_cards_unchanged(previous, draft)
+
+    def _assert_output_evidence(self) -> None:
+        authority = self.paid_budget_authority
+        image_set = self.output_image_set_receipt
+        draft = self.output_storyboard_draft
+        script_revision = self.ares_script_revision
+        plan_revision = self.ares_beat_plan_revision
         if (
             image_set.workspace_id != self.workspace_id
             or image_set.run_id != self.run_id
@@ -629,9 +662,9 @@ class StoryboardPhaseACompletionReceiptV1(BaseModel):
             for request in requests
         ):
             raise ValueError("Phase-A image request revision evidence drifted")
-        card_by_source = {card.source_beat_index: card for card in draft.cards}
+        cards = {card.source_beat_index: card for card in draft.cards}
         for source_index, beat in enumerate(plan_revision.beat_plan.beats):
-            card = card_by_source[source_index]
+            card = cards[source_index]
             if (
                 card.voice_text != beat.text
                 or card.caption_text != beat.caption
@@ -641,6 +674,12 @@ class StoryboardPhaseACompletionReceiptV1(BaseModel):
                 != script_revision.script_package.caption_script[source_index].text
             ):
                 raise ValueError("storyboard card text does not match Ares revisions")
+
+    def _assert_paid_receipts_and_carrier(self) -> None:
+        authority = self.paid_budget_authority
+        image_set = self.output_image_set_receipt
+        draft = self.output_storyboard_draft
+        requests = [receipt.request for receipt in image_set.provider_receipts]
         paid_receipts = [
             image_set.provider_receipts[index]
             for index in self.paid_source_beat_indices
@@ -670,45 +709,60 @@ class StoryboardPhaseACompletionReceiptV1(BaseModel):
             for request in requests
         ):
             raise ValueError("initial completion contains an alien image authority")
-        if self.purpose == "storyboard_regen":
-            previous = self.input_storyboard_draft
-            previous_image_set = self.input_image_set_receipt
-            assert previous is not None
-            assert previous_image_set is not None
-            if image_set.previous_image_set_receipt_digest != (
-                previous_image_set.receipt_digest
+
+    def _assert_regen_image_preservation(self) -> None:
+        if self.purpose != "storyboard_regen":
+            return
+        previous = self.input_storyboard_draft
+        previous_image_set = self.input_image_set_receipt
+        if previous is None or previous_image_set is None:
+            raise ValueError("storyboard_regen input does not bind valid successor")
+        image_set = self.output_image_set_receipt
+        if image_set.previous_image_set_receipt_digest != previous_image_set.receipt_digest:
+            raise ValueError("regen image set does not bind prior sealed image set")
+        images_by_source = {
+            image.source_beat_index: image for image in image_set.images
+        }
+        previous_by_source = {
+            card.source_beat_index: card for card in previous.cards
+        }
+        prior_receipts = {
+            receipt.request.source_beat_index: receipt
+            for receipt in previous_image_set.provider_receipts
+        }
+        output_receipts = {
+            receipt.request.source_beat_index: receipt
+            for receipt in image_set.provider_receipts
+        }
+        for source in set(range(16)) - set(self.paid_source_beat_indices):
+            image = images_by_source[source]
+            if (
+                previous_by_source[source].selected_artifact.artifact_id
+                != image.artifact_id
+                or previous_by_source[source].selected_artifact.artifact_digest
+                != image.artifact_digest
+                or output_receipts[source] != prior_receipts[source]
             ):
-                raise ValueError("regen image set does not bind prior sealed image set")
-            images_by_source = {
-                image.source_beat_index: image for image in image_set.images
-            }
-            previous_by_source = {
-                card.source_beat_index: card for card in previous.cards
-            }
-            prior_receipts = {
-                receipt.request.source_beat_index: receipt
-                for receipt in previous_image_set.provider_receipts
-            }
-            output_receipts = {
-                receipt.request.source_beat_index: receipt
-                for receipt in image_set.provider_receipts
-            }
-            for source in set(range(16)) - set(self.paid_source_beat_indices):
-                image = images_by_source[source]
-                if (
-                    previous_by_source[source].selected_artifact.artifact_id
-                    != image.artifact_id
-                    or previous_by_source[source].selected_artifact.artifact_digest
-                    != image.artifact_digest
-                    or output_receipts[source] != prior_receipts[source]
-                ):
-                    raise ValueError("regen replaced an unpaid image artifact")
-        if _parse_utc(self.completed_at_utc) < _parse_utc(image_set.completed_at_utc):
+                raise ValueError("regen replaced an unpaid image artifact")
+
+    def _assert_completion_terminal(self) -> None:
+        if _parse_utc(self.completed_at_utc) < _parse_utc(
+            self.output_image_set_receipt.completed_at_utc
+        ):
             raise ValueError("completed_at_utc precedes output image set completion")
-        if self.receipt_digest != (
-            derive_storyboard_phase_a_completion_receipt_digest_v1(self)
+        if self.receipt_digest != derive_storyboard_phase_a_completion_receipt_digest_v1(
+            self
         ):
             raise ValueError("receipt_digest does not match Phase-A completion")
+
+    @model_validator(mode="after")
+    def _bind_completion(self) -> "StoryboardPhaseACompletionReceiptV1":
+        self._assert_completion_authority_scope()
+        self._assert_purpose_lineage()
+        self._assert_output_evidence()
+        self._assert_paid_receipts_and_carrier()
+        self._assert_regen_image_preservation()
+        self._assert_completion_terminal()
         return self
 
     def binds_paid_operations(
@@ -1037,30 +1091,42 @@ class StarReelsViewV3(BaseModel):
             raise ValueError("StoryboardReview requires confirmed image work")
         pointer = self.storyboard
         if self.status == "storyboard_generating":
-            if self.budget.purpose == "storyboard_draft":
-                if (
-                    pointer is not None
-                    or self.stage_output is not None
-                    or self.review_digest is not None
-                ):
-                    raise ValueError(
-                        "storyboard draft generating cannot carry a projection"
-                    )
-                return
-            if pointer is None:
-                raise ValueError("storyboard regen generating requires a pointer")
+            self._bind_storyboard_generating(pointer)
+            return
+        self._bind_storyboard_ready_for_review(pointer)
+
+    def _bind_storyboard_generating(
+        self,
+        pointer: FactoryStoryboardCarrierV1 | None,
+    ) -> None:
+        if self.budget.purpose == "storyboard_draft":
             if (
-                pointer.approval_receipt_digest is not None
-                or pointer.execution_manifest_digest is not None
+                pointer is not None
+                or self.stage_output is not None
+                or self.review_digest is not None
             ):
                 raise ValueError(
-                    "generating storyboard cannot carry approval or execution manifest"
-                )
-            if self.stage_output != pointer or self.review_digest is not None:
-                raise ValueError(
-                    "regen generating pointer must be echoed without review digest"
+                    "storyboard draft generating cannot carry a projection"
                 )
             return
+        if pointer is None:
+            raise ValueError("storyboard regen generating requires a pointer")
+        if (
+            pointer.approval_receipt_digest is not None
+            or pointer.execution_manifest_digest is not None
+        ):
+            raise ValueError(
+                "generating storyboard cannot carry approval or execution manifest"
+            )
+        if self.stage_output != pointer or self.review_digest is not None:
+            raise ValueError(
+                "regen generating pointer must be echoed without review digest"
+            )
+
+    def _bind_storyboard_ready_for_review(
+        self,
+        pointer: FactoryStoryboardCarrierV1 | None,
+    ) -> None:
         if pointer is None or self.stage_output != pointer:
             raise ValueError(
                 "storyboard review requires the current storyboard pointer"
@@ -1099,6 +1165,14 @@ class StarReelsViewV3(BaseModel):
         if self.budget.paid_budget_authority_digest is None:
             raise ValueError("RunStatus requires final paid authority digest")
         pointer = self.storyboard
+        self._bind_two_stage_pointer(pointer)
+        self._bind_two_stage_error()
+        self._bind_two_stage_factory()
+
+    def _bind_two_stage_pointer(
+        self,
+        pointer: FactoryStoryboardCarrierV1 | None,
+    ) -> None:
         if (
             pointer is None
             or pointer.approval_receipt_digest is None
@@ -1107,6 +1181,8 @@ class StarReelsViewV3(BaseModel):
             raise ValueError("RunStatus requires approved execution manifest pointer")
         if self.stage_output is not None or self.review_digest is not None:
             raise ValueError("RunStatus cannot carry review-only fields")
+
+    def _bind_two_stage_error(self) -> None:
         if self.status == "failed":
             if self.error is None or not isinstance(
                 self.receipts.factory,
@@ -1115,6 +1191,8 @@ class StarReelsViewV3(BaseModel):
                 raise ValueError("failed state requires error and failure receipt")
         elif self.error is not None:
             raise ValueError("non-failed state cannot carry an error")
+
+    def _bind_two_stage_factory(self) -> None:
         if self.status in {"pending", "rendering"} and not isinstance(
             self.receipts.factory,
             ReelsFactoryProgressReceiptV3,
@@ -1130,18 +1208,34 @@ class StarReelsViewV3(BaseModel):
         approval = self.receipts.paid_budget_approval_receipt
         authority = self.receipts.paid_budget_authority
         if self.section == "ProductionBudgetApproval":
-            if (
-                approval is not None
-                or authority is not None
-                or self.budget.paid_budget_authority_digest is not None
-            ):
-                raise ValueError(
-                    "unapproved final budget cannot carry paid budget pair or authority"
-                )
+            self._bind_unapproved_budget_evidence(approval, authority)
             return
-
         if approval is None or authority is None:
             raise ValueError("V3 purpose state requires a complete paid budget pair")
+        self._bind_paid_authority_budget(approval, authority)
+        pointer = self.storyboard
+        self._bind_paid_authority_storyboard(authority, pointer)
+        self._bind_paid_factory(authority, pointer)
+
+    def _bind_unapproved_budget_evidence(
+        self,
+        approval: FactoryPaidBudgetApprovalReceiptV2 | None,
+        authority: FactoryPaidBudgetAuthorityV2 | None,
+    ) -> None:
+        if (
+            approval is not None
+            or authority is not None
+            or self.budget.paid_budget_authority_digest is not None
+        ):
+            raise ValueError(
+                "unapproved final budget cannot carry paid budget pair or authority"
+            )
+
+    def _bind_paid_authority_budget(
+        self,
+        approval: FactoryPaidBudgetApprovalReceiptV2,
+        authority: FactoryPaidBudgetAuthorityV2,
+    ) -> None:
         if not approval.structurally_binds(authority):
             raise ValueError("paid budget pair does not structurally bind authority")
         if authority.purpose != self.budget.purpose:
@@ -1167,7 +1261,11 @@ class StarReelsViewV3(BaseModel):
         ):
             raise ValueError("paid authority does not bind the current view budget")
 
-        pointer = self.storyboard
+    def _bind_paid_authority_storyboard(
+        self,
+        authority: FactoryPaidBudgetAuthorityV2,
+        pointer: FactoryStoryboardCarrierV1 | None,
+    ) -> None:
         if authority.purpose == "storyboard_regen":
             if pointer is None:
                 raise ValueError("regen authority requires current storyboard")
@@ -1183,6 +1281,11 @@ class StarReelsViewV3(BaseModel):
         ):
             raise ValueError("final authority does not bind approved storyboard")
 
+    def _bind_paid_factory(
+        self,
+        authority: FactoryPaidBudgetAuthorityV2,
+        pointer: FactoryStoryboardCarrierV1 | None,
+    ) -> None:
         factory = self.receipts.factory
         if isinstance(
             factory,

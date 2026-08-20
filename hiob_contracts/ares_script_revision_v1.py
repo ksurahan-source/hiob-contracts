@@ -128,30 +128,46 @@ def _valid_utc(value: str) -> str:
 UtcTimestamp = Annotated[str, AfterValidator(_valid_utc)]
 
 
+def _assert_json_string(value: str, path: str) -> None:
+    if any(0xD800 <= ord(char) <= 0xDFFF for char in value):
+        raise ValueError(f"{path} contains an unpaired Unicode surrogate")
+
+
+def _assert_json_integer(value: int, path: str) -> None:
+    if abs(value) > _JSON_SAFE_INTEGER_MAX:
+        raise ValueError(f"{path} contains an integer outside the JSON safe range")
+
+
+def _validate_json_sequence(value: list[Any] | tuple[Any, ...], path: str) -> None:
+    for index, item in enumerate(value):
+        _validate_json(item, f"{path}[{index}]")
+
+
+def _validate_json_mapping(value: Mapping[Any, Any], path: str) -> None:
+    for key, item in value.items():
+        if not isinstance(key, str):
+            raise ValueError(f"{path} contains a non-string key")
+        _validate_json(item, f"{path}.{key}")
+
+
 def _validate_json(value: Any, path: str = "value") -> None:
     if value is None or isinstance(value, bool):
         return
     if isinstance(value, str):
-        if any(0xD800 <= ord(char) <= 0xDFFF for char in value):
-            raise ValueError(f"{path} contains an unpaired Unicode surrogate")
+        _assert_json_string(value, path)
         return
     if isinstance(value, int):
-        if abs(value) > _JSON_SAFE_INTEGER_MAX:
-            raise ValueError(f"{path} contains an integer outside the JSON safe range")
+        _assert_json_integer(value, path)
         return
     if isinstance(value, float):
         raise ValueError(
             f"{path} contains a float; digest-bearing numbers must be safe integers"
         )
     if isinstance(value, (list, tuple)):
-        for index, item in enumerate(value):
-            _validate_json(item, f"{path}[{index}]")
+        _validate_json_sequence(value, path)
         return
     if isinstance(value, Mapping):
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise ValueError(f"{path} contains a non-string key")
-            _validate_json(item, f"{path}.{key}")
+        _validate_json_mapping(value, path)
         return
     raise ValueError(f"{path} contains non-JSON value {type(value).__name__}")
 
@@ -700,10 +716,7 @@ class AresApprovalReceiptV1(BaseModel):
     transaction_audit_id: NonEmptyStr
     receipt_digest: DigestStr
 
-    @model_validator(mode="after")
-    def _bind_content(self) -> "AresApprovalReceiptV1":
-        if self.transaction_audit_id != self.receipt_id:
-            raise ValueError("transaction_audit_id must equal receipt_id")
+    def _assert_artifact_binding(self) -> None:
         if self.approval_kind == "script":
             if (
                 self.artifact_digest != self.script_package_digest
@@ -713,34 +726,41 @@ class AresApprovalReceiptV1(BaseModel):
                 raise ValueError(
                     "script receipt must bind only the ScriptPackage artifact"
                 )
-        else:
-            if self.beat_plan_digest is None or self.g1_subject_digest is None:
-                raise ValueError(
-                    "production receipt requires BeatPlan and G1 subject digests"
-                )
-            expected_g1 = derive_ares_g1_subject_digest_v1(
-                self.target_profile_digest,
-                self.identity_lock_digest,
-                self.script_package_digest,
-                self.beat_plan_digest,
+            return
+        if self.beat_plan_digest is None or self.g1_subject_digest is None:
+            raise ValueError(
+                "production receipt requires BeatPlan and G1 subject digests"
             )
-            if (
-                self.g1_subject_digest != expected_g1
-                or self.artifact_digest != expected_g1
-            ):
-                raise ValueError(
-                    "production receipt artifact must equal the four-digest G1 subject"
-                )
+        expected_g1 = derive_ares_g1_subject_digest_v1(
+            self.target_profile_digest,
+            self.identity_lock_digest,
+            self.script_package_digest,
+            self.beat_plan_digest,
+        )
+        if self.g1_subject_digest != expected_g1 or self.artifact_digest != expected_g1:
+            raise ValueError(
+                "production receipt artifact must equal the four-digest G1 subject"
+            )
+
+    def _assert_approval_window(self) -> None:
         approved_at = _parse_utc(self.approved_at_utc)
         expires_at = _parse_utc(self.expires_at_utc)
         if expires_at <= approved_at:
             raise ValueError("expires_at_utc must follow approved_at_utc")
-        if self.revoked_at_utc is not None:
-            revoked_at = _parse_utc(self.revoked_at_utc)
-            if revoked_at < approved_at:
-                raise ValueError("revoked_at_utc cannot precede approved_at_utc")
-            if revoked_at > expires_at:
-                raise ValueError("revoked_at_utc cannot follow expires_at_utc")
+        if self.revoked_at_utc is None:
+            return
+        revoked_at = _parse_utc(self.revoked_at_utc)
+        if revoked_at < approved_at:
+            raise ValueError("revoked_at_utc cannot precede approved_at_utc")
+        if revoked_at > expires_at:
+            raise ValueError("revoked_at_utc cannot follow expires_at_utc")
+
+    @model_validator(mode="after")
+    def _bind_content(self) -> "AresApprovalReceiptV1":
+        if self.transaction_audit_id != self.receipt_id:
+            raise ValueError("transaction_audit_id must equal receipt_id")
+        self._assert_artifact_binding()
+        self._assert_approval_window()
         expected = canonical_contract_digest_v1(
             self, exclude={"receipt_digest"}
         )

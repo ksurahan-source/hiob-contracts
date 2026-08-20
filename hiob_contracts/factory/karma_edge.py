@@ -161,30 +161,40 @@ class KarmaEdgeReceipt(BaseModel):
     mapper: MapperRef
     created_at: str
 
+    def _assert_source_output_digests(self) -> None:
+        if not self.source_output_digests:
+            raise ValueError("receipt must reference at least one source output digest")
+        for digest in self.source_output_digests:
+            if not is_digest(digest):
+                raise ValueError(f"source_output_digest malformed: {digest!r}")
+
+    def _assert_decision_payload(self) -> None:
+        has_error = any(
+            violation.severity == "error" for violation in self.violations
+        )
+        if self.decision == "accepted":
+            if has_error:
+                raise ValueError(
+                    "accepted receipt cannot carry error-severity violations"
+                )
+            if self.target_input is None or self.target_input_digest is None:
+                raise ValueError(
+                    "accepted receipt must carry target_input + target_input_digest"
+                )
+            if self.target_input_digest != sha256_digest(self.target_input):
+                raise ValueError("target_input_digest does not match target_input")
+            return
+        if self.target_input is not None or self.target_input_digest is not None:
+            raise ValueError(
+                f"{self.decision} receipt must not carry a target_input projection"
+            )
+
     @model_validator(mode="after")
     def _check(self) -> "KarmaEdgeReceipt":
         if not self.workspace_id.strip():
             raise ValueError("receipt workspace_id must not be blank")
-        if not self.source_output_digests:
-            raise ValueError("receipt must reference at least one source output digest")
-        for d in self.source_output_digests:
-            if not is_digest(d):
-                raise ValueError(f"source_output_digest malformed: {d!r}")
-
-        has_error = any(v.severity == "error" for v in self.violations)
-
-        if self.decision == "accepted":
-            if has_error:
-                raise ValueError("accepted receipt cannot carry error-severity violations")
-            if self.target_input is None or self.target_input_digest is None:
-                raise ValueError("accepted receipt must carry target_input + target_input_digest")
-            if self.target_input_digest != sha256_digest(self.target_input):
-                raise ValueError("target_input_digest does not match target_input")
-        else:  # blocked | needs_human
-            if self.target_input is not None or self.target_input_digest is not None:
-                raise ValueError(
-                    f"{self.decision} receipt must not carry a target_input projection"
-                )
+        self._assert_source_output_digests()
+        self._assert_decision_payload()
         return self
 
     def authorizes(self, target_input_digest: Digest) -> bool:

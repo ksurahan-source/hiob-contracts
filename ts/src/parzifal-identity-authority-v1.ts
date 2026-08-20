@@ -108,6 +108,50 @@ function enumerableDataProperty(value: object, key: string, path: string): unkno
   return descriptor.value;
 }
 
+function assertNoSymbolKeys(value: object, path: string): void {
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    throw new Error(`${path} contains a symbol-keyed property`);
+  }
+}
+
+function assertJsonArray(value: unknown[], path: string): void {
+  assertNoSymbolKeys(value, path);
+  if (Object.getPrototypeOf(value) !== Array.prototype) {
+    throw new Error(`${path} contains a non-JSON array`);
+  }
+  for (const key of Object.getOwnPropertyNames(value)) {
+    if (key === 'length') continue;
+    enumerableDataProperty(value, key, `${path}.${key}`);
+    const index = Number(key);
+    if (!Number.isInteger(index) || index < 0 || index >= value.length || String(index) !== key) {
+      throw new Error(`${path} contains a non-index array property`);
+    }
+  }
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.prototype.hasOwnProperty.call(value, index)) {
+      throw new Error(`${path} contains a sparse array`);
+    }
+    assertJson(
+      enumerableDataProperty(value, String(index), `${path}[${index}]`),
+      `${path}[${index}]`,
+    );
+  }
+}
+
+function assertJsonObject(value: object, path: string): void {
+  assertNoSymbolKeys(value, path);
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new Error(`${path} contains a non-JSON object`);
+  }
+  for (const key of Object.getOwnPropertyNames(value)) {
+    assertJson(
+      enumerableDataProperty(value, key, `${path}.${key}`),
+      `${path}.${key}`,
+    );
+  }
+}
+
 function assertJson(value: unknown, path = 'value'): void {
   if (value === null || typeof value === 'boolean') return;
   if (typeof value === 'string') {
@@ -120,47 +164,12 @@ function assertJson(value: unknown, path = 'value'): void {
     }
     return;
   }
-  if (
-    value !== null
-    && typeof value === 'object'
-    && Object.getOwnPropertySymbols(value).length > 0
-  ) {
-    throw new Error(`${path} contains a symbol-keyed property`);
-  }
   if (Array.isArray(value)) {
-    if (Object.getPrototypeOf(value) !== Array.prototype) {
-      throw new Error(`${path} contains a non-JSON array`);
-    }
-    for (const key of Object.getOwnPropertyNames(value)) {
-      if (key === 'length') continue;
-      enumerableDataProperty(value, key, `${path}.${key}`);
-      const index = Number(key);
-      if (!Number.isInteger(index) || index < 0 || index >= value.length || String(index) !== key) {
-        throw new Error(`${path} contains a non-index array property`);
-      }
-    }
-    for (let index = 0; index < value.length; index += 1) {
-      if (!Object.prototype.hasOwnProperty.call(value, index)) {
-        throw new Error(`${path} contains a sparse array`);
-      }
-      assertJson(
-        enumerableDataProperty(value, String(index), `${path}[${index}]`),
-        `${path}[${index}]`,
-      );
-    }
+    assertJsonArray(value, path);
     return;
   }
   if (value !== null && typeof value === 'object') {
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype !== Object.prototype && prototype !== null) {
-      throw new Error(`${path} contains a non-JSON object`);
-    }
-    for (const key of Object.getOwnPropertyNames(value)) {
-      assertJson(
-        enumerableDataProperty(value, key, `${path}.${key}`),
-        `${path}.${key}`,
-      );
-    }
+    assertJsonObject(value, path);
     return;
   }
   throw new Error(`${path} contains non-JSON value`);

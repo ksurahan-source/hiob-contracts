@@ -1406,11 +1406,22 @@ class StoryboardImageSetReceiptV1(BaseModel):
 
     @model_validator(mode="after")
     def _bind_complete_unique_set(self) -> "StoryboardImageSetReceiptV1":
+        self._bind_complete_image_order()
+        self._bind_unique_image_fields()
+        self._bind_complete_provider_receipts()
+        current_receipts, current_purpose = self._current_authority_receipts()
+        self._bind_current_authority_sources(current_receipts)
+        self._bind_image_set_lineage(current_receipts, current_purpose)
+        self._bind_image_set_completion()
+        return self
+
+    def _bind_complete_image_order(self) -> None:
         if [image.source_beat_index for image in self.images] != list(
             range(_STORYBOARD_BEAT_COUNT)
         ):
             raise ValueError("images must cover source beats exactly 0..15 in order")
 
+    def _bind_unique_image_fields(self) -> None:
         unique_fields = (
             "artifact_id",
             "storage_key",
@@ -1422,6 +1433,7 @@ class StoryboardImageSetReceiptV1(BaseModel):
             if len(values) != len(set(values)):
                 raise ValueError(f"image {field} values must be unique")
 
+    def _bind_complete_provider_receipts(self) -> None:
         receipt_sources = [
             receipt.request.source_beat_index for receipt in self.provider_receipts
         ]
@@ -1458,30 +1470,40 @@ class StoryboardImageSetReceiptV1(BaseModel):
         for field, values in execution_fields.items():
             if len(values) != len(set(values)):
                 raise ValueError(f"provider receipt {field} values must be unique")
-
         for image, receipt in zip(
             self.images,
             self.provider_receipts,
             strict=True,
         ):
-            request = receipt.request
-            if (
-                image.source_beat_index != request.source_beat_index
-                or image.artifact_id != receipt.artifact_id
-                or image.storage_key != receipt.storage_key
-                or image.sha256 != receipt.sha256
-                or image.mime != receipt.mime
-                or image.width != receipt.width
-                or image.height != receipt.height
-                or image.provider_receipt_digest != receipt.receipt_digest
-                or image.frame_plan_digest != request.frame_plan.plan_digest
-                or image.generation_nonce != request.generation_nonce
-                or request.workspace_id != self.workspace_id
-                or request.run_id != self.run_id
-                or request.factory_revision != self.factory_revision
-                or request.plan_digest != self.plan_digest
-            ):
-                raise ValueError("image does not match provider receipt projection")
+            self._bind_image_provider_projection(image, receipt)
+
+    def _bind_image_provider_projection(
+        self,
+        image: StoryboardImageArtifactRefV1,
+        receipt: StoryboardImageProviderReceiptV1,
+    ) -> None:
+        request = receipt.request
+        if (
+            image.source_beat_index != request.source_beat_index
+            or image.artifact_id != receipt.artifact_id
+            or image.storage_key != receipt.storage_key
+            or image.sha256 != receipt.sha256
+            or image.mime != receipt.mime
+            or image.width != receipt.width
+            or image.height != receipt.height
+            or image.provider_receipt_digest != receipt.receipt_digest
+            or image.frame_plan_digest != request.frame_plan.plan_digest
+            or image.generation_nonce != request.generation_nonce
+            or request.workspace_id != self.workspace_id
+            or request.run_id != self.run_id
+            or request.factory_revision != self.factory_revision
+            or request.plan_digest != self.plan_digest
+        ):
+            raise ValueError("image does not match provider receipt projection")
+
+    def _current_authority_receipts(
+        self,
+    ) -> tuple[tuple[StoryboardImageProviderReceiptV1, ...], str]:
         current_receipts = [
             receipt
             for receipt in self.provider_receipts
@@ -1492,6 +1514,12 @@ class StoryboardImageSetReceiptV1(BaseModel):
         if not current_receipts or len(current_purposes) != 1:
             raise ValueError("image set current paid authority output is ambiguous")
         current_purpose = next(iter(current_purposes))
+        return tuple(current_receipts), current_purpose
+
+    def _bind_current_authority_sources(
+        self,
+        current_receipts: tuple[StoryboardImageProviderReceiptV1, ...],
+    ) -> None:
         current_sources = tuple(
             receipt.request.source_beat_index for receipt in current_receipts
         )
@@ -1499,6 +1527,12 @@ class StoryboardImageSetReceiptV1(BaseModel):
             raise ValueError(
                 "paid_source_beat_indices must equal current authority receipts"
             )
+
+    def _bind_image_set_lineage(
+        self,
+        current_receipts: tuple[StoryboardImageProviderReceiptV1, ...],
+        current_purpose: str,
+    ) -> None:
         if current_purpose == "storyboard_draft" and len(current_receipts) != 16:
             raise ValueError(
                 "storyboard_draft image set requires all 16 current authority receipts"
@@ -1523,6 +1557,8 @@ class StoryboardImageSetReceiptV1(BaseModel):
             for receipt in current_receipts
         ):
             raise ValueError("regen image set contains mismatched current receipts")
+
+    def _bind_image_set_completion(self) -> None:
         if _parse_utc(self.completed_at_utc) < max(
             _parse_utc(receipt.completed_at_utc) for receipt in self.provider_receipts
         ):
@@ -1530,7 +1566,6 @@ class StoryboardImageSetReceiptV1(BaseModel):
 
         if self.receipt_digest != derive_storyboard_image_set_receipt_digest_v1(self):
             raise ValueError("receipt_digest does not match storyboard image set")
-        return self
 
     def binds_paid_operations(
         self,
@@ -1548,7 +1583,24 @@ class StoryboardImageSetReceiptV1(BaseModel):
         if resolution is None:
             return False
         paid_authority = resolution.paid_budget_authority
-        if not (
+        if not self._binds_paid_image_authority(paid_authority, operation_proofs):
+            return False
+        if not self._binds_paid_image_lineage(paid_authority, previous_image_set):
+            return False
+        if not self._binds_paid_image_receipts(paid_authority, operation_proofs):
+            return False
+        if paid_authority.purpose == "storyboard_draft":
+            return self._binds_all_initial_image_receipts(paid_authority)
+        if previous_image_set is None:
+            return False
+        return self._binds_unchanged_regen_images(previous_image_set)
+
+    def _binds_paid_image_authority(
+        self,
+        paid_authority: FactoryPaidBudgetAuthorityV2,
+        operation_proofs: tuple[object, ...],
+    ) -> bool:
+        return (
             paid_authority.purpose in {"storyboard_draft", "storyboard_regen"}
             and paid_authority.workspace_id == self.workspace_id
             and paid_authority.run_id == self.run_id
@@ -1557,28 +1609,37 @@ class StoryboardImageSetReceiptV1(BaseModel):
             and paid_authority.image_source_beat_indices
             == self.paid_source_beat_indices
             and len(operation_proofs) == len(self.paid_source_beat_indices)
-        ):
-            return False
+        )
+
+    def _binds_paid_image_lineage(
+        self,
+        paid_authority: FactoryPaidBudgetAuthorityV2,
+        previous_image_set: "StoryboardImageSetReceiptV1 | None",
+    ) -> bool:
         if paid_authority.purpose == "storyboard_draft":
-            if (
+            return not (
                 paid_authority.plan_digest is not None
                 or previous_image_set is not None
                 or self.previous_image_set_receipt_digest is not None
                 or self.paid_source_beat_indices != tuple(range(16))
-            ):
-                return False
-        elif (
-            previous_image_set is None
-            or paid_authority.plan_digest != self.plan_digest
-            or self.previous_image_set_receipt_digest
-            != previous_image_set.receipt_digest
-            or previous_image_set.workspace_id != self.workspace_id
-            or previous_image_set.run_id != self.run_id
-            or previous_image_set.factory_revision != self.factory_revision
-            or previous_image_set.plan_digest != self.plan_digest
-        ):
+            )
+        if previous_image_set is None:
             return False
+        return (
+            paid_authority.plan_digest == self.plan_digest
+            and self.previous_image_set_receipt_digest
+            == previous_image_set.receipt_digest
+            and previous_image_set.workspace_id == self.workspace_id
+            and previous_image_set.run_id == self.run_id
+            and previous_image_set.factory_revision == self.factory_revision
+            and previous_image_set.plan_digest == self.plan_digest
+        )
 
+    def _binds_paid_image_receipts(
+        self,
+        paid_authority: FactoryPaidBudgetAuthorityV2,
+        operation_proofs: tuple[object, ...],
+    ) -> bool:
         receipt_by_source = {
             receipt.request.source_beat_index: receipt
             for receipt in self.provider_receipts
@@ -1596,17 +1657,24 @@ class StoryboardImageSetReceiptV1(BaseModel):
                 or not _image_receipt_binds_operation_proof_v2(receipt, proof)
             ):
                 return False
+        return True
 
+    def _binds_all_initial_image_receipts(
+        self,
+        paid_authority: FactoryPaidBudgetAuthorityV2,
+    ) -> bool:
+        return all(
+            receipt.request.paid_budget_authority_digest
+            == paid_authority.authority_digest
+            and receipt.request.purpose == "storyboard_draft"
+            for receipt in self.provider_receipts
+        )
+
+    def _binds_unchanged_regen_images(
+        self,
+        previous_image_set: "StoryboardImageSetReceiptV1",
+    ) -> bool:
         paid_sources = set(self.paid_source_beat_indices)
-        if paid_authority.purpose == "storyboard_draft":
-            return all(
-                receipt.request.paid_budget_authority_digest
-                == paid_authority.authority_digest
-                and receipt.request.purpose == "storyboard_draft"
-                for receipt in self.provider_receipts
-            )
-
-        assert previous_image_set is not None
         for source in set(range(16)) - paid_sources:
             if (
                 self.images[source] != previous_image_set.images[source]
@@ -2147,6 +2215,20 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
     @model_validator(mode="after")
     def _bind_complete_scene_video_set(self) -> "StoryboardSceneVideoSetReceiptV1":
         scene_receipts = self.scene_video_receipts
+        self._bind_scene_receipt_cardinality(scene_receipts)
+        self._bind_scene_receipt_uniqueness(scene_receipts)
+        self._bind_projection_order()
+        self._bind_projection_sequence(scene_receipts)
+        if self.receipt_digest != (
+            derive_storyboard_scene_video_set_receipt_digest_v1(self)
+        ):
+            raise ValueError("receipt_digest does not match scene video set")
+        return self
+
+    def _bind_scene_receipt_cardinality(
+        self,
+        scene_receipts: tuple[StoryboardSceneVideoReceiptV1, ...],
+    ) -> None:
         if len(scene_receipts) != self.storyboard_scene_count:
             raise ValueError(
                 "scene video receipt count must equal storyboard_scene_count"
@@ -2156,6 +2238,10 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
         ):
             raise ValueError("scene video receipts must use dense sequence order")
 
+    def _bind_scene_receipt_uniqueness(
+        self,
+        scene_receipts: tuple[StoryboardSceneVideoReceiptV1, ...],
+    ) -> None:
         for field in (
             "scene_id",
             "scene_digest",
@@ -2179,6 +2265,7 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
             if len(values) != len(set(values)):
                 raise ValueError(f"scene video artifact {field} values must be unique")
 
+    def _bind_projection_order(self) -> None:
         projections = self.beat_projections
         if [item.sequence_index for item in projections] != list(
             range(_STORYBOARD_BEAT_COUNT)
@@ -2189,9 +2276,13 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
         ):
             raise ValueError("beat projections must cover source beats exactly 0..15")
 
+    def _bind_projection_sequence(
+        self,
+        scene_receipts: tuple[StoryboardSceneVideoReceiptV1, ...],
+    ) -> None:
         current_scene = -1
         repeat_index = 0
-        for projection in projections:
+        for projection in self.beat_projections:
             if projection.scene_sequence_index == current_scene + 1:
                 current_scene += 1
                 repeat_index = 0
@@ -2212,11 +2303,6 @@ class StoryboardSceneVideoSetReceiptV1(BaseModel):
             raise ValueError(
                 "every scene video must be referenced by a beat projection"
             )
-        if self.receipt_digest != (
-            derive_storyboard_scene_video_set_receipt_digest_v1(self)
-        ):
-            raise ValueError("receipt_digest does not match scene video set")
-        return self
 
     def binds(
         self,
@@ -3633,6 +3719,18 @@ class FactoryPaidOperationHistoricalEvidenceV2(BaseModel):
         approval = resolution.approval_receipt
         profile = resolution.cost_profile
         operation_profile = getattr(profile.operations, self.operation)
+        self._bind_historical_resolution(authority, profile, operation_profile)
+        self._bind_historical_operation_scope(authority)
+        self._bind_historical_timeline(approval, profile)
+        self._bind_historical_output()
+        return self
+
+    def _bind_historical_resolution(
+        self,
+        authority: FactoryPaidBudgetAuthorityV2,
+        profile: FactoryCostProfileV1,
+        operation_profile: FactoryCostOperationV1,
+    ) -> None:
         if (
             self.workspace_id != authority.workspace_id
             or self.run_id != authority.run_id
@@ -3645,6 +3743,11 @@ class FactoryPaidOperationHistoricalEvidenceV2(BaseModel):
             or self.model != operation_profile.model
         ):
             raise ValueError("historical evidence does not bind paid resolution")
+
+    def _bind_historical_operation_scope(
+        self,
+        authority: FactoryPaidBudgetAuthorityV2,
+    ) -> None:
         if self.operation == "image":
             if (
                 authority.purpose not in {"storyboard_draft", "storyboard_regen"}
@@ -3669,6 +3772,11 @@ class FactoryPaidOperationHistoricalEvidenceV2(BaseModel):
         elif authority.purpose != "final_production" or self.source_index is not None:
             raise ValueError("historical render evidence is outside paid scope")
 
+    def _bind_historical_timeline(
+        self,
+        approval: FactoryPaidBudgetApprovalReceiptV2,
+        profile: FactoryCostProfileV1,
+    ) -> None:
         reserved = _parse_utc(self.reserved_at_utc)
         provider_result_recorded = _parse_utc(self.provider_result_recorded_at_utc)
         completed = _parse_utc(self.completed_at_utc)
@@ -3685,13 +3793,14 @@ class FactoryPaidOperationHistoricalEvidenceV2(BaseModel):
             raise ValueError("historical operation was reserved after revocation")
         if not reserved <= provider_result_recorded <= completed:
             raise ValueError("historical result/claim timestamps are out of order")
+
+    def _bind_historical_output(self) -> None:
         if self.provider_result_output_digest != self.completed_claim_output_digest:
             raise ValueError("leaf result and completed claim output must be identical")
         if self.evidence_digest != (
             derive_factory_paid_operation_historical_evidence_digest_v2(self)
         ):
             raise ValueError("evidence_digest does not match historical operation")
-        return self
 
     @classmethod
     def from_verified(

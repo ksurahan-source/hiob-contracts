@@ -72,6 +72,51 @@ function isPlainJsonObject(value: object): value is Record<string, unknown> {
   return prototype === Object.prototype || prototype === null;
 }
 
+function assertNoSymbolKeys(value: object, path: string): void {
+  if (Object.getOwnPropertySymbols(value).length > 0) {
+    throw new TypeError(`${path} contains a symbol key`);
+  }
+}
+
+function cloneCanonicalArray(value: unknown[], path: string): JsonValue[] {
+  assertNoSymbolKeys(value, path);
+  const expectedNames = new Set([
+    ...Array.from({ length: value.length }, (_, index) => String(index)),
+    'length',
+  ]);
+  if (Object.getOwnPropertyNames(value).some((name) => !expectedNames.has(name))) {
+    throw new TypeError(`${path} contains a non-JSON array property`);
+  }
+  const result: JsonValue[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor) throw new TypeError(`${path} contains a sparse array hole`);
+    if (!descriptor.enumerable || !('value' in descriptor)) {
+      throw new TypeError(`${path}[${index}] is not an enumerable JSON data property`);
+    }
+    result.push(cloneCanonicalJson(descriptor.value, `${path}[${index}]`));
+  }
+  return result;
+}
+
+function cloneCanonicalObject(value: Record<string, unknown>, path: string): JsonValue {
+  assertNoSymbolKeys(value, path);
+  const result = Object.create(null) as Record<string, JsonValue>;
+  for (const key of Object.getOwnPropertyNames(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor?.enumerable || !('value' in descriptor)) {
+      throw new TypeError(`${path}.${key} is not an enumerable JSON data property`);
+    }
+    Object.defineProperty(result, key, {
+      configurable: true,
+      enumerable: true,
+      value: cloneCanonicalJson(descriptor.value, `${path}.${key}`),
+      writable: true,
+    });
+  }
+  return result;
+}
+
 function cloneCanonicalJson(value: unknown, path = 'json'): JsonValue {
   if (value === null || typeof value === 'boolean') return value;
   if (typeof value === 'string') {
@@ -92,47 +137,10 @@ function cloneCanonicalJson(value: unknown, path = 'json'): JsonValue {
     return value;
   }
   if (Array.isArray(value)) {
-    if (Object.getOwnPropertySymbols(value).length > 0) {
-      throw new TypeError(`${path} contains a symbol key`);
-    }
-    const expectedNames = new Set([
-      ...Array.from({ length: value.length }, (_, index) => String(index)),
-      'length',
-    ]);
-    if (Object.getOwnPropertyNames(value).some((name) => !expectedNames.has(name))) {
-      throw new TypeError(`${path} contains a non-JSON array property`);
-    }
-    const result: JsonValue[] = [];
-    for (let index = 0; index < value.length; index += 1) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-      if (!descriptor) {
-        throw new TypeError(`${path} contains a sparse array hole`);
-      }
-      if (!descriptor.enumerable || !('value' in descriptor)) {
-        throw new TypeError(`${path}[${index}] is not an enumerable JSON data property`);
-      }
-      result.push(cloneCanonicalJson(descriptor.value, `${path}[${index}]`));
-    }
-    return result;
+    return cloneCanonicalArray(value, path);
   }
   if (typeof value === 'object' && isPlainJsonObject(value)) {
-    if (Object.getOwnPropertySymbols(value).length > 0) {
-      throw new TypeError(`${path} contains a symbol key`);
-    }
-    const result = Object.create(null) as Record<string, JsonValue>;
-    for (const key of Object.getOwnPropertyNames(value)) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (!descriptor?.enumerable || !('value' in descriptor)) {
-        throw new TypeError(`${path}.${key} is not an enumerable JSON data property`);
-      }
-      Object.defineProperty(result, key, {
-        configurable: true,
-        enumerable: true,
-        value: cloneCanonicalJson(descriptor.value, `${path}.${key}`),
-        writable: true,
-      });
-    }
-    return result;
+    return cloneCanonicalObject(value, path);
   }
   throw new TypeError(`${path} contains a non-JSON value`);
 }
@@ -201,20 +209,30 @@ function normalizeAthenaOwnedKey(key: string): string {
   return key.toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function findAthenaOwnedKey(value: unknown, path = 'master_sales_script'): string | null {
-  if (Array.isArray(value)) {
-    for (let index = 0; index < value.length; index += 1) {
-      const found = findAthenaOwnedKey(value[index], `${path}[${index}]`);
-      if (found) return found;
-    }
-    return null;
+function findAthenaOwnedKeyInArray(value: unknown[], path: string): string | null {
+  for (let index = 0; index < value.length; index += 1) {
+    const found = findAthenaOwnedKey(value[index], `${path}[${index}]`);
+    if (found) return found;
   }
+  return null;
+}
+
+function findAthenaOwnedKeyInObject(
+  value: Record<string, unknown>,
+  path: string,
+): string | null {
+  for (const [key, item] of Object.entries(value)) {
+    if (AthenaOwnedOutputKeys.has(normalizeAthenaOwnedKey(key))) return `${path}.${key}`;
+    const found = findAthenaOwnedKey(item, `${path}.${key}`);
+    if (found) return found;
+  }
+  return null;
+}
+
+function findAthenaOwnedKey(value: unknown, path = 'master_sales_script'): string | null {
+  if (Array.isArray(value)) return findAthenaOwnedKeyInArray(value, path);
   if (value !== null && typeof value === 'object') {
-    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      if (AthenaOwnedOutputKeys.has(normalizeAthenaOwnedKey(key))) return `${path}.${key}`;
-      const found = findAthenaOwnedKey(item, `${path}.${key}`);
-      if (found) return found;
-    }
+    return findAthenaOwnedKeyInObject(value as Record<string, unknown>, path);
   }
   return null;
 }

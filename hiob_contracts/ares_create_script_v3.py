@@ -480,8 +480,7 @@ class AresCreateScriptRequestV3(BaseModel):
     hook_directive: AresHookDirectiveV2
     creative_constraints: AresCreativeConstraintsV2
 
-    @model_validator(mode="after")
-    def _bind_scope_authority_and_payloads(self) -> "AresCreateScriptRequestV3":
+    def _assert_authority_scope(self) -> None:
         refs = (
             self.authority.identity_ref,
             self.authority.product_ref,
@@ -501,6 +500,10 @@ class AresCreateScriptRequestV3(BaseModel):
         if receipt.run_id != self.scope.run_id:
             raise ValueError("Karma receipt run_id must match request scope")
 
+    def _canonical_p2a_projection(
+        self,
+    ) -> tuple[AresP2ATargetProjectionV3, dict[str, Any], str]:
+        receipt = self.authority.accepted_p2a_receipt
         receipt_projection = AresP2ATargetProjectionV3.model_validate(
             _json_value(receipt.target_input)
         )
@@ -517,6 +520,14 @@ class AresCreateScriptRequestV3(BaseModel):
         )
         projection_payload = projection.model_dump(mode="json")
         projection_digest = sha256_digest(projection_payload)
+        return projection, projection_payload, projection_digest
+
+    def _assert_projection_binding(
+        self,
+        projection_payload: dict[str, Any],
+        projection_digest: str,
+    ) -> None:
+        receipt = self.authority.accepted_p2a_receipt
         if _json_value(receipt.target_input) != projection_payload:
             raise ValueError(
                 "Karma receipt target_input must equal canonical "
@@ -534,6 +545,9 @@ class AresCreateScriptRequestV3(BaseModel):
             raise ValueError(
                 "p2a_ref digests must bind canonical AresP2ATargetProjection.v3"
             )
+
+    def _assert_source_coverage(self, projection: AresP2ATargetProjectionV3) -> None:
+        receipt = self.authority.accepted_p2a_receipt
         source_digests = set(receipt.source_output_digests)
         required_sources = {
             self.authority.identity_ref.source_output_digest,
@@ -548,6 +562,7 @@ class AresCreateScriptRequestV3(BaseModel):
                 "outputs and the Star command output"
             )
 
+    def _assert_sealed_payload_bindings(self) -> None:
         bindings = (
             (
                 self.authority.identity_ref,
@@ -582,6 +597,16 @@ class AresCreateScriptRequestV3(BaseModel):
             expected_payload_digest = sha256_digest(payload.model_dump(mode="json"))
             if ref.payload_digest != expected_payload_digest:
                 raise ValueError(f"{field}.payload_digest must match sealed payload")
+
+    @model_validator(mode="after")
+    def _bind_scope_authority_and_payloads(self) -> "AresCreateScriptRequestV3":
+        self._assert_authority_scope()
+        projection, projection_payload, projection_digest = (
+            self._canonical_p2a_projection()
+        )
+        self._assert_projection_binding(projection_payload, projection_digest)
+        self._assert_source_coverage(projection)
+        self._assert_sealed_payload_bindings()
         return self
 
 
@@ -624,8 +649,7 @@ class ScriptPackageV3(BaseModel):
     def _serialize_frozen_mappings(self, value: Mapping[str, Any]) -> dict:
         return _json_value(value)
 
-    @model_validator(mode="after")
-    def _bind_content(self) -> "ScriptPackageV3":
+    def _assert_segment_shape(self) -> int:
         count = len(self.voice_script)
         if count == 0:
             raise ValueError("voice_script must contain at least one segment")
@@ -638,6 +662,9 @@ class ScriptPackageV3(BaseModel):
             raise ValueError("caption_script beat indices must be exactly 0..N-1")
         if any(not item.text.strip() for item in self.voice_script):
             raise ValueError("voice_script segments must contain non-empty dialogue")
+        return count
+
+    def _assert_master_beats(self, count: int) -> None:
         master_beats = self.master_sales_script.get("beats")
         if not isinstance(master_beats, (list, tuple)):
             raise ValueError("master_sales_script.beats must be a canonical beat array")
@@ -660,6 +687,11 @@ class ScriptPackageV3(BaseModel):
                 raise ValueError(
                     "master_sales_script beat caption must match caption_script"
                 )
+
+    @model_validator(mode="after")
+    def _bind_content(self) -> "ScriptPackageV3":
+        count = self._assert_segment_shape()
+        self._assert_master_beats(count)
         if self.package_digest != canonical_contract_digest_v1(
             self, exclude={"package_digest"}
         ):
@@ -762,41 +794,39 @@ class AresCreateScriptResultV3(BaseModel):
     def _findings_to_tuple(cls, value: Any) -> Any:
         return tuple(value) if isinstance(value, list) else value
 
+    def _assert_ok_artifacts(self) -> None:
+        if self.script_package is None or self.semantic_beat_plan is None:
+            raise ValueError("ok result requires script_package and semantic_beat_plan")
+        if (
+            self.semantic_beat_plan.script_package_digest
+            != self.script_package.package_digest
+        ):
+            raise ValueError(
+                "semantic_beat_plan.script_package_digest must match "
+                "script_package.package_digest"
+            )
+        if len(self.semantic_beat_plan.beats) != len(self.script_package.voice_script):
+            raise ValueError("semantic beat count must match script package segments")
+        for index, beat in enumerate(self.semantic_beat_plan.beats):
+            if beat.text != self.script_package.voice_script[index].text:
+                raise ValueError("semantic beat text must match voice_script")
+            if beat.caption != self.script_package.caption_script[index].text:
+                raise ValueError("semantic beat caption must match caption_script")
+        if self.block_reason is not None:
+            raise ValueError("ok result must not carry block_reason")
+
+    def _assert_non_ok_artifacts(self) -> None:
+        if self.script_package is not None or self.semantic_beat_plan is not None:
+            raise ValueError(f"{self.status} result must not carry generated artifacts")
+        if not self.block_reason:
+            raise ValueError(f"{self.status} result requires block_reason")
+
     @model_validator(mode="after")
     def _bind_status_and_content(self) -> "AresCreateScriptResultV3":
         if self.status == "ok":
-            if self.script_package is None or self.semantic_beat_plan is None:
-                raise ValueError(
-                    "ok result requires script_package and semantic_beat_plan"
-                )
-            if (
-                self.semantic_beat_plan.script_package_digest
-                != self.script_package.package_digest
-            ):
-                raise ValueError(
-                    "semantic_beat_plan.script_package_digest must match "
-                    "script_package.package_digest"
-                )
-            if len(self.semantic_beat_plan.beats) != len(
-                self.script_package.voice_script
-            ):
-                raise ValueError(
-                    "semantic beat count must match script package segments"
-                )
-            for index, beat in enumerate(self.semantic_beat_plan.beats):
-                if beat.text != self.script_package.voice_script[index].text:
-                    raise ValueError("semantic beat text must match voice_script")
-                if beat.caption != self.script_package.caption_script[index].text:
-                    raise ValueError("semantic beat caption must match caption_script")
-            if self.block_reason is not None:
-                raise ValueError("ok result must not carry block_reason")
+            self._assert_ok_artifacts()
         else:
-            if self.script_package is not None or self.semantic_beat_plan is not None:
-                raise ValueError(
-                    f"{self.status} result must not carry generated artifacts"
-                )
-            if not self.block_reason:
-                raise ValueError(f"{self.status} result requires block_reason")
+            self._assert_non_ok_artifacts()
         if self.content_digest != canonical_contract_digest_v1(
             self, exclude={"content_digest"}
         ):

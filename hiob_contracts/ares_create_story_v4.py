@@ -337,6 +337,35 @@ class AresStoryNarrativeBriefV4(BaseModel):
         return self
 
 
+def _assert_story_beat_authority(
+    beat: AresStoryBeatV4,
+    *,
+    evidence_claim_ids: set[str],
+    evidence_anchor_ids: set[str],
+    objection_anchor_ids: set[str],
+) -> None:
+    claim_ids = set(beat.used_claim_ids)
+    if not claim_ids.issubset(evidence_claim_ids):
+        raise ValueError("used_claim_ids must be sealed Artemis claim ids")
+    anchor_ids = set(beat.addresses_anchor_ids)
+    if beat.story_function == "proof":
+        if not beat.used_claim_ids:
+            raise ValueError("proof stage requires at least one used_claim_id")
+        if not anchor_ids or not anchor_ids.issubset(evidence_anchor_ids):
+            raise ValueError(
+                "proof stage must address at least one Artemis evidence anchor"
+            )
+        return
+    if beat.story_function == "objection":
+        if not anchor_ids or not anchor_ids.issubset(objection_anchor_ids):
+            raise ValueError(
+                "objection stage must address at least one Karma objection anchor"
+            )
+        return
+    if anchor_ids:
+        raise ValueError("only proof and objection stages may address authority anchors")
+
+
 class AresCreateStoryRequestV4(BaseModel):
     """Ares input for a complete, authority-bound UGC or informational story."""
 
@@ -349,10 +378,7 @@ class AresCreateStoryRequestV4(BaseModel):
     narrative_brief: AresStoryNarrativeBriefV4
     hook_directive: AresStoryHookDirectiveV4
 
-    @model_validator(mode="after")
-    def _bind_authority_scope_anchors_and_payloads(
-        self,
-    ) -> "AresCreateStoryRequestV4":
+    def _assert_authority_scope(self) -> None:
         refs = (
             self.authority.janus_product_truth_ref,
             self.authority.karma_story_brief_ref,
@@ -366,6 +392,7 @@ class AresCreateStoryRequestV4(BaseModel):
             if ref.run_id != self.scope.run_id:
                 raise ValueError("authority ref run_id must match request scope")
 
+    def _assert_payload_bindings(self) -> None:
         evidence_ref = self.authority.artemis_evidence_bundle_ref
         if evidence_ref.artifact_digest != self.evidence_bundle.evidence_bundle_digest:
             raise ValueError(
@@ -402,6 +429,7 @@ class AresCreateStoryRequestV4(BaseModel):
                 "metis_hook_directive_ref.payload_digest must bind hook directive"
             )
 
+    def _assert_beat_authority(self) -> None:
         evidence_anchor_ids = {
             anchor.anchor_id for anchor in self.evidence_bundle.anchors
         }
@@ -412,26 +440,20 @@ class AresCreateStoryRequestV4(BaseModel):
         if evidence_anchor_ids & objection_anchor_ids:
             raise ValueError("Artemis and Karma anchor_id values must not overlap")
         for beat in self.narrative_brief.beats:
-            claim_ids = set(beat.used_claim_ids)
-            if not claim_ids.issubset(evidence_claim_ids):
-                raise ValueError("used_claim_ids must be sealed Artemis claim ids")
-            anchor_ids = set(beat.addresses_anchor_ids)
-            if beat.story_function == "proof":
-                if not beat.used_claim_ids:
-                    raise ValueError("proof stage requires at least one used_claim_id")
-                if not anchor_ids or not anchor_ids.issubset(evidence_anchor_ids):
-                    raise ValueError(
-                        "proof stage must address at least one Artemis evidence anchor"
-                    )
-            elif beat.story_function == "objection":
-                if not anchor_ids or not anchor_ids.issubset(objection_anchor_ids):
-                    raise ValueError(
-                        "objection stage must address at least one Karma objection anchor"
-                    )
-            elif anchor_ids:
-                raise ValueError(
-                    "only proof and objection stages may address authority anchors"
-                )
+            _assert_story_beat_authority(
+                beat,
+                evidence_claim_ids=evidence_claim_ids,
+                evidence_anchor_ids=evidence_anchor_ids,
+                objection_anchor_ids=objection_anchor_ids,
+            )
+
+    @model_validator(mode="after")
+    def _bind_authority_scope_anchors_and_payloads(
+        self,
+    ) -> "AresCreateStoryRequestV4":
+        self._assert_authority_scope()
+        self._assert_payload_bindings()
+        self._assert_beat_authority()
         return self
 
 

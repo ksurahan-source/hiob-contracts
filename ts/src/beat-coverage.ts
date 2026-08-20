@@ -100,6 +100,107 @@ const CoverageContractVersionSchema = z.union([
   z.literal(SERIAL_FAN_IN_RECEIPT_CONTRACT_VERSION_V1),
 ]);
 
+interface CoverageCandidate {
+  run_id: string;
+  workspace_id: string;
+  package_digest: string;
+  plan_digest: string;
+  expected_n_beats: number;
+  expected_beat_indices: number[];
+  lane_receipts: BeatLaneTerminalReceiptV1[];
+  required_lanes: string[];
+  coverage_digest: string;
+  contract_version: string;
+}
+
+function appendExpectedIndexIssue(
+  coverage: CoverageCandidate,
+  expected: number[],
+  ctx: z.RefinementCtx,
+): void {
+  const invalid = coverage.expected_beat_indices.length !== expected.length
+    || coverage.expected_beat_indices.some((value, index) => value !== expected[index]);
+  if (invalid) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['expected_beat_indices'],
+      message: 'expected_beat_indices must be exactly 0..N-1 without duplicates, holes, or out-of-range values',
+    });
+  }
+}
+
+function appendRequiredLaneIssues(coverage: CoverageCandidate, ctx: z.RefinementCtx): void {
+  if (new Set(coverage.required_lanes).size !== coverage.required_lanes.length) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['required_lanes'], message: 'required_lanes contains duplicate lanes' });
+  }
+  for (const requiredLane of DEFAULT_BEAT_COVERAGE_LANES_V1) {
+    if (!coverage.required_lanes.includes(requiredLane)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['required_lanes'], message: `required_lanes must include ${requiredLane}` });
+    }
+  }
+}
+
+function appendReceiptBindingIssues(
+  receipt: BeatLaneTerminalReceiptV1,
+  coverage: CoverageCandidate,
+  ctx: z.RefinementCtx,
+): void {
+  const bindings = [
+    [receipt.run_id, coverage.run_id, 'run_id'],
+    [receipt.workspace_id, coverage.workspace_id, 'workspace_id'],
+    [receipt.package_digest, coverage.package_digest, 'package_digest'],
+    [receipt.plan_digest, coverage.plan_digest, 'plan_digest'],
+  ];
+  for (const [observed, expected, name] of bindings) {
+    if (observed !== expected) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lane_receipts'], message: `lane receipt ${name} does not match coverage` });
+    }
+  }
+  if (receipt.beat_index >= coverage.expected_n_beats) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lane_receipts'], message: `lane receipt beat_index ${receipt.beat_index} out of range` });
+  }
+}
+
+function collectReceiptKeys(coverage: CoverageCandidate, ctx: z.RefinementCtx): Set<string> {
+  const seen = new Set<string>();
+  for (const receipt of coverage.lane_receipts) {
+    const key = `${receipt.beat_index}\u0000${receipt.lane}`;
+    if (seen.has(key)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lane_receipts'], message: `duplicate lane receipt for ${key}` });
+    }
+    seen.add(key);
+    appendReceiptBindingIssues(receipt, coverage, ctx);
+  }
+  return seen;
+}
+
+function appendMissingReceiptIssue(
+  coverage: CoverageCandidate,
+  expected: number[],
+  seen: Set<string>,
+  ctx: z.RefinementCtx,
+): void {
+  const expectedPairs = new Set(
+    expected.flatMap((beatIndex) => coverage.required_lanes.map((lane) => `${beatIndex}\u0000${lane}`)),
+  );
+  const missing = [...expectedPairs].filter((key) => !seen.has(key));
+  if (missing.length > 0) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lane_receipts'], message: `missing lane receipts: ${missing.join(', ')}` });
+  }
+}
+
+function appendCoverageDigestIssue(coverage: CoverageCandidate, ctx: z.RefinementCtx): void {
+  const payload = { ...coverage };
+  delete (payload as { coverage_digest?: string }).coverage_digest;
+  payload.lane_receipts = [...payload.lane_receipts].sort((left, right) => {
+    if (left.beat_index !== right.beat_index) return left.beat_index - right.beat_index;
+    return left.lane < right.lane ? -1 : (left.lane > right.lane ? 1 : 0);
+  });
+  if (coverage.coverage_digest !== sha256Digest(payload)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['coverage_digest'], message: 'coverage_digest does not match coverage payload' });
+  }
+}
+
 export const BeatCoverageV1Schema = z.object({
   run_id: NonBlankString,
   workspace_id: NonBlankString,
@@ -113,64 +214,11 @@ export const BeatCoverageV1Schema = z.object({
   contract_version: CoverageContractVersionSchema.default(BEAT_COVERAGE_CONTRACT_VERSION_V1),
 }).strict().superRefine((coverage, ctx) => {
   const expected = Array.from({ length: coverage.expected_n_beats }, (_, index) => index);
-  if (coverage.expected_beat_indices.length !== expected.length
-      || coverage.expected_beat_indices.some((value, index) => value !== expected[index])) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['expected_beat_indices'],
-      message: 'expected_beat_indices must be exactly 0..N-1 without duplicates, holes, or out-of-range values',
-    });
-  }
-  if (new Set(coverage.required_lanes).size !== coverage.required_lanes.length) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['required_lanes'], message: 'required_lanes contains duplicate lanes' });
-  }
-  for (const requiredLane of DEFAULT_BEAT_COVERAGE_LANES_V1) {
-    if (!coverage.required_lanes.includes(requiredLane)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['required_lanes'], message: `required_lanes must include ${requiredLane}` });
-    }
-  }
-
-  const seen = new Set<string>();
-  for (const receipt of coverage.lane_receipts) {
-    const key = `${receipt.beat_index}\u0000${receipt.lane}`;
-    if (seen.has(key)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lane_receipts'], message: `duplicate lane receipt for ${key}` });
-    }
-    seen.add(key);
-    if (receipt.run_id !== coverage.run_id) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lane_receipts'], message: 'lane receipt run_id does not match coverage' });
-    }
-    if (receipt.workspace_id !== coverage.workspace_id) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lane_receipts'], message: 'lane receipt workspace_id does not match coverage' });
-    }
-    if (receipt.package_digest !== coverage.package_digest) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lane_receipts'], message: 'lane receipt package_digest does not match coverage' });
-    }
-    if (receipt.plan_digest !== coverage.plan_digest) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lane_receipts'], message: 'lane receipt plan_digest does not match coverage' });
-    }
-    if (receipt.beat_index >= coverage.expected_n_beats) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lane_receipts'], message: `lane receipt beat_index ${receipt.beat_index} out of range` });
-    }
-  }
-
-  const expectedPairs = new Set(
-    expected.flatMap((beatIndex) => coverage.required_lanes.map((lane) => `${beatIndex}\u0000${lane}`)),
-  );
-  const missing = [...expectedPairs].filter((key) => !seen.has(key));
-  if (missing.length > 0) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['lane_receipts'], message: `missing lane receipts: ${missing.join(', ')}` });
-  }
-
-  const payload = { ...coverage };
-  delete (payload as { coverage_digest?: string }).coverage_digest;
-  payload.lane_receipts = [...payload.lane_receipts].sort((left, right) => {
-    if (left.beat_index !== right.beat_index) return left.beat_index - right.beat_index;
-    return left.lane < right.lane ? -1 : (left.lane > right.lane ? 1 : 0);
-  });
-  if (coverage.coverage_digest !== sha256Digest(payload)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['coverage_digest'], message: 'coverage_digest does not match coverage payload' });
-  }
+  appendExpectedIndexIssue(coverage, expected, ctx);
+  appendRequiredLaneIssues(coverage, ctx);
+  const seen = collectReceiptKeys(coverage, ctx);
+  appendMissingReceiptIssue(coverage, expected, seen, ctx);
+  appendCoverageDigestIssue(coverage, ctx);
 });
 
 export type BeatCoverageV1 = z.infer<typeof BeatCoverageV1Schema>;
