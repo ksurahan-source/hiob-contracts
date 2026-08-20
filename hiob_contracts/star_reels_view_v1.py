@@ -1323,11 +1323,7 @@ class StarReelsViewV3(BaseModel):
 
     def _bind_phase_a_completion_summary(self) -> None:
         summary = self.receipts.storyboard_phase_a_completion_summary
-        if self.section in {
-            "LockGate",
-            "ScriptReview",
-            "PlanReview",
-        } or self.status == ("storyboard_generating"):
+        if self._is_pre_phase_a_completion():
             if summary is not None:
                 raise ValueError(
                     "pre-completion state cannot carry Phase-A completion summary"
@@ -1338,6 +1334,22 @@ class StarReelsViewV3(BaseModel):
         pointer = self.storyboard
         if pointer is None:
             raise ValueError("Phase-A completion summary requires storyboard pointer")
+        self._bind_phase_a_summary_lineage(summary, pointer)
+        if self.section == "StoryboardReview":
+            self._bind_phase_a_review_authority(summary, pointer)
+
+    def _is_pre_phase_a_completion(self) -> bool:
+        return self.section in {
+            "LockGate",
+            "ScriptReview",
+            "PlanReview",
+        } or self.status == "storyboard_generating"
+
+    @staticmethod
+    def _bind_phase_a_summary_lineage(
+        summary: StoryboardPhaseACompletionSummaryV1,
+        pointer: FactoryStoryboardCarrierV1,
+    ) -> None:
         if (
             summary.output_image_set_receipt_digest != pointer.image_set_receipt_digest
             or pointer.storyboard_revision < summary.output_storyboard_revision
@@ -1347,27 +1359,33 @@ class StarReelsViewV3(BaseModel):
             pointer.storyboard_digest != summary.output_storyboard_digest
         ):
             raise ValueError("Phase-A completion does not bind current storyboard")
-        if self.section == "StoryboardReview":
-            authority = self.receipts.paid_budget_authority
-            if (
-                summary.purpose != self.budget.purpose
-                or authority is None
-                or summary.paid_budget_authority_digest != authority.authority_digest
-            ):
-                raise ValueError("Phase-A completion does not bind image authority")
-            if pointer.storyboard_revision == summary.output_storyboard_revision:
-                unapproved_pointer = FactoryStoryboardCarrierV1(
-                    contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V1,
-                    storyboard_revision=pointer.storyboard_revision,
-                    storyboard_digest=pointer.storyboard_digest,
-                    image_set_receipt_digest=pointer.image_set_receipt_digest,
-                    approval_receipt_digest=None,
-                    execution_manifest_digest=None,
-                )
-                if summary.output_storyboard_carrier_digest != (
-                    derive_factory_storyboard_carrier_digest_v1(unapproved_pointer)
-                ):
-                    raise ValueError("Phase-A completion carrier digest drifted")
+
+    def _bind_phase_a_review_authority(
+        self,
+        summary: StoryboardPhaseACompletionSummaryV1,
+        pointer: FactoryStoryboardCarrierV1,
+    ) -> None:
+        authority = self.receipts.paid_budget_authority
+        if (
+            summary.purpose != self.budget.purpose
+            or authority is None
+            or summary.paid_budget_authority_digest != authority.authority_digest
+        ):
+            raise ValueError("Phase-A completion does not bind image authority")
+        if pointer.storyboard_revision != summary.output_storyboard_revision:
+            return
+        unapproved_pointer = FactoryStoryboardCarrierV1(
+            contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V1,
+            storyboard_revision=pointer.storyboard_revision,
+            storyboard_digest=pointer.storyboard_digest,
+            image_set_receipt_digest=pointer.image_set_receipt_digest,
+            approval_receipt_digest=None,
+            execution_manifest_digest=None,
+        )
+        if summary.output_storyboard_carrier_digest != (
+            derive_factory_storyboard_carrier_digest_v1(unapproved_pointer)
+        ):
+            raise ValueError("Phase-A completion carrier digest drifted")
 
     def _bind_factory_receipt_provider_state(self) -> None:
         factory = self.receipts.factory
