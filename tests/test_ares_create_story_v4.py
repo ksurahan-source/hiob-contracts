@@ -20,7 +20,9 @@ from hiob_contracts import (
     request_content_digest_v4,
     sha256_digest,
     story_authority_ref_receipt_digest_v4,
+    story_slot_sequence_v4,
 )
+import hiob_contracts.ares_create_story_v4 as story_v4
 
 
 WORKSPACE_ID = "ws-story-v4"
@@ -334,3 +336,148 @@ def test_schema_descriptor_and_request_digest_publish_v4_shape():
     assert "raw_13q=forbidden" in descriptor["invariants"]
     assert ares_create_story_request_v4_schema_digest().startswith("sha256:")
     assert request_content_digest_v4(request).startswith("sha256:")
+
+
+def test_story_mode_and_nested_digest_uniqueness_guards() -> None:
+    with pytest.raises(ValueError, match="production story modes"):
+        story_slot_sequence_v4("invalid")
+
+    request = AresCreateStoryRequestV4.model_validate(story_request_data())
+    ref = request.authority.janus_product_truth_ref
+    with pytest.raises(ValueError, match="receipt_digest"):
+        ref.model_copy(
+            update={"receipt_digest": sha256_digest({"receipt": "wrong"})}
+        )._bind_receipt_subject()
+
+    evidence = request.evidence_bundle
+    duplicate_anchor = evidence.anchors[0].model_copy(update={"claim_id": "claim-2"})
+    with pytest.raises(ValueError, match="anchor_id values"):
+        evidence.model_copy(
+            update={"anchors": (evidence.anchors[0], duplicate_anchor)}
+        )._require_unique_anchor_and_claim_ids()
+    duplicate_claim = evidence.anchors[0].model_copy(update={"anchor_id": "anchor-2"})
+    with pytest.raises(ValueError, match="claim_id values"):
+        evidence.model_copy(
+            update={"anchors": (evidence.anchors[0], duplicate_claim)}
+        )._require_unique_anchor_and_claim_ids()
+
+    with pytest.raises(ValueError, match="directive_digest"):
+        request.hook_directive.model_copy(
+            update={"directive_digest": sha256_digest({"hook": "wrong"})}
+        )._bind_canonical_hook_line()
+
+    beat = request.narrative_brief.beats[0]
+    with pytest.raises(ValueError, match="used_claim_ids"):
+        beat.model_copy(update={"used_claim_ids": ("c", "c")})._require_unique_ids()
+    with pytest.raises(ValueError, match="addresses_anchor_ids"):
+        beat.model_copy(
+            update={"addresses_anchor_ids": ("a", "a")}
+        )._require_unique_ids()
+
+
+def test_narrative_brief_late_slot_and_digest_guards() -> None:
+    request = AresCreateStoryRequestV4.model_validate(story_request_data())
+    brief = request.narrative_brief
+    first = brief.beats[0]
+    with pytest.raises(ValueError, match="beat indices"):
+        brief.model_copy(
+            update={"beats": (first.model_copy(update={"beat_index": 1}), *brief.beats[1:])}
+        )._bind_fixed_slots_and_digest()
+    with pytest.raises(ValueError, match="story_function"):
+        brief.model_copy(
+            update={
+                "beats": (
+                    first.model_copy(update={"story_function": "tension"}),
+                    *brief.beats[1:],
+                )
+            }
+        )._bind_fixed_slots_and_digest()
+    duplicate = brief.karma_objection_anchors[0]
+    with pytest.raises(ValueError, match="objection anchor_id"):
+        brief.model_copy(
+            update={"karma_objection_anchors": (duplicate, duplicate)}
+        )._bind_fixed_slots_and_digest()
+    with pytest.raises(ValueError, match="story_brief_digest"):
+        brief.model_copy(
+            update={"story_brief_digest": sha256_digest({"brief": "wrong"})}
+        )._bind_fixed_slots_and_digest()
+
+
+def test_story_beat_authority_rejects_unknown_claim_and_non_authority_anchor() -> None:
+    request = AresCreateStoryRequestV4.model_validate(story_request_data())
+    beat = request.narrative_brief.beats[0]
+    with pytest.raises(ValueError, match="sealed Artemis claim"):
+        story_v4._assert_story_beat_authority(
+            beat.model_copy(update={"used_claim_ids": ("unknown",)}),
+            evidence_claim_ids={"claim-fast-absorption"},
+            evidence_anchor_ids={"evidence-fast-absorption"},
+            objection_anchor_ids={"objection-price"},
+        )
+    with pytest.raises(ValueError, match="only proof and objection"):
+        story_v4._assert_story_beat_authority(
+            beat.model_copy(update={"addresses_anchor_ids": ("objection-price",)}),
+            evidence_claim_ids={"claim-fast-absorption"},
+            evidence_anchor_ids={"evidence-fast-absorption"},
+            objection_anchor_ids={"objection-price"},
+        )
+
+
+def test_story_request_late_scope_payload_and_anchor_guards() -> None:
+    request = AresCreateStoryRequestV4.model_validate(story_request_data())
+    authority = request.authority
+    for field in ("workspace_id", "run_id"):
+        alien = authority.janus_product_truth_ref.model_copy(update={field: "other"})
+        with pytest.raises(ValueError, match=field):
+            request.model_copy(
+                update={
+                    "authority": authority.model_copy(
+                        update={"janus_product_truth_ref": alien}
+                    )
+                }
+            )._assert_authority_scope()
+
+    payload_cases = [
+        (
+            "artemis_evidence_bundle_ref",
+            "artifact_digest",
+            "evidence bundle",
+        ),
+        (
+            "karma_story_brief_ref",
+            "artifact_digest",
+            "narrative brief",
+        ),
+        (
+            "karma_story_brief_ref",
+            "payload_digest",
+            "bind narrative brief",
+        ),
+        (
+            "metis_hook_directive_ref",
+            "payload_digest",
+            "bind hook directive",
+        ),
+    ]
+    for ref_name, field, message in payload_cases:
+        ref = getattr(authority, ref_name).model_copy(
+            update={field: sha256_digest({ref_name: field})}
+        )
+        with pytest.raises(ValueError, match=message):
+            request.model_copy(
+                update={
+                    "authority": authority.model_copy(update={ref_name: ref})
+                }
+            )._assert_payload_bindings()
+
+    objection = request.narrative_brief.karma_objection_anchors[0]
+    overlapping = objection.model_copy(
+        update={"anchor_id": request.evidence_bundle.anchors[0].anchor_id}
+    )
+    with pytest.raises(ValueError, match="must not overlap"):
+        request.model_copy(
+            update={
+                "narrative_brief": request.narrative_brief.model_copy(
+                    update={"karma_objection_anchors": (overlapping,)}
+                )
+            }
+        )._assert_beat_authority()

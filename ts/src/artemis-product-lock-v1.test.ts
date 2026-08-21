@@ -616,3 +616,57 @@ test('sealed-result helper requires current authority and exact request-lock bin
     false,
   );
 });
+
+test('duplicate IDs and forbidden claims are rejected independently of content fingerprints', () => {
+  const duplicateObservationPayload = observationsPayload();
+  duplicateObservationPayload.observations.push({
+    ...structuredClone(duplicateObservationPayload.observations[0]),
+    text: 'different fact',
+    evidence_sha256: sha256Digest('different evidence'),
+  });
+  assert.equal(JanusProductObservationsV1Schema.safeParse({
+    ...duplicateObservationPayload,
+    observations_digest: sha256Digest(duplicateObservationPayload),
+  }).success, false);
+
+  const duplicateClaimId = structuredClone(draft());
+  duplicateClaimId.claims.push({
+    ...structuredClone(duplicateClaimId.claims[0]),
+    text: 'different grounded-looking claim',
+    evidence_sha256: sha256Digest('different claim evidence'),
+  });
+  assert.equal(
+    ProductElementLockDraftV1Schema.safeParse(rehashDraft(duplicateClaimId)).success,
+    false,
+  );
+
+  const duplicateForbidden = structuredClone(draft());
+  duplicateForbidden.forbidden_claims = ['medical claim', 'medical claim'];
+  assert.equal(
+    ProductElementLockDraftV1Schema.safeParse(rehashDraft(duplicateForbidden)).success,
+    false,
+  );
+});
+
+test('seal and lock digests reject request, approval, and terminal payload drift independently', () => {
+  assert.equal(ArtemisSealRequestV1Schema.safeParse({
+    ...sealRequest(),
+    request_digest: sha256Digest('wrong seal request'),
+  }).success, false);
+
+  const unboundLock = structuredClone(lock());
+  unboundLock.approval_receipt.workspace_id = 'ws-other';
+  const {
+    receipt_digest: _receiptDigest,
+    ...receiptPayload
+  } = unboundLock.approval_receipt;
+  unboundLock.approval_receipt.receipt_digest = sha256Digest(receiptPayload);
+  const { lock_digest: _lockDigest, ...unboundPayload } = unboundLock;
+  unboundLock.lock_digest = sha256Digest(unboundPayload);
+  assert.equal(ProductElementLockV1Schema.safeParse(unboundLock).success, false);
+
+  assert.equal(ProductElementLockV1Schema.safeParse({
+    ...lock(),
+    lock_digest: sha256Digest('wrong lock'),
+  }).success, false);
+});

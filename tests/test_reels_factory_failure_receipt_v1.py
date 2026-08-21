@@ -96,6 +96,46 @@ def test_failure_receipt_rejects_digest_drift_and_extra_fields() -> None:
 
 
 @pytest.mark.parametrize(
+    ("model", "version", "stage", "attempts"),
+    [
+        (
+            ReelsFactoryFailureReceiptV1,
+            "ReelsFactoryFailureReceipt.v1",
+            "voice",
+            {"script": 1, "image": 1, "voice": 1, "render": 0},
+        ),
+        (
+            ReelsFactoryFailureReceiptV2,
+            "ReelsFactoryFailureReceipt.v2",
+            "video",
+            {
+                "script": 1,
+                "image": 1,
+                "video": 1,
+                "voice": 0,
+                "render": 0,
+            },
+        ),
+    ],
+)
+def test_failure_receipt_rejects_nonpositive_revision(
+    model: type,
+    version: str,
+    stage: str,
+    attempts: dict[str, int],
+) -> None:
+    with pytest.raises(ValidationError, match="revision must be positive"):
+        model.model_validate(
+            _receipt(
+                contract_version=version,
+                revision=0,
+                stage=stage,
+                provider_attempts=attempts,
+            )
+        )
+
+
+@pytest.mark.parametrize(
     "stage",
     [
         "authority",

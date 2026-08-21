@@ -13,6 +13,7 @@ import pytest
 from pydantic import ValidationError
 
 import hiob_contracts
+import hiob_contracts.story_producer_seal_v4 as story_seal
 from hiob_contracts import (
     INFO_SHORT_SLOT_SEQUENCE_V4,
     STORY_PRODUCER_ARTIFACT_PAIRS_V4,
@@ -329,3 +330,75 @@ def test_star_db_accepted_authority_is_only_a_nonconstructible_exact_field_descr
         "status": "accepted",
         "consumer": "ares_strict_request_parser",
     }
+
+
+@pytest.mark.parametrize(
+    ("producer", "artifact_type", "message"),
+    [
+        ("karma", "story_brief", "story_brief_digest"),
+        ("artemis", "evidence_bundle", "evidence_bundle_digest"),
+        ("metis", "hook_directive", "directive_digest"),
+    ],
+)
+def test_typed_artifact_payload_requires_native_artifact_digest(
+    producer: str,
+    artifact_type: str,
+    message: str,
+) -> None:
+    payload, _digest = _artifact_payload(producer, artifact_type)
+    with pytest.raises(ValueError, match=message):
+        story_seal._validate_artifact_payload(
+            producer=producer,
+            artifact_type=artifact_type,
+            artifact_digest=sha256_digest({"artifact": "wrong"}),
+            canonical_payload=payload,
+        )
+
+
+def test_seal_payload_and_staged_reference_late_guards() -> None:
+    candidate = StoryProducerSealCandidateV4.model_validate(
+        staged_candidate_data("karma", "story_brief")
+    )
+    payload = candidate.payload
+    with pytest.raises(ValueError, match="must not be empty"):
+        type(payload)._freeze_canonical_payload({})
+    with pytest.raises(ValueError, match="contract_version"):
+        type(payload)._freeze_canonical_payload({"contract_version": " "})
+
+    with pytest.raises(ValueError, match="canonical_payload_digest"):
+        payload.model_copy(
+            update={"canonical_payload_digest": sha256_digest({"payload": "wrong"})}
+        )._bind_canonical_payload_and_lineage()
+    with pytest.raises(ValueError, match="payload_digest"):
+        payload.model_copy(
+            update={"payload_digest": sha256_digest({"seal": "wrong"})}
+        )._bind_canonical_payload_and_lineage()
+
+    staged = candidate.staged_ref
+    with pytest.raises(ValueError, match="candidate_digest"):
+        staged.model_copy(
+            update={"candidate_digest": sha256_digest({"candidate": "wrong"})}
+        )._bind_staging_identity_and_lineage()
+
+
+def test_seal_candidate_late_scope_and_field_bindings() -> None:
+    candidate = StoryProducerSealCandidateV4.model_validate(
+        staged_candidate_data("janus", "product_truth")
+    )
+    alien_scope = candidate.staged_ref.scope.model_copy(update={"run_id": "other"})
+    with pytest.raises(ValueError, match="exact seal scope"):
+        candidate.model_copy(
+            update={
+                "staged_ref": candidate.staged_ref.model_copy(
+                    update={"scope": alien_scope}
+                )
+            }
+        )._bind_payload_to_staged_ref()
+    with pytest.raises(ValueError, match="staged_ref.artifact_digest"):
+        candidate.model_copy(
+            update={
+                "staged_ref": candidate.staged_ref.model_copy(
+                    update={"artifact_digest": sha256_digest({"artifact": "other"})}
+                )
+            }
+        )._bind_payload_to_staged_ref()

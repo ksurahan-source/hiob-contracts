@@ -23,7 +23,10 @@ from hiob_contracts.factory import (
     sha256_digest,
 )
 from hiob_contracts.parzifal_target_input import ParzifalTargetInput
-from hiob_contracts.ares_script_input import AresScriptInput
+from hiob_contracts.ares_script_input import (
+    AresScriptInput,
+    ares_script_input_schema_digest,
+)
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 SCHEMA_DIGEST = sha256_digest({"schema": "example.v1"})
@@ -215,6 +218,10 @@ def test_ares_script_input_validation_missing_grounding():
     )
     errs = script_input.validate()
     assert any("grounding fact" in e for e in errs)
+
+
+def test_ares_script_input_schema_digest_is_stable_and_nonblank():
+    assert ares_script_input_schema_digest().startswith("sha256:")
 
 
 def test_karma_p2a_receipt_carries_ares_v3_projection():

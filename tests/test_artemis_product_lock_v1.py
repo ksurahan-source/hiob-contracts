@@ -95,6 +95,11 @@ class _Resolver:
         return True
 
 
+class _StaleResolver:
+    def is_current_approval(self, **_values) -> bool:
+        return False
+
+
 def test_janus_owns_observations_not_product_claims() -> None:
     observations = _observations()
 
@@ -309,3 +314,117 @@ def test_seal_result_has_exactly_one_terminal_shape() -> None:
             lock=None,
             error_code=None,
         )
+
+    assert not blocked.authorizes(request, resolver=_Resolver())
+
+
+def test_artemis_rejects_blank_duplicate_and_mismatched_content() -> None:
+    blank = _observations().model_dump(
+        mode="python",
+        exclude={"contract_version", "observations_digest"},
+    )
+    blank["product_name"] = "   "
+    with pytest.raises(ValidationError, match="blank"):
+        JanusProductObservationsV1.build(**blank)
+
+    duplicate_observations = _observations().model_dump(
+        mode="python",
+        exclude={"contract_version", "observations_digest"},
+    )
+    second_observation = dict(duplicate_observations["observations"][0])
+    second_observation["text"] = "다른 문구"
+    duplicate_observations["observations"] = (
+        *duplicate_observations["observations"],
+        second_observation,
+    )
+    with pytest.raises(ValidationError, match="observation_id"):
+        JanusProductObservationsV1.build(**duplicate_observations)
+
+    duplicate_claims = _draft().model_dump(
+        mode="python",
+        exclude={"contract_version", "draft_digest"},
+    )
+    second_claim = dict(duplicate_claims["claims"][0])
+    second_claim["text"] = "다른 주장"
+    duplicate_claims["claims"] = (*duplicate_claims["claims"], second_claim)
+    with pytest.raises(ValidationError, match="claim_id"):
+        ProductElementLockDraftV1.build(**duplicate_claims)
+
+    request = ArtemisCompileRequestV1.build(observations=_observations())
+    mismatched_draft = ProductElementLockDraftV1.build(
+        **{
+            **_draft().model_dump(
+                mode="python",
+                exclude={"contract_version", "draft_digest"},
+            ),
+            "compile_request_digest": sha256_digest("different-request"),
+        }
+    )
+    with pytest.raises(ValidationError, match="must match result"):
+        ArtemisCompileResultV1(
+            status="compiled",
+            request_digest=request.request_digest,
+            draft=mismatched_draft,
+        )
+
+
+def test_artemis_rejects_incomplete_grounding_and_stale_approval() -> None:
+    source_payload = _observations().model_dump(
+        mode="python",
+        exclude={"contract_version", "observations_digest"},
+    )
+    second = dict(source_payload["observations"][0])
+    second.update(
+        observation_id="obs-2",
+        kind="social_proof",
+        text="재구매 후기",
+    )
+    source_payload["observations"] = (*source_payload["observations"], second)
+    observations = JanusProductObservationsV1.build(**source_payload)
+    request = ArtemisCompileRequestV1.build(observations=observations)
+    incomplete = ProductElementLockDraftV1.build(
+        **{
+            **_draft().model_dump(
+                mode="python",
+                exclude={"contract_version", "draft_digest"},
+            ),
+            "source_observations_digest": observations.observations_digest,
+            "compile_request_digest": request.request_digest,
+        }
+    )
+    with pytest.raises(ValueError, match="not grounded"):
+        ArtemisCompileResultV1.compiled(request, incomplete)
+
+    seal_request = _seal_request()
+    with pytest.raises(ValueError, match="not current"):
+        ProductElementLockV1.from_verified(
+            seal_request,
+            resolver=_StaleResolver(),
+        )
+
+    lock = ProductElementLockV1.from_verified(
+        seal_request,
+        resolver=_Resolver(),
+    )
+    assert lock.authorizes(resolver=_Resolver())
+
+    foreign_draft = ProductElementLockDraftV1.build(
+        **{
+            **seal_request.draft.model_dump(
+                mode="python",
+                exclude={"contract_version", "draft_digest"},
+            ),
+            "workspace_id": "foreign-workspace",
+        }
+    )
+    foreign_receipt = ArtemisApprovalReceiptV1.build(
+        receipt_id="foreign-receipt",
+        draft=foreign_draft,
+        approver_account_id="user-1",
+        environment="test",
+        state_revision=1,
+    )
+    payload = lock.model_dump(mode="python")
+    payload["approval_receipt"] = foreign_receipt
+    with pytest.raises(ValidationError, match="does not bind product element lock"):
+        ProductElementLockV1.model_validate(payload)

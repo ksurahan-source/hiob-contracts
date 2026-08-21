@@ -24,7 +24,14 @@ from hiob_contracts import (
     derive_editor_approval_digest_v2,
     derive_effect_key_v2,
     sha256_digest,
+    validate_creative_order_v2,
+    validate_editor_approval_receipt_v2,
+    validate_paid_effect_attempt_v2,
+    validate_paid_effect_intent_v2,
+    validate_script_approval_receipt_v2,
+    validate_verified_render_receipt_v2,
 )
+from hiob_contracts import overnight_first_customer_v2 as contract_module
 
 
 PAYLOAD = {"brief_id": "brief-1", "format": "reel"}
@@ -404,3 +411,124 @@ def test_verified_receipt_requires_pass_exact_sha_and_exact_editor_binding():
     mismatched_editor["editor_approval_digest"] = ORDER_DIGEST
     parsed = VerifiedRenderReceiptV2.model_validate(mismatched_editor)
     assert not parsed.binds(editor)
+
+
+def test_v2_identity_helpers_reject_blank_digest_and_key_inputs():
+    with pytest.raises(ValueError, match="non-empty"):
+        derive_customer_order_key_v2(" ", "EXT-1")
+    with pytest.raises(ValueError, match="64 lowercase hex"):
+        derive_effect_key_v2("invalid-key", SCRIPT_DIGEST, "visual", "hero")
+    with pytest.raises(ValueError, match="sha256"):
+        derive_effect_key_v2(ORDER_KEY, "invalid-digest", "visual", "hero")
+    with pytest.raises(ValueError, match="64 lowercase hex"):
+        derive_editor_approval_digest_v2(
+            "invalid-key",
+            SCRIPT_DIGEST,
+            TIMELINE_DIGEST,
+            MEDIA_DIGEST,
+            POLICY_DIGEST,
+        )
+
+
+def test_creative_order_json_and_timestamp_edges_fail_closed():
+    nested = order_data()
+    nested["canonical_order_payload"] = {
+        "brief_id": "brief-1",
+        "scenes": [{"index": 0}, {"index": 1}],
+    }
+    nested["canonical_order_digest"] = sha256_digest(
+        nested["canonical_order_payload"]
+    )
+    assert CreativeOrderV2.model_validate(nested).canonical_order_payload[
+        "scenes"
+    ]
+
+    finite_float = order_data()
+    finite_float["canonical_order_payload"] = {"score": 0.5}
+    finite_float["canonical_order_digest"] = sha256_digest(
+        finite_float["canonical_order_payload"]
+    )
+    assert CreativeOrderV2.model_validate(
+        finite_float
+    ).canonical_order_payload == {"score": 0.5}
+
+    empty_payload = order_data()
+    empty_payload["canonical_order_payload"] = {}
+    empty_payload["canonical_order_digest"] = sha256_digest({})
+    with pytest.raises(ValidationError, match="must not be empty"):
+        CreativeOrderV2.model_validate(empty_payload)
+
+    for unsafe in (
+        {"value": float("nan")},
+        {"value": ("tuple",)},
+    ):
+        data = order_data()
+        data["canonical_order_payload"] = unsafe
+        data["canonical_order_digest"] = ORDER_DIGEST
+        with pytest.raises(ValidationError):
+            CreativeOrderV2.model_validate(data)
+
+    with pytest.raises(ValueError, match="non-string key"):
+        contract_module._validate_json_value({1: "value"})
+
+    for timestamp in (
+        "2026-07-16 00:00:00",
+        "2026-02-30T00:00:00Z",
+    ):
+        data = order_data()
+        data["created_at_utc"] = timestamp
+        with pytest.raises(ValidationError):
+            CreativeOrderV2.model_validate(data)
+
+
+def test_verified_render_requires_complete_revision_maps():
+    for field, value in (
+        ("source_revisions", {}),
+        ("source_revisions", {" ": "abc123"}),
+        ("deployed_revisions", {"modal": " "}),
+    ):
+        data = verified_render_data()
+        data[field] = value
+        with pytest.raises(ValidationError):
+            VerifiedRenderReceiptV2.model_validate(data)
+
+
+def test_paid_attempt_rejects_identity_state_cost_and_time_drift():
+    cases = (
+        ("effect_key", "0" * 64, "effect_key"),
+        ("fencing_token", 0, "fencing_token"),
+        ("lease_owner", None, "active lease"),
+        ("cost_currency", "USD", "present together"),
+        ("updated_at_utc", "2026-07-16T00:02:59Z", "cannot precede"),
+    )
+    for field, value, message in cases:
+        data = effect_attempt_data()
+        data[field] = value
+        with pytest.raises(ValidationError, match=message):
+            PaidEffectAttemptV2.model_validate(data)
+
+    wrong_cost_currency = effect_attempt_data()
+    wrong_cost_currency.update(cost_currency="EUR", cost_amount=1.0)
+    with pytest.raises(ValidationError, match="authorized currency"):
+        PaidEffectAttemptV2.model_validate(wrong_cost_currency)
+
+
+def test_public_v2_validation_entrypoints_return_contracts():
+    assert validate_creative_order_v2(order_data()).contract_version == (
+        "CreativeOrder.v2"
+    )
+    assert validate_script_approval_receipt_v2(
+        script_approval_data()
+    ).approval_kind == "script"
+    assert validate_editor_approval_receipt_v2(
+        editor_approval_data()
+    ).editor_account_id == "acct-1"
+    assert validate_paid_effect_intent_v2(
+        effect_intent_data()
+    ).effect_kind == "visual"
+    assert validate_paid_effect_attempt_v2(
+        effect_attempt_data()
+    ).attempt_id == "attempt-1"
+    assert validate_verified_render_receipt_v2(
+        verified_render_data()
+    ).qa_verdict == "PASS"

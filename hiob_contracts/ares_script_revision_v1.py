@@ -115,8 +115,6 @@ def _parse_utc(value: str) -> datetime:
         parsed = datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError as exc:
         raise ValueError("timestamp is not a valid calendar value") from exc
-    if parsed.utcoffset() is None or parsed.utcoffset().total_seconds() != 0:
-        raise ValueError("timestamp must be UTC")
     return parsed
 
 
@@ -346,8 +344,6 @@ class ScriptPackageV1(BaseModel):
             raise ValueError("voice_script beat indices must be exactly 0..N-1")
         if caption_indices != expected_indices:
             raise ValueError("caption_script beat indices must be exactly 0..N-1")
-        if voice_indices != caption_indices:
-            raise ValueError("voice/caption segment indices must match")
         if any(not segment.text.strip() for segment in self.voice_script):
             raise ValueError("voice_script segments must contain non-empty dialogue")
         expected = canonical_contract_digest_v1(

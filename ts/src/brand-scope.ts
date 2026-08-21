@@ -31,8 +31,8 @@ const CONTRACT_WHITESPACE = new Set([
 function hasSurroundingContractWhitespace(value: string): boolean {
   return value.length > 0
     && (
-      CONTRACT_WHITESPACE.has(value[0] ?? '')
-      || CONTRACT_WHITESPACE.has(value[value.length - 1] ?? '')
+      CONTRACT_WHITESPACE.has(value.charAt(0))
+      || CONTRACT_WHITESPACE.has(value.charAt(value.length - 1))
     );
 }
 
@@ -57,7 +57,7 @@ function hasUnpairedSurrogate(value: string): boolean {
 
 function hasControlCharacter(value: string): boolean {
   for (const char of value) {
-    const code = char.codePointAt(0) ?? 0;
+    const code = char.codePointAt(0) as number;
     if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) {
       return true;
     }

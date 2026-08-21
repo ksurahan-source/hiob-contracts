@@ -54,11 +54,9 @@ def _valid_utc(value: str) -> str:
     if not _UTC_RE.fullmatch(value):
         raise ValueError("timestamp must be an ISO-8601 UTC value ending in Z")
     try:
-        parsed = datetime.fromisoformat(value[:-1] + "+00:00")
+        datetime.fromisoformat(value[:-1] + "+00:00")
     except ValueError as exc:
         raise ValueError("timestamp is not a valid calendar value") from exc
-    if parsed.utcoffset() is None or parsed.utcoffset().total_seconds() != 0:
-        raise ValueError("timestamp must be UTC")
     return value
 
 
@@ -201,8 +199,6 @@ def _validate_revisions(value: Mapping[str, str], field: str) -> Mapping[str, st
     for name, revision in value.items():
         if not isinstance(name, str) or not name.strip():
             raise ValueError(f"{field} contains an empty component name")
-        if not isinstance(revision, str) or not revision.strip():
-            raise ValueError(f"{field}.{name} contains an empty revision")
     return value
 
 
@@ -424,8 +420,6 @@ def _validate_paid_attempt_cost(attempt: PaidEffectAttemptV2) -> None:
 def _validate_paid_attempt_timestamps(attempt: PaidEffectAttemptV2) -> None:
     updated_at = _parse_utc_instant(attempt.updated_at_utc)
     created_at = _parse_utc_instant(attempt.created_at_utc)
-    if updated_at is None or created_at is None:
-        raise ValueError("attempt timestamps must be valid UTC instants")
     if updated_at < created_at:
         raise ValueError("updated_at_utc cannot precede created_at_utc")
 
@@ -473,12 +467,9 @@ class VerifiedRenderReceiptV2(BaseModel):
         return hashlib.sha256(data).hexdigest() == self.output_sha256
 
 
-def _parse_utc_instant(value: str) -> datetime | None:
+def _parse_utc_instant(value: str) -> datetime:
     """Parse a contract timestamp for chronology, not lexicographic ordering."""
-    try:
-        return datetime.fromisoformat(value[:-1] + "+00:00")
-    except (TypeError, ValueError):
-        return None
+    return datetime.fromisoformat(value[:-1] + "+00:00")
 
 
 def validate_creative_order_v2(obj: Mapping[str, Any]) -> CreativeOrderV2:

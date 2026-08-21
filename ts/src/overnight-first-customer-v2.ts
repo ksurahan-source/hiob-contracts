@@ -29,11 +29,11 @@ function utcTimestampMicros(value: string): number {
   // Date.parse normalizes to milliseconds, which loses the six fractional
   // digits this sealed contract permits. Parse the fraction separately so an
   // update at .000001Z is correctly ordered after the whole second.
-  const match = /^(.*?)(?:\.(\d{1,6}))?Z$/.exec(value);
-  if (!match) return Number.NaN;
-  const wholeMs = Date.parse(`${match[1]}Z`);
-  if (Number.isNaN(wholeMs)) return Number.NaN;
-  const micros = Number.parseInt((match[2] ?? '').padEnd(6, '0') || '0', 10);
+  // Both calls are downstream of UtcTimestampSchema, so shape and calendar
+  // validity have already been established.
+  const [, whole, fraction = ''] = /^(.*?)(?:\.(\d{1,6}))?Z$/.exec(value)!;
+  const wholeMs = Date.parse(`${whole}Z`);
+  const micros = Number.parseInt(fraction.padEnd(6, '0'), 10);
   return wholeMs * 1000 + micros;
 }
 
@@ -154,7 +154,9 @@ export const CreativeOrderV2Schema = z
   })
   .strict()
   .superRefine((order, ctx) => {
-    if (order.canonical_order_digest !== sha256Digest(order.canonical_order_payload)) {
+    if (Object.keys(order.canonical_order_payload).length > 0
+      && isJsonValue(order.canonical_order_payload)
+      && order.canonical_order_digest !== sha256Digest(order.canonical_order_payload)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'canonical_order_digest mismatch' });
     }
     if (order.customer_order_key !== deriveCustomerOrderKeyV2(

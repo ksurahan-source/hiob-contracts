@@ -92,6 +92,32 @@ def test_ares_generation_output_is_exact_immutable_provider_input() -> None:
         parsed.conflict = "mutated"
     with pytest.raises(ValidationError):
         parsed.model_copy(update={"current_character": "mutated"})
+    assert parsed.model_copy() == parsed
+
+
+def test_ares_generation_rejects_scope_mismatch_after_valid_nested_digests() -> None:
+    value = _payload()
+    value["voice_spec"]["subject_id"] = "other-subject"
+    unsigned_voice = dict(value["voice_spec"])
+    unsigned_voice.pop("voice_spec_digest")
+    value["voice_spec"]["voice_spec_digest"] = derive_voice_spec_digest_v1(
+        unsigned_voice
+    )
+    unsigned = dict(value)
+    unsigned.pop("generation_input_digest")
+    value["generation_input_digest"] = (
+        derive_ares_script_generation_input_digest_v1(unsigned)
+    )
+
+    with pytest.raises(ValidationError, match="must match character_lock"):
+        AresScriptGenerationInputV1.model_validate(value, strict=True)
+
+
+def test_ares_generation_private_nonblank_guard_rejects_contract_blank() -> None:
+    import hiob_contracts.planets.ares.script_generation_v1 as contract_module
+
+    with pytest.raises(ValueError, match="must not be blank"):
+        contract_module._contract_nonblank("\uFEFF")
 
 
 @pytest.mark.parametrize(

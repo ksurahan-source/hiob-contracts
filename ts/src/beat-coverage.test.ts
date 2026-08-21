@@ -5,6 +5,8 @@ import {
   BeatCoverageV1Schema,
   DEFAULT_BEAT_COVERAGE_LANES_V1,
   SerialFanInReceiptV1Schema,
+  beatCoverageDigestPayloadV1,
+  beatLaneTerminalReceiptDigestV1,
   createBeatCoverageV1,
   createBeatLaneTerminalReceiptV1,
 } from './beat-coverage.js';
@@ -85,6 +87,20 @@ test('exact indices, duplicate, missing, foreign, failed, and out-of-range lanes
     ...value,
     lane_receipts: [{ ...value.lane_receipts[0], beat_index: 6 }, ...value.lane_receipts.slice(1)],
   }).success, false);
+  const strippedReceipts = value.lane_receipts.map((receipt) => {
+    const {
+      status: _status,
+      contract_version: _contractVersion,
+      receipt_digest: _digest,
+      ...rawReceipt
+    } = receipt;
+    return rawReceipt;
+  });
+  const { coverage_digest: _coverageDigest, ...coveragePayload } = value;
+  assert.equal(createBeatCoverageV1({
+    ...coveragePayload,
+    lane_receipts: strippedReceipts,
+  }).lane_receipts.every((receipt) => receipt.status === 'succeeded'), true);
 });
 
 test('strict boundaries reject malformed, unknown, and coercible coverage values without crashing', () => {
@@ -141,4 +157,27 @@ test('lane constructor preserves nonblank whitespace for Python digest parity', 
     padded.receipt_digest,
     'sha256:65b1c484bebdb3d57f1dfc733748a8dd4cef862a9b374736a6c41395307c4d6a',
   );
+});
+
+test('coverage helpers exercise explicit defaults, lane ordering, and lane policy failures', () => {
+  const value = coverage(2);
+  const first = value.lane_receipts[0];
+  const { receipt_digest: _receiptDigest, ...receiptPayload } = first;
+  assert.equal(beatLaneTerminalReceiptDigestV1(receiptPayload), first.receipt_digest);
+  assert.equal(createBeatLaneTerminalReceiptV1(receiptPayload).status, 'succeeded');
+
+  const { coverage_digest: _coverageDigest, ...coveragePayload } = value;
+  const repeated = [value.lane_receipts[2], first, first, ...value.lane_receipts.slice(3)];
+  assert.equal(
+    beatCoverageDigestPayloadV1({ ...coveragePayload, lane_receipts: repeated }).lane_receipts.length,
+    repeated.length,
+  );
+  assert.equal(BeatCoverageV1Schema.safeParse({
+    ...value,
+    required_lanes: [...DEFAULT_BEAT_COVERAGE_LANES_V1, DEFAULT_BEAT_COVERAGE_LANES_V1[0]],
+  }).success, false);
+  assert.equal(BeatCoverageV1Schema.safeParse({
+    ...value,
+    required_lanes: DEFAULT_BEAT_COVERAGE_LANES_V1.slice(1),
+  }).success, false);
 });

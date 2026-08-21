@@ -87,6 +87,55 @@ function sampleRequest() {
   };
 }
 
+function sampleVoiceSpec(subjectId = 'mom') {
+  const value = {
+    contract_version: 'VoiceSpec.v1' as const,
+    subject_id: subjectId,
+    rhythm: 'short and quick',
+    vocabulary: ['근데'],
+    forbidden_phrases: ['혁신적인'],
+    approved_examples: ['첫 문장', '둘째 문장', '셋째 문장'],
+  };
+  return { ...value, voice_spec_digest: deriveVoiceSpecDigestV1(value) };
+}
+
+function sampleResult() {
+  const packageDigest = digest({ package: 'v2' });
+  return {
+    contract_version: 'AresCreateScriptResult.v2' as const,
+    status: 'ok' as const,
+    script_package: {
+      contract_version: 'AresScriptPackage.v2' as const,
+      master_sales_script: { title: 'one-beat script' },
+      voice_script: [{ beat_index: 0, text: 'voice' }],
+      caption_script: [{ beat_index: 0, text: 'caption' }],
+      pronunciation_overrides: {},
+      package_digest: packageDigest,
+    },
+    beat_plan: {
+      contract_version: 'AresBeatPlan.v2' as const,
+      script_package_digest: packageDigest,
+      beats: [{
+        beat_index: 0,
+        text: 'voice',
+        caption: 'caption',
+        scene_direction: { shot: '', subject: '', setting: '', overlay: '' },
+      }],
+      beat_role_intents: [],
+      plan_digest: digest({ plan: 'v2' }),
+    },
+    quality_findings: [],
+    provenance: {
+      producer: 'ares' as const,
+      contract_version: 'AresCreateScriptResult.v2' as const,
+      request_content_digest: digest({ request: 'v2' }),
+    },
+    usage: {},
+    content_digest: digest({ result: 'v2' }),
+    block_reason: null,
+  };
+}
+
 test('request schema accepts sealed authority bundle', () => {
   const parsed = AresCreateScriptRequestV2Schema.parse(sampleRequest());
   assert.equal(parsed.contract_version, 'AresCreateScriptRequest.v2');
@@ -142,18 +191,7 @@ test('speaker rejects a mismatched face and voice binding', () => {
 test('identity accepts one matching VoiceSpec and rejects subject drift', () => {
   const request = sampleRequest();
   const identity = request.identity as Record<string, any>;
-  const voiceSpec = {
-    contract_version: 'VoiceSpec.v1' as const,
-    subject_id: 'mom',
-    rhythm: 'short and quick',
-    vocabulary: ['근데'],
-    forbidden_phrases: ['혁신적인'],
-    approved_examples: ['첫 문장', '둘째 문장', '셋째 문장'],
-  };
-  identity.voice_spec = {
-    ...voiceSpec,
-    voice_spec_digest: deriveVoiceSpecDigestV1(voiceSpec),
-  };
+  identity.voice_spec = sampleVoiceSpec();
   assert.equal(AresCreateScriptRequestV2Schema.safeParse(request).success, true);
   identity.voice_spec.subject_id = 'other';
   identity.voice_spec.voice_spec_digest = deriveVoiceSpecDigestV1(
@@ -214,4 +252,69 @@ test('schema digests are stable and distinct', () => {
   assert.match(b, /^sha256:[0-9a-f]{64}$/);
   assert.equal(a, aresCreateScriptRequestSchemaDigest());
   assert.notEqual(a, b);
+});
+
+test('authority, identity, and product bindings reject each independent drift', () => {
+  const mutations: Array<(value: ReturnType<typeof sampleRequest>) => void> = [
+    value => { value.authority.accepted_p2a_receipt.edge_id = 'j2p'; },
+    value => { value.authority.accepted_p2a_receipt.target_contract.name = 'OtherInput'; },
+    value => { value.authority.accepted_p2a_receipt.source_output_digests = [digest({ other: 'identity' })]; },
+    value => { value.identity.identity_lock_digest = digest({ other: 'identity' }); },
+    value => { value.product_facts.product_truth_digest = digest({ other: 'product' }); },
+  ];
+  for (const mutate of mutations) {
+    const request = sampleRequest();
+    mutate(request);
+    assert.equal(AresCreateScriptRequestV2Schema.safeParse(request).success, false);
+  }
+});
+
+test('identity rejects duplicate roles and a VoiceSpec spanning multiple speakers', () => {
+  const duplicateRoles = sampleRequest();
+  duplicateRoles.identity.speakers.push({
+    role: 'lead',
+    subject_id: 'guest',
+    display_name: 'Guest',
+  });
+  assert.equal(AresCreateScriptRequestV2Schema.safeParse(duplicateRoles).success, false);
+
+  const multiSpeakerVoice = sampleRequest();
+  multiSpeakerVoice.identity.speakers.push({
+    role: 'guest',
+    subject_id: 'guest',
+    display_name: 'Guest',
+  });
+  (multiSpeakerVoice.identity as Record<string, unknown>).voice_spec = sampleVoiceSpec();
+  assert.equal(AresCreateScriptRequestV2Schema.safeParse(multiSpeakerVoice).success, false);
+});
+
+test('result terminal states enforce package, plan, binding, and block reason', () => {
+  const valid = sampleResult();
+  assert.equal(AresCreateScriptResultV2Schema.safeParse(valid).success, true);
+  assert.equal(AresCreateScriptResultV2Schema.safeParse({
+    ...valid,
+    script_package: null,
+    beat_plan: null,
+  }).success, false);
+  assert.equal(AresCreateScriptResultV2Schema.safeParse({
+    ...valid,
+    beat_plan: { ...valid.beat_plan, script_package_digest: digest({ other: 'package' }) },
+  }).success, false);
+  assert.equal(AresCreateScriptResultV2Schema.safeParse({
+    ...valid,
+    block_reason: 'must be absent',
+  }).success, false);
+
+  const blocked = {
+    ...valid,
+    status: 'blocked' as const,
+    script_package: null,
+    beat_plan: null,
+    block_reason: 'authority unavailable',
+  };
+  assert.equal(AresCreateScriptResultV2Schema.safeParse(blocked).success, true);
+  assert.equal(AresCreateScriptResultV2Schema.safeParse({
+    ...blocked,
+    block_reason: null,
+  }).success, false);
 });

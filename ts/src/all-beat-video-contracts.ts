@@ -64,11 +64,9 @@ function safelyEqualsDigest(actual: string, derive: () => string): boolean {
 }
 
 function safelyCanonicalEqual(left: unknown, right: unknown): boolean {
-  try {
-    assertStrictCanonicalValue(left);
-    assertStrictCanonicalValue(right);
-    return sha256Digest(left) === sha256Digest(right);
-  } catch { return false; }
+  assertStrictCanonicalValue(left);
+  assertStrictCanonicalValue(right);
+  return sha256Digest(left) === sha256Digest(right);
 }
 
 export function deriveFactoryBeatManifestIdempotencyKeyV1(value: unknown): string {

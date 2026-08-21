@@ -951,3 +951,190 @@ def test_g1_digest_rejects_trailing_newline():
     values[0] += "\n"
     with pytest.raises(ValueError, match="sha256"):
         derive_ares_g1_subject_digest_v1(*values)
+
+
+def test_contract_helpers_reject_noncanonical_and_non_json_inputs():
+    package = ScriptPackageV1.model_validate(script_package_data())
+    assert len(package.master_sales_script) == len(master_sales_script_data())
+    with pytest.raises(TypeError, match="cannot be mutated"):
+        setattr(package.master_sales_script, "new_field", "value")
+
+    bad_uuid = script_package_data()
+    bad_uuid["workspace_id"] = "00000000-0000-4000-8000-00000000000A"
+    _rehash(bad_uuid, "package_digest")
+    with pytest.raises(ValidationError, match="canonical lowercase"):
+        ScriptPackageV1.model_validate(bad_uuid)
+
+    bad_digest = script_package_data()
+    bad_digest["package_digest"] = "not-a-digest"
+    with pytest.raises(ValidationError, match="64 lowercase hex"):
+        ScriptPackageV1.model_validate(bad_digest)
+
+    bad_timestamp = approval_command_data()
+    bad_timestamp["issued_at_utc"] = "2026-07-23 01:02:03"
+    _rehash(bad_timestamp, "command_digest")
+    with pytest.raises(ValidationError, match="ending in Z"):
+        AresApprovalCommandV1.model_validate(bad_timestamp)
+
+    for unsafe in ({"bad": "\ud800"}, {1: "value"}):
+        with pytest.raises(ValueError):
+            canonical_contract_digest_v1(unsafe)
+
+    with pytest.raises(TypeError, match="model or mapping"):
+        canonical_contract_json_v1(["not", "a", "mapping"])
+    with pytest.raises(TypeError, match="model or mapping"):
+        canonical_contract_digest_v1(["not", "a", "mapping"])
+
+    raw = {1: "value"}
+    assert (
+        ScriptPackageV1._reject_normalized_pronunciation_key_collisions(raw)
+        is raw
+    )
+
+
+def test_artifact_models_reject_empty_content_and_digest_drift():
+    blank_beat = beat_plan_data()
+    blank_beat["beats"][0]["text"] = "   "
+    _rehash(blank_beat, "plan_digest")
+    with pytest.raises(ValidationError, match="blank"):
+        BeatPlanV1.model_validate(blank_beat)
+
+    bad_package_digest = script_package_data()
+    bad_package_digest["package_digest"] = sha256_digest("wrong-package")
+    with pytest.raises(ValidationError, match="package_digest"):
+        ScriptPackageV1.model_validate(bad_package_digest)
+
+    empty_plan = beat_plan_data()
+    empty_plan["production_plan"] = {}
+    _rehash(empty_plan, "plan_digest")
+    with pytest.raises(ValidationError, match="production_plan"):
+        BeatPlanV1.model_validate(empty_plan)
+
+    empty_beats = beat_plan_data()
+    empty_beats["beats"] = []
+    _rehash(empty_beats, "plan_digest")
+    with pytest.raises(ValidationError, match="at least one beat"):
+        BeatPlanV1.model_validate(empty_beats)
+
+    candidate_mismatch = revision_data()
+    candidate_mismatch["script_package"]["candidate_id"] = (
+        "00000000-0000-4000-8000-000000000099"
+    )
+    _rehash(candidate_mismatch["script_package"], "package_digest")
+    _rehash(candidate_mismatch, "revision_digest")
+    with pytest.raises(ValidationError, match="candidate_id"):
+        AresScriptRevisionV1.model_validate(candidate_mismatch)
+
+    bad_script_revision_digest = revision_data()
+    bad_script_revision_digest["revision_digest"] = sha256_digest(
+        "wrong-script-revision"
+    )
+    with pytest.raises(ValidationError, match="revision_digest"):
+        AresScriptRevisionV1.model_validate(bad_script_revision_digest)
+
+    bad_plan_revision_digest = beat_plan_revision_data()
+    bad_plan_revision_digest["revision_digest"] = sha256_digest(
+        "wrong-plan-revision"
+    )
+    with pytest.raises(ValidationError, match="revision_digest"):
+        AresBeatPlanRevisionV1.model_validate(bad_plan_revision_digest)
+
+
+def test_revision_binding_rejects_scope_and_caption_drift():
+    script_revision = AresScriptRevisionV1.model_validate(revision_data())
+    plan_revision = AresBeatPlanRevisionV1.model_validate(
+        beat_plan_revision_data()
+    )
+
+    wrong_scope = script_revision.model_copy(
+        update={"run_id": "00000000-0000-4000-8000-000000000099"}
+    )
+    assert not plan_revision.binds_script_revision(wrong_scope)
+
+    first_beat = plan_revision.beat_plan.beats[0].model_copy(
+        update={"caption": "different caption"}
+    )
+    changed_plan = plan_revision.beat_plan.model_copy(
+        update={"beats": (first_beat, *plan_revision.beat_plan.beats[1:])}
+    )
+    caption_drift = plan_revision.model_copy(update={"beat_plan": changed_plan})
+    assert not caption_drift.binds_script_revision(script_revision)
+
+
+def test_approval_commands_reject_invalid_artifact_shapes_and_digests():
+    script_with_plan = approval_command_data()
+    script_with_plan["beat_plan_digest"] = beat_plan_data()["plan_digest"]
+    _rehash(script_with_plan, "command_digest")
+    with pytest.raises(ValidationError, match="ScriptPackage artifact"):
+        AresApprovalCommandV1.model_validate(script_with_plan)
+
+    production_missing_plan = approval_command_data("production_plan")
+    production_missing_plan["beat_plan_digest"] = None
+    _rehash(production_missing_plan, "command_digest")
+    with pytest.raises(ValidationError, match="requires BeatPlan"):
+        AresApprovalCommandV1.model_validate(production_missing_plan)
+
+    production_wrong_subject = approval_command_data("production_plan")
+    production_wrong_subject["g1_subject_digest"] = sha256_digest(
+        "wrong-g1-subject"
+    )
+    production_wrong_subject["artifact_digest"] = production_wrong_subject[
+        "g1_subject_digest"
+    ]
+    _rehash(production_wrong_subject, "command_digest")
+    with pytest.raises(ValidationError, match="four-digest G1 subject"):
+        AresApprovalCommandV1.model_validate(production_wrong_subject)
+
+    bad_command_digest = approval_command_data()
+    bad_command_digest["command_digest"] = sha256_digest("wrong-command")
+    with pytest.raises(ValidationError, match="command_digest"):
+        AresApprovalCommandV1.model_validate(bad_command_digest)
+
+    script_command = AresApprovalCommandV1.model_validate(
+        approval_command_data()
+    )
+    plan_command = AresApprovalCommandV1.model_validate(
+        approval_command_data("production_plan")
+    )
+    script_revision = AresScriptRevisionV1.model_validate(revision_data())
+    plan_revision = AresBeatPlanRevisionV1.model_validate(
+        beat_plan_revision_data()
+    )
+    assert not script_command.binds_revision(plan_revision)
+    assert not plan_command.binds_revision(script_revision)
+
+
+def test_approval_receipts_reject_invalid_artifacts_windows_and_digest():
+    script_with_plan = approval_receipt_data()
+    script_with_plan["beat_plan_digest"] = beat_plan_data()["plan_digest"]
+    _rehash(script_with_plan, "receipt_digest")
+    with pytest.raises(ValidationError, match="ScriptPackage artifact"):
+        AresApprovalReceiptV1.model_validate(script_with_plan)
+
+    production_missing_plan = approval_receipt_data("production_plan")
+    production_missing_plan["beat_plan_digest"] = None
+    _rehash(production_missing_plan, "receipt_digest")
+    with pytest.raises(ValidationError, match="requires BeatPlan"):
+        AresApprovalReceiptV1.model_validate(production_missing_plan)
+
+    production_wrong_subject = approval_receipt_data("production_plan")
+    production_wrong_subject["g1_subject_digest"] = sha256_digest(
+        "wrong-receipt-g1"
+    )
+    production_wrong_subject["artifact_digest"] = production_wrong_subject[
+        "g1_subject_digest"
+    ]
+    _rehash(production_wrong_subject, "receipt_digest")
+    with pytest.raises(ValidationError, match="four-digest G1 subject"):
+        AresApprovalReceiptV1.model_validate(production_wrong_subject)
+
+    revoked_after_expiry = approval_receipt_data()
+    revoked_after_expiry["revoked_at_utc"] = "2026-07-23T03:02:04Z"
+    _rehash(revoked_after_expiry, "receipt_digest")
+    with pytest.raises(ValidationError, match="cannot follow"):
+        AresApprovalReceiptV1.model_validate(revoked_after_expiry)
+
+    bad_receipt_digest = approval_receipt_data()
+    bad_receipt_digest["receipt_digest"] = sha256_digest("wrong-receipt")
+    with pytest.raises(ValidationError, match="receipt_digest"):
+        AresApprovalReceiptV1.model_validate(bad_receipt_digest)

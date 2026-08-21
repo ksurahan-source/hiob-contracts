@@ -214,3 +214,100 @@ def test_voice_metrics_and_limits_are_bound_to_each_beat_and_bundle_total() -> N
     wrong_total["total_voice_utf8_bytes"] += 1
     with pytest.raises(ValidationError, match="total_voice_utf8_bytes"):
         StoryScriptReviewBundleV1.model_validate(wrong_total)
+
+
+def test_voice_limit_argument_guards() -> None:
+    with pytest.raises(TypeError, match="integer"):
+        story_voice_limits_v1(True)
+    with pytest.raises(ValueError, match="between 1 and 55000"):
+        story_voice_limits_v1(0)
+
+
+def test_request_and_card_late_digest_and_uniqueness_guards() -> None:
+    request = _request()
+    with pytest.raises(ValueError, match="intake_digest"):
+        request.model_copy(
+            update={"intake_digest": "sha256:" + "0" * 64}
+        )._bind_intake()
+    invalid_calls = StoryScriptPaidCallsV1.model_construct(
+        script=1, image=1, video=0, voice=0, render=0
+    )
+    with pytest.raises(ValueError, match="script only"):
+        request.model_copy(update={"paid_calls": invalid_calls})._bind_intake()
+
+    product = StoryProductCardV1.from_intake(request.intake)
+    with pytest.raises(ValueError, match="card_digest"):
+        product.model_copy(
+            update={"card_digest": "sha256:" + "0" * 64}
+        )._bind_card()
+    with pytest.raises(ValueError, match="visual_traits must be unique"):
+        StoryCharacterCardV1._unique_traits(("same", "same"))
+
+
+def test_beat_utf8_ceiling_guard_is_independent() -> None:
+    beat = _beats()[0]
+    text = "😀" * 9
+    with pytest.raises(ValueError, match="UTF-8 limit"):
+        beat.model_copy(
+            update={
+                "duration_ms": 1_000,
+                "voice_text": text,
+                "voice_char_count": len(text),
+                "voice_utf8_bytes": len(text.encode("utf-8")),
+            }
+        )._bind_speech_rate()
+
+
+def test_review_bundle_all_late_shape_rate_and_digest_guards() -> None:
+    bundle = _bundle()
+    with pytest.raises(ValueError, match="exactly 16 beats"):
+        bundle.model_copy(update={"beats": bundle.beats[:-1]})._bind_review()
+    with pytest.raises(ValueError, match="beat indices"):
+        bundle.model_copy(
+            update={
+                "beats": (
+                    bundle.beats[0].model_copy(update={"beat_index": 1}),
+                    *bundle.beats[1:],
+                )
+            }
+        )._bind_review()
+    with pytest.raises(ValueError, match="total_voice_char_count"):
+        bundle.model_copy(
+            update={"total_voice_char_count": bundle.total_voice_char_count + 1}
+        )._bind_review()
+
+    huge_chars = bundle.beats[0].model_copy(update={"voice_char_count": 1_000})
+    beats = (huge_chars, *bundle.beats[1:])
+    with pytest.raises(ValueError, match="character limits"):
+        bundle.model_copy(
+            update={
+                "beats": beats,
+                "total_voice_char_count": sum(beat.voice_char_count for beat in beats),
+            }
+        )._bind_review()
+    huge_utf8 = bundle.beats[0].model_copy(update={"voice_utf8_bytes": 2_000})
+    beats = (huge_utf8, *bundle.beats[1:])
+    with pytest.raises(ValueError, match="UTF-8 limit"):
+        bundle.model_copy(
+            update={
+                "beats": beats,
+                "total_voice_utf8_bytes": sum(beat.voice_utf8_bytes for beat in beats),
+            }
+        )._bind_review()
+
+    card = bundle.character_cards[0]
+    with pytest.raises(ValueError, match="card_id values"):
+        bundle.model_copy(update={"character_cards": (card, card)})._bind_review()
+    with pytest.raises(ValueError, match="exactly one lead"):
+        bundle.model_copy(
+            update={"character_cards": (card.model_copy(update={"role": "support"}),)}
+        )._bind_review()
+    invalid_calls = StoryScriptPaidCallsV1.model_construct(
+        script=1, image=1, video=0, voice=0, render=0
+    )
+    with pytest.raises(ValueError, match="exclude every media call"):
+        bundle.model_copy(update={"paid_calls": invalid_calls})._bind_review()
+    with pytest.raises(ValueError, match="bundle_digest"):
+        bundle.model_copy(
+            update={"bundle_digest": "sha256:" + "0" * 64}
+        )._bind_review()

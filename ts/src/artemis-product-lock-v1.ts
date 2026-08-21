@@ -165,19 +165,7 @@ export const ArtemisClaimV1Schema = z
     kind: ClaimKindSchema,
     source_observation_ids: z.array(OpaqueIdSchema).length(1),
   })
-  .strict()
-  .superRefine((value, ctx) => {
-    if (
-      new Set(value.source_observation_ids).size
-      !== value.source_observation_ids.length
-    ) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'source_observation_ids must be unique',
-        path: ['source_observation_ids'],
-      });
-    }
-  });
+  .strict();
 
 const ProductLockDraftContentShape = {
   ...ProductScopeShape,

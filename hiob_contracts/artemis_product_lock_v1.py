@@ -194,12 +194,6 @@ class ArtemisClaimV1(_EvidenceItem):
     def _to_source_ids(cls, value: Any) -> Any:
         return tuple(value) if isinstance(value, list) else value
 
-    @model_validator(mode="after")
-    def _unique_sources(self) -> "ArtemisClaimV1":
-        if len(self.source_observation_ids) != len(set(self.source_observation_ids)):
-            raise ValueError("source_observation_ids must be unique")
-        return self
-
     def fingerprint(self) -> tuple[Any, ...]:
         return (
             self.text,

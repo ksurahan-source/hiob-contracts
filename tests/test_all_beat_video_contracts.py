@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 import hiob_contracts
+import hiob_contracts.all_beat_video as all_beat_video
 from hiob_contracts import (
     AtroposFanInManifestV2,
     AtroposFanInManifestV3,
@@ -702,3 +703,176 @@ def test_digest_vector_is_stable_for_python_typescript_parity() -> None:
     assert _factory_receipt(_fan_in_v2())["receipt_digest"] == (
         "sha256:8aaa8f391e121cffe978c0c2026ef3b10b0ebd06fefd520da440c437447bbd6f"
     )
+
+
+def test_private_artifact_guards_fail_closed_after_model_construction() -> None:
+    image = all_beat_video.StrictAllBeatArtifactRefV1.model_validate(
+        _artifact(
+            0,
+            kind="image",
+            artifact_id="reference.png",
+            sha_seed="reference",
+        )
+    )
+    with pytest.raises(ValueError, match="relative storage key"):
+        all_beat_video._assert_relative_storage_key("folder//file", "artifact")
+    with pytest.raises(ValueError, match="sha256 values must be unique"):
+        all_beat_video._assert_reference_artifacts((image, image), 0)
+
+    video = BeatVideoReceiptV1.model_validate(_video_receipt(0)).artifact
+    invalid_video_fields = [
+        ({"kind": "image"}, "video/mp4"),
+        ({"bytes_len": 0}, "bytes_len"),
+        ({"duration_ms": 0}, "duration_ms"),
+        ({"width": 0}, "width"),
+        ({"height": 0}, "height"),
+    ]
+    for update, message in invalid_video_fields:
+        with pytest.raises(ValueError, match=message):
+            all_beat_video._assert_video_artifact(
+                video.model_copy(update=update), beat_index=0
+            )
+    with pytest.raises(ValueError, match="final artifact"):
+        all_beat_video._assert_video_artifact(
+            video, beat_index=None, final=True
+        )
+
+    audio = all_beat_video.StrictAllBeatArtifactRefV1.model_validate(
+        _audio_artifacts()[0]
+    )
+    with pytest.raises(ValueError, match="beat_index is required"):
+        all_beat_video._assert_audio_artifact(
+            audio.model_copy(update={"beat_index": None})
+        )
+
+
+def test_https_url_guard_covers_whitespace_invalid_port_and_ip_host() -> None:
+    with pytest.raises(ValueError, match="credential-free HTTPS"):
+        all_beat_video._assert_https_url("https://cdn.example/out file.mp4")
+    with pytest.raises(ValueError, match="credential-free HTTPS"):
+        all_beat_video._assert_https_url("https://cdn.example:99999/out.mp4")
+    all_beat_video._assert_https_url("https://127.0.0.1/out.mp4")
+
+
+def test_manifest_reports_each_sealed_digest_failure_after_valid_shape() -> None:
+    manifest = FactoryBeatManifestV1.model_validate(_manifest())
+    duplicate_nonce = manifest.beats[1].model_copy(
+        update={"generation_nonce": manifest.beats[0].generation_nonce}
+    )
+    with pytest.raises(ValueError, match="generation_nonce"):
+        manifest.model_copy(
+            update={"beats": (manifest.beats[0], duplicate_nonce)}
+        )._bind_all_beats()
+    with pytest.raises(ValueError, match="idempotency_key"):
+        manifest.model_copy(
+            update={"idempotency_key": sha256_digest({"wrong": "idempotency"})}
+        )._bind_all_beats()
+    with pytest.raises(ValueError, match="manifest_digest"):
+        manifest.model_copy(
+            update={"manifest_digest": sha256_digest({"wrong": "manifest"})}
+        )._bind_all_beats()
+
+
+def test_video_receipt_reports_artifact_shape_and_receipt_digest_drift() -> None:
+    receipt = BeatVideoReceiptV1.model_validate(_video_receipt(0))
+    with pytest.raises(ValueError, match="dimensions or duration"):
+        receipt.model_copy(
+            update={
+                "artifact": receipt.artifact.model_copy(update={"width": 720})
+            }
+        )._bind_success_artifact()
+    with pytest.raises(ValueError, match="receipt_digest"):
+        receipt.model_copy(
+            update={"receipt_digest": sha256_digest({"wrong": "receipt"})}
+        )._bind_success_artifact()
+
+
+def test_artifact_set_reports_duplicate_and_terminal_digest_failures() -> None:
+    artifact_set = BeatArtifactSetReceiptV1.model_validate(_artifact_set())
+    first, second = artifact_set.video_receipts
+    with pytest.raises(ValueError, match="receipt digests must be unique"):
+        artifact_set.model_copy(
+            update={
+                "video_receipts": (
+                    first,
+                    second.model_copy(
+                        update={"receipt_digest": first.receipt_digest}
+                    ),
+                )
+            }
+        )._bind_complete_set()
+    with pytest.raises(ValueError, match="artifact digests must be unique"):
+        artifact_set.model_copy(
+            update={
+                "video_receipts": (
+                    first,
+                    second.model_copy(
+                        update={
+                            "artifact": second.artifact.model_copy(
+                                update={"sha256": first.artifact.sha256}
+                            )
+                        }
+                    ),
+                )
+            }
+        )._bind_complete_set()
+    with pytest.raises(ValueError, match="receipt_digest"):
+        artifact_set.model_copy(
+            update={"receipt_digest": sha256_digest({"wrong": "set"})}
+        )._bind_complete_set()
+
+
+def test_fan_in_reports_scope_and_manifest_digest_failures() -> None:
+    fan_in = AtroposFanInManifestV2.model_validate(_fan_in_v2())
+    alien_set = fan_in.beat_artifact_set_receipt.model_copy(
+        update={"workspace_id": "00000000-0000-4000-8000-000000000099"}
+    )
+    with pytest.raises(ValueError, match="scope or digest"):
+        fan_in.model_copy(
+            update={"beat_artifact_set_receipt": alien_set}
+        )._bind_fan_in()
+    with pytest.raises(ValueError, match="manifest_digest"):
+        fan_in.model_copy(
+            update={"manifest_digest": sha256_digest({"wrong": "fan-in"})}
+        )._bind_fan_in()
+
+
+def test_terminal_receipts_report_each_late_binding_failure() -> None:
+    render = HephaestusFinalRenderReceiptV2.model_validate(_final_render())
+    with pytest.raises(ValueError, match="receipt_digest"):
+        render.model_copy(
+            update={"receipt_digest": sha256_digest({"wrong": "render"})}
+        )._bind_final_render()
+
+    factory = ReelsFactoryReceiptV2.model_validate(_factory_receipt())
+    alien_render = factory.final_render_receipt.model_copy(
+        update={"workspace_id": "00000000-0000-4000-8000-000000000099"}
+    )
+    with pytest.raises(ValueError, match="scope"):
+        factory.model_copy(
+            update={"final_render_receipt": alien_render}
+        )._bind_terminal_success()
+    with pytest.raises(ValueError, match="output_sha256"):
+        factory.model_copy(
+            update={"output_sha256": sha256_digest({"wrong": "output"})}
+        )._bind_terminal_success()
+    with pytest.raises(ValueError, match="receipt_digest"):
+        factory.model_copy(
+            update={"receipt_digest": sha256_digest({"wrong": "factory"})}
+        )._bind_terminal_success()
+
+
+def test_manifest_binding_rejects_out_of_range_beat() -> None:
+    manifest = FactoryBeatManifestV1.model_validate(_manifest())
+    valid_request = BeatVideoRequestV1.model_validate(_request(0))
+    receipt = BeatVideoReceiptV1.model_validate(_video_receipt(0))
+    assert receipt.binds_request(valid_request)
+    assert not receipt.binds_request(
+        valid_request.model_copy(
+            update={"request_digest": sha256_digest({"request": "different"})}
+        )
+    )
+    request = valid_request.model_copy(
+        update={"beat_index": len(manifest.beats)}
+    )
+    assert not beat_video_request_binds_manifest_v1(request, manifest)

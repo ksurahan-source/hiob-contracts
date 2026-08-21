@@ -166,3 +166,167 @@ def test_lane_constructor_preserves_nonblank_whitespace_in_digest_payload():
     assert receipt.receipt_digest == (
         "sha256:65b1c484bebdb3d57f1dfc733748a8dd4cef862a9b374736a6c41395307c4d6a"
     )
+
+
+def test_lane_receipt_from_dict_rejects_missing_and_wrong_field_types():
+    with pytest.raises(ValueError, match="missing required fields"):
+        BeatLaneTerminalReceiptV1.from_dict({})
+
+    valid = _lanes(1)[0].to_dict()
+    for field, value, message in (
+        ("run_id", 1, "must be strings"),
+        ("beat_index", True, "must be an integer"),
+        ("output_digest", 1, "string or null"),
+    ):
+        payload = dict(valid)
+        payload[field] = value
+        with pytest.raises(ValueError, match=message):
+            BeatLaneTerminalReceiptV1.from_dict(payload)
+
+
+def test_lane_receipt_validation_reports_every_invalid_boundary():
+    receipt = _lanes(1)[0]
+    invalid = replace(
+        receipt,
+        run_id=1,
+        workspace_id=" ",
+        contract_version="unsupported",
+        beat_index=True,
+        package_digest="invalid",
+        plan_digest="invalid",
+        output_digest="invalid",
+        status="running",
+        receipt_digest="invalid",
+    )
+    errors = invalid.validate()
+    for expected in (
+        "run_id must be a string",
+        "workspace_id is required",
+        "unsupported lane receipt contract_version",
+        "beat_index must be an integer",
+        "package_digest must be a sha256 digest",
+        "plan_digest must be a sha256 digest",
+        "output_digest must be a sha256 digest",
+        "status is not terminal",
+        "receipt_digest must be a sha256 digest",
+    ):
+        assert any(expected in error for error in errors)
+
+    assert "beat_index must be non-negative" in replace(
+        receipt,
+        beat_index=-1,
+    ).validate()
+
+
+def test_lane_receipt_canonical_serialization_failures_are_closed():
+    with pytest.raises(ValueError, match="cannot be canonically serialized"):
+        BeatLaneTerminalReceiptV1.create(
+            run_id=object(),
+            workspace_id=WORKSPACE_ID,
+            package_digest=PACKAGE_DIGEST,
+            plan_digest=PLAN_DIGEST,
+            beat_index=0,
+            lane="athena",
+        )
+
+    receipt = replace(_lanes(1)[0], run_id=object())
+    errors = receipt.validate()
+    assert "lane receipt payload cannot be canonically serialized" in errors
+
+
+def test_coverage_from_dict_rejects_invalid_collection_members():
+    valid = _coverage(1).to_dict()
+    cases = (
+        ("expected_beat_indices", [True], "contain integers"),
+        ("required_lanes", [1], "contain strings"),
+        ("lane_receipts", [{"unknown": "receipt"}], "contain receipts"),
+    )
+    for field, value, message in cases:
+        payload = {**valid, field: value}
+        with pytest.raises(ValueError, match=message):
+            BeatCoverageV1.from_dict(payload)
+
+
+def test_coverage_create_rejects_invalid_arrays_receipts_and_json():
+    base = {
+        "run_id": RUN_ID,
+        "workspace_id": WORKSPACE_ID,
+        "package_digest": PACKAGE_DIGEST,
+        "plan_digest": PLAN_DIGEST,
+        "expected_n_beats": 1,
+        "expected_beat_indices": (0,),
+        "lane_receipts": _lanes(1),
+    }
+    with pytest.raises(ValueError, match="must be an array"):
+        BeatCoverageV1.create(**{**base, "required_lanes": "athena"})
+    with pytest.raises(ValueError, match="lane_receipts are invalid"):
+        BeatCoverageV1.create(
+            **{**base, "lane_receipts": ({"unknown": "receipt"},)}
+        )
+    with pytest.raises(ValueError, match="cannot be canonically serialized"):
+        BeatCoverageV1.create(**{**base, "run_id": object()})
+
+
+def test_coverage_validation_reports_malformed_scope_and_collections():
+    coverage = _coverage(1)
+    malformed = replace(
+        coverage,
+        run_id=1,
+        workspace_id=" ",
+        contract_version="unsupported",
+        package_digest="invalid",
+        plan_digest="invalid",
+        expected_beat_indices="invalid",
+        required_lanes="invalid",
+        lane_receipts="invalid",
+        coverage_digest="invalid",
+    )
+    errors = malformed.validate()
+    for expected in (
+        "run_id must be a string",
+        "workspace_id is required",
+        "unsupported coverage contract_version",
+        "package_digest must be a sha256 digest",
+        "plan_digest must be a sha256 digest",
+        "expected_beat_indices must be an array",
+        "required_lanes must be an array",
+        "lane_receipts must be an array",
+        "coverage_digest must be a sha256 digest",
+    ):
+        assert expected in errors
+
+    non_string_lanes = replace(
+        coverage,
+        required_lanes=(
+            *DEFAULT_BEAT_COVERAGE_LANES_V1,
+            1,
+        ),
+    )
+    errors = non_string_lanes.validate()
+    assert "required_lanes must contain non-blank lane names" in errors
+    assert "required_lanes must contain strings" in errors
+
+    duplicate_lanes = replace(
+        coverage,
+        required_lanes=(
+            *DEFAULT_BEAT_COVERAGE_LANES_V1,
+            DEFAULT_BEAT_COVERAGE_LANES_V1[0],
+        ),
+    )
+    assert "required_lanes contains duplicate lanes" in duplicate_lanes.validate()
+
+    invalid_receipts = replace(
+        coverage,
+        lane_receipts=(
+            replace(coverage.lane_receipts[0], beat_index=True),
+            object(),
+            *coverage.lane_receipts[1:],
+        ),
+    )
+    errors = invalid_receipts.validate()
+    assert "lane_receipts must contain BeatLaneTerminalReceiptV1" in errors
+
+
+def test_coverage_digest_canonical_serialization_failure_is_closed():
+    coverage = replace(_coverage(1), run_id=object())
+    assert "coverage payload cannot be canonically serialized" in coverage.validate()

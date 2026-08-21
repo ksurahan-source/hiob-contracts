@@ -208,3 +208,50 @@ def test_existing_voice_receipt_shape_is_not_rewritten() -> None:
 
     assert receipt == before
     assert model.voice_receipt.model_dump(mode="json") == before
+
+
+@pytest.mark.parametrize(
+    ("outer_update", "receipt_update", "message"),
+    [
+        (
+            {},
+            {"run_id": "other-run"},
+            "scope or beat",
+        ),
+        (
+            {},
+            {"voice_id": TYPECAST_CUSTOM_VOICE_ID},
+            "voice_id",
+        ),
+        (
+            {},
+            {"source_text_digest": sha256_digest({"source_text": "other"})},
+            "source_text_digest",
+        ),
+        (
+            {"voice_receipt_digest": sha256_digest({"receipt": "other"})},
+            {},
+            "voice_receipt_digest",
+        ),
+        (
+            {"input_digest": sha256_digest({"input": "other"})},
+            {},
+            "input_digest",
+        ),
+    ],
+)
+def test_voice_materialization_late_authority_guards_fail_independently(
+    outer_update: dict,
+    receipt_update: dict,
+    message: str,
+) -> None:
+    model = OrpheusVoiceMaterializationInputV1.model_validate(_payload())
+    if receipt_update:
+        outer_update = {
+            **outer_update,
+            "voice_receipt": model.voice_receipt.model_copy(
+                update=receipt_update
+            ),
+        }
+    with pytest.raises(ValueError, match=message):
+        model.model_copy(update=outer_update)._authority_matches()

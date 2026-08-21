@@ -12,6 +12,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 import hiob_contracts
+from hiob_contracts import storyboard_two_stage_v1 as storyboard_contract
 from hiob_contracts import (
     FactoryPaidBudgetAuthorityV1,
     FactoryPaidBudgetApprovalReceiptV2,
@@ -4532,3 +4533,1209 @@ def test_all_new_wire_models_forbid_unknown_preview_or_provider_fields() -> None
     }
     with pytest.raises(ValidationError, match="extra"):
         StoryboardSelectedArtifactV1.model_validate(selected)
+
+
+def test_storyboard_low_level_fail_closed_edges_are_covered() -> None:
+    with pytest.raises(ValueError, match="blank"):
+        storyboard_contract._non_blank_limited("   ")
+    with pytest.raises(ValueError, match="image purpose"):
+        hiob_contracts.derive_storyboard_image_generation_nonce_v1(
+            authority_idempotency_key=DRAFT_AUTHORITY_IDEMPOTENCY_KEY,
+            purpose="final_production",
+            source_beat_index=0,
+        )
+    with pytest.raises(ValueError, match="integer in 0..15"):
+        hiob_contracts.derive_storyboard_image_generation_nonce_v1(
+            authority_idempotency_key=DRAFT_AUTHORITY_IDEMPOTENCY_KEY,
+            purpose="storyboard_draft",
+            source_beat_index=True,
+        )
+    with pytest.raises(ValueError, match="sha256"):
+        hiob_contracts.derive_storyboard_image_artifact_digest_v1({})
+    with pytest.raises(ValueError, match="sha256"):
+        hiob_contracts.derive_storyboard_scene_video_artifact_digest_v1({})
+    with pytest.raises(TypeError, match="complete legacy"):
+        hiob_contracts.derive_storyboard_scene_video_request_digest_v1()
+
+    image_set = _image_set()
+    draft = _draft(image_set)
+    scene = derive_storyboard_scenes_v1(draft.cards)[0]
+    with pytest.raises(ValueError, match="first selected card"):
+        hiob_contracts.derive_storyboard_scene_video_request_digest_v1(
+            scene=scene,
+            anchor_card=draft.cards[1],
+            storyboard_execution_manifest_digest=sha256_digest({"manifest": 1}),
+            final_production_authority_digest=FINAL_AUTHORITY_DIGEST,
+        )
+    with pytest.raises(ValueError, match="canonical POSIX"):
+        storyboard_contract._assert_storage_key("images//frame.webp")
+
+
+def test_reference_frame_plan_and_athena_validation_edges_are_covered() -> None:
+    reference = {
+        "owner": "artemis",
+        "workspace_id": WORKSPACE_ID,
+        "master_id": "product-master",
+        "version": 1,
+        "approval_status": "approved",
+        "storage_key": "products/reference.webp",
+        "content_digest": sha256_digest({"reference": 1}),
+        "ref_kind": "product",
+        "subject_id": "product-1",
+        "label": "product",
+        "url": None,
+        "source_run_id": None,
+    }
+    for changes in (
+        {"owner": "artemis", "ref_kind": "character"},
+        {"owner": "parzifal", "ref_kind": "evidence"},
+    ):
+        with pytest.raises(ValidationError, match="owned"):
+            storyboard_contract.StoryboardImageReferenceSnapshotV1.model_validate(
+                {**reference, **changes}
+            )
+
+    planned_ref = {"role": "product", "required": True, "snapshot": reference}
+    invalid_plans = (
+        _image_frame_plan(0, shot={"beat_index": 1}),
+        _image_frame_plan(0, ordered_refs=[planned_ref, planned_ref], max_refs=1),
+        _image_frame_plan(0, ordered_refs=[planned_ref, planned_ref]),
+        _image_frame_plan(
+            0,
+            ordered_refs=[
+                {
+                    **planned_ref,
+                    "snapshot": {**reference, "workspace_id": "alien-workspace"},
+                }
+            ],
+        ),
+    )
+    expected = ("matching beat_index", "max_refs", "duplicate", "cross-workspace")
+    for payload, message in zip(invalid_plans, expected, strict=True):
+        with pytest.raises(ValidationError, match=message):
+            storyboard_contract.StoryboardImageFramePlanV1.model_validate(payload)
+
+    script_revision, plan_revision = _ares_revision_pair()
+    athena = _athena_frame_plan_receipt(script_revision, plan_revision)
+    swapped = deepcopy(athena)
+    swapped["frame_plans"][0], swapped["frame_plans"][1] = (
+        swapped["frame_plans"][1],
+        swapped["frame_plans"][0],
+    )
+    with pytest.raises(ValidationError, match="exactly 0..15"):
+        storyboard_contract.AthenaFramePlanReceiptV1.model_validate(swapped)
+    alien_scope = deepcopy(athena)
+    alien_scope["workspace_id"] = "alien-workspace"
+    with pytest.raises(ValidationError, match="scope"):
+        storyboard_contract.AthenaFramePlanReceiptV1.model_validate(alien_scope)
+    wrong_digest = deepcopy(athena)
+    wrong_digest["receipt_digest"] = sha256_digest({"wrong": "athena"})
+    with pytest.raises(ValidationError, match="receipt_digest"):
+        storyboard_contract.AthenaFramePlanReceiptV1.model_validate(wrong_digest)
+
+
+def test_image_request_structural_digest_edges_are_covered() -> None:
+    valid = _image_provider_request(0)
+    mutations = (
+        ("ares_beat_plan_revision_digest", sha256_digest({"alien": "plan"}), "beat-plan"),
+        ("operation_key", "reels:alien", "operation_key"),
+        ("request_digest", sha256_digest({"alien": "request"}), "request_digest"),
+        (
+            "expected_artifact_id",
+            "00000000-0000-4000-8000-000000009999",
+            "expected_artifact_id",
+        ),
+        ("expected_storage_key", "images/alien.webp", "expected_storage_key"),
+        (
+            "execution_request_digest",
+            sha256_digest({"alien": "execution"}),
+            "execution_request_digest",
+        ),
+        ("idempotency_key", sha256_digest({"alien": "idempotency"}), "idempotency_key"),
+    )
+    for field, value, message in mutations:
+        payload = deepcopy(valid)
+        payload[field] = value
+        with pytest.raises(ValidationError, match=message):
+            storyboard_contract.StoryboardImageProviderRequestV1.model_validate(payload)
+
+
+def test_verified_image_request_capability_is_fully_sealed() -> None:
+    capability_type = storyboard_contract.VerifiedStoryboardImageProviderRequestV1
+    with pytest.raises(TypeError, match="only be minted"):
+        capability_type(object(), _token=object())
+
+    unminted = object.__new__(capability_type)
+    with pytest.raises(TypeError, match="unminted"):
+        hiob_contracts.require_verified_storyboard_image_provider_request_v1(unminted)
+    invalid = object.__new__(capability_type)
+    storyboard_contract._VERIFIED_IMAGE_REQUEST_REGISTRY_V1[invalid] = object()
+    with pytest.raises(TypeError, match="invalid"):
+        hiob_contracts.require_verified_storyboard_image_provider_request_v1(invalid)
+    with pytest.raises(TypeError, match="immutable"):
+        unminted.anything = object()
+    with pytest.raises(TypeError, match="serializable"):
+        pickle.dumps(unminted)
+    assert repr(unminted) == "VerifiedStoryboardImageProviderRequestV1(<sealed>)"
+
+
+def test_image_receipt_and_image_set_private_invariants_are_covered() -> None:
+    request = _image_provider_request(0)
+    receipt_payload = _image_provider_receipt(request, 0)
+    wrong_receipt_digest = deepcopy(receipt_payload)
+    wrong_receipt_digest["receipt_digest"] = sha256_digest({"wrong": "receipt"})
+    with pytest.raises(ValidationError, match="receipt_digest"):
+        StoryboardImageProviderReceiptV1.model_validate(wrong_receipt_digest)
+
+    image_payload = _image_from_provider_receipt(receipt_payload)
+    image_payload["artifact_digest"] = sha256_digest({"wrong": "artifact"})
+    with pytest.raises(ValidationError, match="artifact_digest"):
+        StoryboardImageArtifactRefV1.model_validate(image_payload)
+
+    image_set = _image_set()
+    swapped_images = image_set.model_copy(
+        update={"images": (image_set.images[1], image_set.images[0], *image_set.images[2:])}
+    )
+    with pytest.raises(ValueError, match="exactly 0..15"):
+        swapped_images._bind_complete_image_order()
+    duplicate_image = image_set.images[1].model_copy(
+        update={"artifact_id": image_set.images[0].artifact_id}
+    )
+    duplicate_images = image_set.model_copy(
+        update={"images": (image_set.images[0], duplicate_image, *image_set.images[2:])}
+    )
+    with pytest.raises(ValueError, match="artifact_id"):
+        duplicate_images._bind_unique_image_fields()
+    swapped_receipts = image_set.model_copy(
+        update={
+            "provider_receipts": (
+                image_set.provider_receipts[1],
+                image_set.provider_receipts[0],
+                *image_set.provider_receipts[2:],
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="exactly 0..15"):
+        swapped_receipts._bind_complete_provider_receipts()
+    no_current = image_set.model_copy(
+        update={"paid_budget_authority_digest": sha256_digest({"alien": "authority"})}
+    )
+    with pytest.raises(ValueError, match="ambiguous"):
+        no_current._current_authority_receipts()
+    with pytest.raises(ValueError, match="all 16"):
+        image_set._bind_image_set_lineage(
+            image_set.provider_receipts[:1], "storyboard_draft"
+        )
+    with pytest.raises(ValueError, match="prior regen lineage"):
+        image_set.model_copy(
+            update={"previous_image_set_receipt_digest": sha256_digest({"prior": 1})}
+        )._bind_image_set_lineage(image_set.provider_receipts, "storyboard_draft")
+    with pytest.raises(ValueError, match="exact prior lineage"):
+        image_set._bind_image_set_lineage(
+            image_set.provider_receipts, "storyboard_regen"
+        )
+    regen_shape = image_set.model_copy(
+        update={"previous_image_set_receipt_digest": sha256_digest({"prior": 1})}
+    )
+    with pytest.raises(ValueError, match="mismatched current receipts"):
+        regen_shape._bind_image_set_lineage(
+            image_set.provider_receipts, "storyboard_regen"
+        )
+    with pytest.raises(ValueError, match="receipt_digest"):
+        image_set.model_copy(
+            update={"receipt_digest": sha256_digest({"wrong": "set"})}
+        )._bind_image_set_completion()
+
+
+def _valid_final_storyboard_chain() -> dict[str, Any]:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    approval = _approval(draft, image_set)
+    paid_receipt = _paid_approval_receipt_v2(
+        "final_production",
+        storyboard_draft_digest=draft.draft_digest,
+        storyboard_approval_receipt_digest=approval.receipt_digest,
+        storyboard_scene_count=8,
+    )
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(paid_receipt)
+    )
+    verified = _verified_paid_authority_v2(paid_receipt)
+    manifest = _manifest(
+        draft,
+        image_set,
+        approval,
+        final_production_authority_digest=authority.authority_digest,
+    )
+    requests = _verified_scene_video_requests(manifest, verified)
+    scene_set = _scene_video_set(manifest, authority)
+    fan_in = _scene_fan_in(manifest, authority, scene_set)
+    factory_receipt = ReelsFactoryReceiptV3.model_validate(
+        _factory_receipt_v3(
+            manifest,
+            authority,
+            scene_set,
+            fan_in,
+        )
+    )
+    scene_summary = storyboard_contract.StoryboardSceneVideoSetSummaryV1.from_receipt(
+        scene_set,
+        manifest=manifest,
+        authority=verified,
+        operation_proofs=requests,
+    )
+    completion_summary = storyboard_contract.ReelsFactoryCompletionSummaryV3.from_receipt(
+        factory_receipt,
+        scene_video_set_summary=scene_summary,
+        manifest=manifest,
+        authority=verified,
+        operation_proofs=requests,
+    )
+    return {
+        "image_set": image_set,
+        "draft": draft,
+        "approval": approval,
+        "paid_receipt": paid_receipt,
+        "authority": authority,
+        "verified": verified,
+        "manifest": manifest,
+        "requests": requests,
+        "scene_set": scene_set,
+        "fan_in": fan_in,
+        "factory_receipt": factory_receipt,
+        "scene_summary": scene_summary,
+        "completion_summary": completion_summary,
+    }
+
+
+def test_card_scene_and_scene_request_failure_edges_are_covered() -> None:
+    chain = _valid_final_storyboard_chain()
+    draft = chain["draft"]
+    manifest = chain["manifest"]
+    authority = chain["authority"]
+
+    with pytest.raises(ValueError, match="card_digest"):
+        draft.cards[0].model_copy(
+            update={"card_digest": sha256_digest({"wrong": "card"})}
+        )._bind_card_digest()
+    duplicate_scene_sources = manifest.scenes[0].model_copy(
+        update={"source_beat_indices": (0, 0)}
+    )
+    with pytest.raises(ValueError, match="unique"):
+        duplicate_scene_sources._bind_scene_digest()
+
+    request = StoryboardSceneVideoRequestV1.model_validate(
+        _scene_video_request(manifest, authority)
+    )
+    wrong_anchor = request.model_copy(
+        update={
+            "anchor": request.anchor.model_copy(
+                update={
+                    "selected_artifact": request.anchor.selected_artifact.model_copy(
+                        update={"artifact_id": "alien-artifact"}
+                    )
+                }
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="anchor image"):
+        wrong_anchor._bind_request_identity()
+    with pytest.raises(ValueError, match="whole seconds"):
+        request.model_copy(update={"duration_ms": 4_500})._bind_request_identity()
+    with pytest.raises(ValueError, match="request_digest"):
+        request.model_copy(
+            update={"request_digest": sha256_digest({"wrong": "request"})}
+        )._bind_request_identity()
+    with pytest.raises(ValueError, match="idempotency_key"):
+        request.model_copy(
+            update={"idempotency_key": sha256_digest({"wrong": "idempotency"})}
+        )._bind_request_identity()
+    assert not request.model_copy(update={"scene_sequence_index": 15})._binds_manifest_authority_and_cost_profile(
+        manifest,
+        authority,
+        chain["verified"].cost_profile,
+        at_utc="2026-08-14T06:00:00Z",
+    )
+    with pytest.raises(ValueError, match="sequence order"):
+        derive_storyboard_scenes_v1(draft.cards[:-1])
+
+
+def test_verified_scene_request_capability_is_fully_sealed() -> None:
+    capability_type = storyboard_contract.VerifiedStoryboardSceneVideoRequestV1
+    request = StoryboardSceneVideoRequestV1.model_construct()
+    with pytest.raises(TypeError, match="only be minted"):
+        capability_type(request, _token=object())
+    unminted = object.__new__(capability_type)
+    with pytest.raises(TypeError, match="unminted"):
+        require_verified_storyboard_scene_video_request_v1(unminted)
+    for action, message in (
+        (lambda: setattr(unminted, "anything", object()), "immutable"),
+        (lambda: delattr(unminted, "anything"), "immutable"),
+        (lambda: copy(unminted), "cannot be copied"),
+        (lambda: deepcopy(unminted), "cannot be copied"),
+        (lambda: pickle.dumps(unminted), "serializable"),
+    ):
+        with pytest.raises(TypeError, match=message):
+            action()
+    assert repr(unminted) == "VerifiedStoryboardSceneVideoRequestV1(<sealed>)"
+
+
+def test_scene_video_receipt_set_and_projection_failure_edges_are_covered() -> None:
+    chain = _valid_final_storyboard_chain()
+    scene_set = chain["scene_set"]
+    manifest = chain["manifest"]
+    verified = chain["verified"]
+    requests = chain["requests"]
+
+    artifact = scene_set.scene_video_receipts[0].artifact
+    with pytest.raises(ValueError, match="artifact_digest"):
+        artifact.model_copy(
+            update={"artifact_digest": sha256_digest({"wrong": "artifact"})}
+        )._bind_binary_digest()
+    receipt = scene_set.scene_video_receipts[0]
+    with pytest.raises(ValueError, match="output profile"):
+        receipt.model_copy(
+            update={"artifact": artifact.model_copy(update={"width": 1_080})}
+        )._bind_receipt_digest()
+    with pytest.raises(ValueError, match="receipt_digest"):
+        receipt.model_copy(
+            update={"receipt_digest": sha256_digest({"wrong": "receipt"})}
+        )._bind_receipt_digest()
+    projection = scene_set.beat_projections[0]
+    with pytest.raises(ValueError, match="projection_digest"):
+        projection.model_copy(
+            update={"projection_digest": sha256_digest({"wrong": "projection"})}
+        )._bind_projection_digest()
+
+    with pytest.raises(ValueError, match="scene video set"):
+        scene_set.model_copy(
+            update={"receipt_digest": sha256_digest({"wrong": "set"})}
+        )._bind_complete_scene_video_set()
+    with pytest.raises(ValueError, match="count"):
+        scene_set.model_copy(update={"storyboard_scene_count": 7})._bind_scene_receipt_cardinality(
+            scene_set.scene_video_receipts
+        )
+    swapped_receipts = (
+        scene_set.scene_video_receipts[1],
+        scene_set.scene_video_receipts[0],
+        *scene_set.scene_video_receipts[2:],
+    )
+    with pytest.raises(ValueError, match="dense sequence"):
+        scene_set._bind_scene_receipt_cardinality(swapped_receipts)
+    duplicate_request = scene_set.scene_video_receipts[1].request.model_copy(
+        update={"scene_id": scene_set.scene_video_receipts[0].request.scene_id}
+    )
+    duplicate_receipt = scene_set.scene_video_receipts[1].model_copy(
+        update={"request": duplicate_request}
+    )
+    with pytest.raises(ValueError, match="scene_id"):
+        scene_set._bind_scene_receipt_uniqueness(
+            (scene_set.scene_video_receipts[0], duplicate_receipt, *scene_set.scene_video_receipts[2:])
+        )
+    with pytest.raises(ValueError, match="sequence order"):
+        scene_set.model_copy(
+            update={
+                "beat_projections": (
+                    scene_set.beat_projections[1],
+                    scene_set.beat_projections[0],
+                    *scene_set.beat_projections[2:],
+                )
+            }
+        )._bind_projection_order()
+    duplicate_source = scene_set.beat_projections[1].model_copy(
+        update={"source_beat_index": scene_set.beat_projections[0].source_beat_index}
+    )
+    with pytest.raises(ValueError, match="cover source beats"):
+        scene_set.model_copy(
+            update={
+                "beat_projections": (
+                    scene_set.beat_projections[0],
+                    duplicate_source,
+                    *scene_set.beat_projections[2:],
+                )
+            }
+        )._bind_projection_order()
+    sparse_scene = scene_set.beat_projections[0].model_copy(
+        update={"scene_sequence_index": 2}
+    )
+    with pytest.raises(ValueError, match="contiguous and dense"):
+        scene_set.model_copy(
+            update={"beat_projections": (sparse_scene, *scene_set.beat_projections[1:])}
+        )._bind_projection_sequence(scene_set.scene_video_receipts)
+    wrong_projection = scene_set.beat_projections[0].model_copy(
+        update={"video_artifact_id": "alien-video"}
+    )
+    wrong_set = scene_set.model_copy(
+        update={"beat_projections": (wrong_projection, *scene_set.beat_projections[1:])}
+    )
+    with pytest.raises(ValueError, match="does not match"):
+        wrong_set._bind_projection_sequence(scene_set.scene_video_receipts)
+    truncated = scene_set.model_copy(
+        update={"beat_projections": scene_set.beat_projections[:2]}
+    )
+    with pytest.raises(ValueError, match="every scene"):
+        truncated._bind_projection_sequence(scene_set.scene_video_receipts)
+    assert not wrong_set.binds(manifest, verified, requests)
+
+
+def test_scene_summary_fan_in_and_terminal_receipt_failure_edges_are_covered() -> None:
+    chain = _valid_final_storyboard_chain()
+    summary = chain["scene_summary"]
+    scene_set = chain["scene_set"]
+    fan_in = chain["fan_in"]
+    factory = chain["factory_receipt"]
+    completion = chain["completion_summary"]
+
+    with pytest.raises(ValueError, match="safe scene projection"):
+        summary.beat_projections[0].model_copy(
+            update={"projection_digest": sha256_digest({"wrong": "safe"})}
+        )._bind_projection_digest()
+    summary_mutations = (
+        (
+            (
+                summary.beat_projections[1],
+                summary.beat_projections[0],
+                *summary.beat_projections[2:],
+            ),
+            "ordered",
+        ),
+        (
+            (
+                summary.beat_projections[0],
+                summary.beat_projections[1].model_copy(update={"source_beat_index": 0}),
+                *summary.beat_projections[2:],
+            ),
+            "cover source",
+        ),
+        (
+            (
+                summary.beat_projections[0].model_copy(update={"scene_sequence_index": 2}),
+                *summary.beat_projections[1:],
+            ),
+            "contiguous",
+        ),
+        (
+            (
+                summary.beat_projections[0].model_copy(update={"repeat_index": 1}),
+                *summary.beat_projections[1:],
+            ),
+            "repeat_index",
+        ),
+    )
+    for projections, message in summary_mutations:
+        with pytest.raises(ValueError, match=message):
+            summary.model_copy(update={"beat_projections": projections})._bind_safe_projection()
+    with pytest.raises(ValueError, match="reference every scene"):
+        summary.model_copy(update={"storyboard_scene_count": 9})._bind_safe_projection()
+    with pytest.raises(ValueError, match="summary_digest"):
+        summary.model_copy(
+            update={"summary_digest": sha256_digest({"wrong": "summary"})}
+        )._bind_safe_projection()
+    with pytest.raises(ValueError, match="verified live or historical"):
+        storyboard_contract.StoryboardSceneVideoSetSummaryV1.from_receipt(
+            scene_set,
+            manifest=chain["manifest"],
+            authority=object(),
+            operation_proofs=(),
+        )
+
+    caption = fan_in.captions[0]
+    with pytest.raises(ValueError, match="caption_digest"):
+        caption.model_copy(
+            update={"caption_digest": sha256_digest({"wrong": "caption"})}
+        )._bind_caption_digest()
+    short_captions = tuple(
+        item.model_copy(update={"duration_ms": 1_000}) for item in fan_in.captions
+    )
+    fan_in_mutations = (
+        ({"workspace_id": "00000000-0000-4000-8000-000000009999"}, "scope"),
+        (
+            {
+                "captions": (
+                    fan_in.captions[1],
+                    fan_in.captions[0],
+                    *fan_in.captions[2:],
+                )
+            },
+            "sequence order",
+        ),
+        (
+            {
+                "captions": (
+                    fan_in.captions[0],
+                    fan_in.captions[1].model_copy(update={"source_beat_index": 0}),
+                    *fan_in.captions[2:],
+                )
+            },
+            "cover source beats",
+        ),
+        ({"caption_set_digest": sha256_digest({"wrong": "captions"})}, "caption_set_digest"),
+        (
+            {
+                "captions": short_captions,
+                "caption_set_digest": (
+                    hiob_contracts.derive_storyboard_caption_set_digest_v1(
+                        short_captions
+                    )
+                ),
+            },
+            "between 45 and 55",
+        ),
+        ({"audio_mix_digest": sha256_digest({"wrong": "audio"})}, "audio_mix_digest"),
+        ({"manifest_digest": sha256_digest({"wrong": "fan-in"})}, "manifest_digest"),
+    )
+    for changes, message in fan_in_mutations:
+        with pytest.raises(ValueError, match=message):
+            fan_in.model_copy(update=changes)._bind_fan_in()
+    assert not fan_in.binds(chain["manifest"], object(), ())
+
+    factory_mutations = (
+        ({"workspace_id": "00000000-0000-4000-8000-000000009999"}, "fan-in"),
+        (
+            {
+                "final_render_receipt": factory.final_render_receipt.model_copy(
+                    update={"workspace_id": "00000000-0000-4000-8000-000000009999"}
+                )
+            },
+            "render receipt scope",
+        ),
+        (
+            {
+                "final_render_receipt": factory.final_render_receipt.model_copy(
+                    update={"fan_in_manifest_digest": sha256_digest({"wrong": "fan-in"})}
+                )
+            },
+            "fan_in_manifest_digest",
+        ),
+        (
+            {
+                "final_render_receipt": factory.final_render_receipt.model_copy(
+                    update={"output_url": "https://example.com/alien.mp4"}
+                )
+            },
+            "output_url",
+        ),
+        ({"output_sha256": sha256_digest({"wrong": "output"})}, "output_sha256"),
+        ({"receipt_digest": sha256_digest({"wrong": "factory"})}, "receipt_digest"),
+    )
+    for changes, message in factory_mutations:
+        with pytest.raises(ValueError, match=message):
+            factory.model_copy(update=changes)._bind_terminal_success()
+    with pytest.raises(ValueError, match="summary_digest"):
+        completion.model_copy(
+            update={"summary_digest": sha256_digest({"wrong": "completion"})}
+        )._bind_summary_digest()
+    with pytest.raises(ValueError, match="verified terminal proof"):
+        storyboard_contract.ReelsFactoryCompletionSummaryV3.from_receipt(
+            factory,
+            scene_video_set_summary=summary,
+            manifest=chain["manifest"],
+            authority=object(),
+            operation_proofs=(),
+        )
+    assert completion.binds(
+        factory,
+        scene_video_set_summary=summary,
+        manifest=chain["manifest"],
+        authority=chain["verified"],
+        operation_proofs=chain["requests"],
+    )
+
+
+def _valid_verified_image_request() -> dict[str, Any]:
+    script_revision, plan_revision = _ares_revision_pair()
+    athena_receipt = _athena_frame_plan_receipt(script_revision, plan_revision)
+    profile = _cost_profile()
+    paid_receipt = _paid_approval_receipt_v2("storyboard_draft")
+    verified = _verified_paid_authority_v2(paid_receipt, profile=profile)
+    payload = _image_provider_request(
+        0,
+        paid_budget_authority_digest=verified.authority.authority_digest,
+        authority_idempotency_key=verified.authority.idempotency_key,
+        cost_profile=profile,
+        plan_digest=plan_revision.revision_digest,
+        ares_script_revision_digest=script_revision.revision_digest,
+        ares_beat_plan_revision_digest=plan_revision.revision_digest,
+        athena_frame_plan_receipt_digest=athena_receipt["receipt_digest"],
+    )
+    capability = storyboard_contract.StoryboardImageProviderRequestV1.from_verified(
+        payload,
+        authority=verified,
+        script_revision=script_revision,
+        plan_revision=plan_revision,
+        athena_receipt=athena_receipt,
+        at_utc="2026-08-14T06:00:00Z",
+        resolver=_ApprovalResolverV2(),
+    )
+    return {
+        "script_revision": script_revision,
+        "plan_revision": plan_revision,
+        "athena_receipt": athena_receipt,
+        "profile": profile,
+        "paid_receipt": paid_receipt,
+        "verified": verified,
+        "payload": payload,
+        "capability": capability,
+    }
+
+
+def test_verified_image_request_authority_and_receipt_edges_are_covered() -> None:
+    context = _valid_verified_image_request()
+    common = {
+        "authority": context["verified"],
+        "plan_revision": context["plan_revision"],
+        "athena_receipt": context["athena_receipt"],
+        "at_utc": "2026-08-14T06:00:00Z",
+        "resolver": _ApprovalResolverV2(),
+    }
+    with pytest.raises(TypeError, match="validated Ares revisions"):
+        storyboard_contract.StoryboardImageProviderRequestV1.from_verified(
+            context["payload"],
+            script_revision=object(),
+            **common,
+        )
+    alien_authority = deepcopy(context["payload"])
+    alien_authority["paid_budget_authority_digest"] = sha256_digest(
+        {"alien": "authority"}
+    )
+    _reseal_image_provider_request(alien_authority)
+    with pytest.raises(ValueError, match="paid image authority"):
+        storyboard_contract.StoryboardImageProviderRequestV1.from_verified(
+            alien_authority,
+            script_revision=context["script_revision"],
+            **common,
+        )
+
+    request_one = _image_provider_request(
+        1,
+        paid_budget_authority_digest=context["verified"].authority.authority_digest,
+        authority_idempotency_key=context["verified"].authority.idempotency_key,
+        cost_profile=context["profile"],
+        plan_digest=context["plan_revision"].revision_digest,
+        ares_script_revision_digest=context["script_revision"].revision_digest,
+        ares_beat_plan_revision_digest=context["plan_revision"].revision_digest,
+        athena_frame_plan_receipt_digest=context["athena_receipt"]["receipt_digest"],
+    )
+    receipt_one = _image_provider_receipt(request_one, 1)
+    with pytest.raises(ValueError, match="does not bind verified"):
+        StoryboardImageProviderReceiptV1.from_verified_request(
+            receipt_one,
+            request=context["capability"],
+        )
+
+    receipt_zero = StoryboardImageProviderReceiptV1.model_validate(
+        _image_provider_receipt(context["payload"], 0)
+    )
+    resolution = _paid_resolution_v2(context["paid_receipt"], profile=context["profile"])
+    evidence = _verified_historical_evidence(
+        resolution=resolution,
+        receipt=receipt_zero,
+    )
+    assert StoryboardImageProviderReceiptV1.from_reconciled_claim(
+        receipt_zero,
+        request=receipt_zero.request,
+        reconciliation=evidence,
+    ) == receipt_zero
+
+
+def test_image_set_paid_operation_failure_and_regen_edges_are_covered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial_receipt = _paid_approval_receipt_v2("storyboard_draft")
+    initial_set = _image_set_for_paid_receipt(initial_receipt)
+    verified_initial = _verified_paid_authority_v2(initial_receipt)
+
+    assert not initial_set.binds_paid_operations(verified_initial, ())
+    assert not initial_set.binds_paid_operations(
+        verified_initial,
+        tuple(object() for _ in range(16)),
+        previous_image_set=initial_set,
+    )
+    assert not initial_set.binds_paid_operations(
+        verified_initial,
+        tuple(object() for _ in range(16)),
+    )
+
+    regen_receipt = _paid_approval_receipt_v2(
+        "storyboard_regen",
+        image_source_beat_indices=[0],
+        plan_digest=initial_set.plan_digest,
+        storyboard_draft_digest=sha256_digest({"draft": "regen"}),
+    )
+    regen_set = _image_set_for_paid_receipt(
+        regen_receipt,
+        previous_image_set=initial_set,
+    )
+    verified_regen = _verified_paid_authority_v2(regen_receipt)
+    assert not regen_set._binds_paid_image_lineage(
+        verified_regen.authority,
+        None,
+    )
+    assert not regen_set._binds_paid_image_receipts(
+        verified_regen.authority,
+        (object(),),
+    )
+    monkeypatch.setattr(
+        storyboard_contract,
+        "_image_receipt_binds_operation_proof_v2",
+        lambda _receipt, _proof: True,
+    )
+    assert regen_set.binds_paid_operations(
+        verified_regen,
+        (object(),),
+        previous_image_set=initial_set,
+    )
+    assert regen_set._binds_unchanged_regen_images(initial_set)
+    changed_previous = initial_set.model_copy(
+        update={
+            "images": (
+                initial_set.images[0],
+                initial_set.images[1].model_copy(
+                    update={"artifact_id": "changed-previous-image"}
+                ),
+                *initial_set.images[2:],
+            )
+        }
+    )
+    assert not regen_set._binds_unchanged_regen_images(changed_previous)
+
+
+def test_draft_permutation_successor_and_paid_cardinality_edges_are_covered() -> None:
+    image_set = _image_set()
+    draft = _draft(image_set)
+    with pytest.raises(ValueError, match="exactly 16"):
+        storyboard_contract._assert_card_permutations(
+            draft.cards[:-1],
+            plan_digest=draft.plan_digest,
+        )
+    short_cards = tuple(
+        card.model_copy(update={"duration_ms": 1_000}) for card in draft.cards
+    )
+    with pytest.raises(ValueError, match="between 45 and 55"):
+        storyboard_contract._assert_card_permutations(
+            short_cards,
+            plan_digest=draft.plan_digest,
+        )
+    with pytest.raises(ValueError, match="draft_digest"):
+        draft.model_copy(
+            update={"draft_digest": sha256_digest({"wrong": "draft"})}
+        )._bind_draft()
+    assert not draft.is_valid_successor_of(draft)
+
+    invalid_cardinalities = (
+        (
+            ("storyboard_draft",),
+            {"storyboard_scene_count": 8},
+            "storyboard_draft",
+        ),
+        (
+            ("storyboard_regen",),
+            {"regen_image_count": 1, "storyboard_scene_count": 8},
+            "storyboard_regen",
+        ),
+        (("storyboard_regen",), {"regen_image_count": True}, "regen_image_count"),
+        (("final_production",), {"storyboard_scene_count": True}, "scene_count"),
+    )
+    for args, kwargs, message in invalid_cardinalities:
+        with pytest.raises(ValueError, match=message):
+            storyboard_contract.factory_paid_call_cardinality_v2(*args, **kwargs)
+
+
+def test_paid_authority_approval_cost_and_resolution_edges_are_covered() -> None:
+    receipt = _paid_approval_receipt_v2("storyboard_draft")
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(receipt)
+    )
+    authority_mutations = (
+        ("approval_subject_digest", sha256_digest({"wrong": "subject"}), "approval_subject"),
+        ("idempotency_key", sha256_digest({"wrong": "idempotency"}), "idempotency_key"),
+        ("authority_digest", sha256_digest({"wrong": "authority"}), "authority_digest"),
+    )
+    for field, value, message in authority_mutations:
+        with pytest.raises(ValueError, match=message):
+            authority.model_copy(update={field: value})._bind_exact_phase()
+
+    verified = _verified_paid_authority_v2(receipt)
+    assert verified.approval_receipt == receipt
+    for action, message in (
+        (lambda: setattr(verified, "anything", object()), "immutable"),
+        (lambda: delattr(verified, "anything"), "immutable"),
+        (lambda: deepcopy(verified), "cannot be copied"),
+        (lambda: pickle.dumps(verified), "serializable"),
+    ):
+        with pytest.raises(TypeError, match=message):
+            action()
+    assert repr(verified) == "VerifiedFactoryPaidBudgetAuthorityV2(<sealed>)"
+
+    capability_type = storyboard_contract.VerifiedFactoryPaidBudgetAuthorityV2
+    unminted = object.__new__(capability_type)
+    with pytest.raises(TypeError, match="unminted"):
+        storyboard_contract._unwrap_verified_factory_paid_budget_resolution_v2(unminted)
+    invalid = object.__new__(capability_type)
+    storyboard_contract._VERIFIED_AUTHORITY_REGISTRY_V2[invalid] = object()
+    with pytest.raises(TypeError, match="profile-resolved"):
+        storyboard_contract._unwrap_verified_factory_paid_budget_resolution_v2(invalid)
+
+    approval_mutations = (
+        ("transaction_audit_id", "alien-audit", "transaction_audit_id"),
+        ("approval_subject_digest", sha256_digest({"wrong": "subject"}), "approval_subject"),
+        ("expires_at_utc", receipt.approved_at_utc, "follow approved"),
+        ("revoked_at_utc", "2026-08-14T04:00:00Z", "approval lifetime"),
+        ("receipt_digest", sha256_digest({"wrong": "approval"}), "receipt_digest"),
+    )
+    for field, value, message in approval_mutations:
+        with pytest.raises(ValueError, match=message):
+            receipt.model_copy(update={field: value})._bind_receipt()
+    assert not receipt.authorizes(
+        authority.model_copy(update={"workspace_id": "00000000-0000-4000-8000-000000009999"}),
+        at_utc="2026-08-14T06:00:00Z",
+        resolver=_ApprovalResolverV2(),
+    )
+
+    profile_payload = _cost_profile()
+    invalid_operations = deepcopy(profile_payload)
+    invalid_operations["operations"]["video"]["provider"] = "alien-provider"
+    invalid_operations["profile_digest"] = derive_factory_cost_profile_digest_v1(
+        invalid_operations
+    )
+    with pytest.raises(ValidationError, match="video operation pricing identity"):
+        FactoryCostProfileV1.model_validate(invalid_operations)
+
+    profile = FactoryCostProfileV1.model_validate(profile_payload)
+    with pytest.raises(ValueError, match="present together"):
+        profile.model_copy(update={"all_beat_count": None})._bind_profile()
+    with pytest.raises(ValueError, match="valid_from"):
+        profile.model_copy(update={"valid_until_utc": profile.valid_from_utc})._bind_profile()
+
+    resolution = _paid_resolution_v2(receipt)
+    with pytest.raises(ValueError, match="approval_receipt"):
+        resolution.model_copy(
+            update={
+                "approval_receipt": receipt.model_copy(update={"receipt_id": "alien-receipt"})
+            }
+        )._bind_resolution()
+    with pytest.raises(ValueError, match="cost_profile"):
+        resolution.model_copy(
+            update={
+                "cost_profile": profile.model_copy(
+                    update={"profile_digest": sha256_digest({"wrong": "profile"})}
+                )
+            }
+        )._bind_resolution()
+
+
+def test_manifest_resolution_failure_edges_are_covered() -> None:
+    chain = _valid_final_storyboard_chain()
+    manifest = chain["manifest"]
+    with pytest.raises(ValueError, match="cover source beats"):
+        manifest.model_copy(
+            update={
+                "images": (
+                    manifest.images[0],
+                    manifest.images[1].model_copy(update={"source_beat_index": 0}),
+                    *manifest.images[2:],
+                )
+            }
+        )._bind_resolved_selections()
+    with pytest.raises(ValueError, match="artifact_id"):
+        manifest.model_copy(
+            update={
+                "images": (
+                    manifest.images[0],
+                    manifest.images[1].model_copy(
+                        update={"artifact_id": manifest.images[0].artifact_id}
+                    ),
+                    *manifest.images[2:],
+                )
+            }
+        )._bind_resolved_selections()
+    with pytest.raises(ValueError, match="selected artifact"):
+        manifest.model_copy(
+            update={
+                "images": (
+                    manifest.images[0].model_copy(update={"artifact_id": "alien-image"}),
+                    *manifest.images[1:],
+                )
+            }
+        )._bind_resolved_selections()
+    with pytest.raises(ValueError, match="manifest_digest"):
+        manifest.model_copy(
+            update={"manifest_digest": sha256_digest({"wrong": "manifest"})}
+        )._bind_resolved_selections()
+
+
+def test_historical_scene_and_scene_set_uniqueness_edges_are_covered() -> None:
+    chain = _valid_final_storyboard_chain()
+    scene_receipt = chain["scene_set"].scene_video_receipts[0]
+    resolution = _paid_resolution_v2(chain["paid_receipt"])
+    evidence = _verified_historical_evidence(
+        resolution=resolution,
+        receipt=scene_receipt,
+    )
+    with pytest.raises(ValueError, match="does not bind scene video"):
+        StoryboardSceneVideoReceiptV1.from_historical_evidence(
+            scene_receipt,
+            request=chain["scene_set"].scene_video_receipts[1].request,
+            evidence=evidence,
+        )
+
+    scene_set = chain["scene_set"]
+    duplicate_job = scene_set.scene_video_receipts[1].model_copy(
+        update={"provider_job_id": scene_set.scene_video_receipts[0].provider_job_id}
+    )
+    with pytest.raises(ValueError, match="provider_job_id"):
+        scene_set._bind_scene_receipt_uniqueness(
+            (scene_set.scene_video_receipts[0], duplicate_job, *scene_set.scene_video_receipts[2:])
+        )
+
+
+def test_historical_operation_scope_timeline_and_output_edges_are_covered() -> None:
+    chain = _valid_final_storyboard_chain()
+    final_authority = chain["authority"]
+    draft_receipt = _paid_approval_receipt_v2("storyboard_draft")
+    draft_authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(draft_receipt)
+    )
+    evidence_type = storyboard_contract.FactoryPaidOperationHistoricalEvidenceV2
+
+    with pytest.raises(ValueError, match="voice evidence"):
+        evidence_type.model_construct(operation="voice", source_index=None)._bind_historical_operation_scope(
+            final_authority
+        )
+    evidence_type.model_construct(operation="voice", source_index=0)._bind_historical_operation_scope(
+        final_authority
+    )
+    with pytest.raises(ValueError, match="script evidence"):
+        evidence_type.model_construct(operation="script", source_index=None)._bind_historical_operation_scope(
+            final_authority
+        )
+    evidence_type.model_construct(operation="script", source_index=None)._bind_historical_operation_scope(
+        draft_authority
+    )
+    with pytest.raises(ValueError, match="render evidence"):
+        evidence_type.model_construct(operation="render", source_index=None)._bind_historical_operation_scope(
+            draft_authority
+        )
+    with pytest.raises(ValueError, match="image evidence"):
+        evidence_type.model_construct(operation="image", source_index=0)._bind_historical_image_scope(
+            final_authority
+        )
+    with pytest.raises(ValueError, match="video evidence"):
+        evidence_type.model_construct(operation="video", source_index=8)._bind_historical_video_scope(
+            final_authority
+        )
+
+    scene_receipt = chain["scene_set"].scene_video_receipts[0]
+    resolution = _paid_resolution_v2(chain["paid_receipt"])
+    historical = evidence_type.model_validate(
+        _historical_paid_operation_evidence(
+            resolution=resolution,
+            receipt=scene_receipt,
+        )
+    )
+    with pytest.raises(ValueError, match="valid windows"):
+        historical.model_copy(
+            update={"reserved_at_utc": "2026-08-14T04:59:00Z"}
+        )._bind_historical_timeline(
+            resolution.approval_receipt,
+            resolution.cost_profile,
+        )
+    revoked = resolution.approval_receipt.model_copy(
+        update={"revoked_at_utc": "2026-08-14T05:30:00Z"}
+    )
+    with pytest.raises(ValueError, match="after revocation"):
+        historical._bind_historical_timeline(revoked, resolution.cost_profile)
+    with pytest.raises(ValueError, match="out of order"):
+        historical.model_copy(
+            update={"provider_result_recorded_at_utc": "2026-08-14T06:22:00Z"}
+        )._bind_historical_timeline(
+            resolution.approval_receipt,
+            resolution.cost_profile,
+        )
+    with pytest.raises(ValueError, match="leaf result"):
+        historical.model_copy(
+            update={"completed_claim_output_digest": sha256_digest({"wrong": "claim"})}
+        )._bind_historical_output()
+    with pytest.raises(ValueError, match="evidence_digest"):
+        historical.model_copy(
+            update={"evidence_digest": sha256_digest({"wrong": "evidence"})}
+        )._bind_historical_output()
+
+
+def test_verified_historical_capability_and_terminal_resolution_edges_are_covered() -> None:
+    capability_type = storyboard_contract.VerifiedFactoryPaidOperationHistoricalEvidenceV2
+    with pytest.raises(TypeError, match="only be minted"):
+        capability_type(object(), _token=object())
+    unminted = object.__new__(capability_type)
+    with pytest.raises(TypeError, match="unminted"):
+        storyboard_contract.require_verified_factory_paid_operation_historical_evidence_v2(
+            unminted
+        )
+    invalid = object.__new__(capability_type)
+    storyboard_contract._VERIFIED_HISTORICAL_EVIDENCE_REGISTRY_V2[invalid] = object()
+    with pytest.raises(TypeError, match="invalid"):
+        storyboard_contract.require_verified_factory_paid_operation_historical_evidence_v2(
+            invalid
+        )
+    for action, message in (
+        (lambda: setattr(unminted, "anything", object()), "immutable"),
+        (lambda: delattr(unminted, "anything"), "immutable"),
+        (lambda: copy(unminted), "cannot be copied"),
+        (lambda: deepcopy(unminted), "cannot be copied"),
+        (lambda: pickle.dumps(unminted), "serializable"),
+    ):
+        with pytest.raises(TypeError, match=message):
+            action()
+    assert repr(unminted) == "VerifiedFactoryPaidOperationHistoricalEvidenceV2(<sealed>)"
+
+    chain = _valid_final_storyboard_chain()
+    final_resolution = _paid_resolution_v2(chain["paid_receipt"])
+    scene_receipt = chain["scene_set"].scene_video_receipts[0]
+    historical_capability = _verified_historical_evidence(
+        resolution=final_resolution,
+        receipt=scene_receipt,
+    )
+    assert storyboard_contract._resolve_terminal_paid_budget_resolution_v2(
+        final_resolution,
+        (object(),),
+    ) is None
+    draft_resolution = _paid_resolution_v2(
+        _paid_approval_receipt_v2("storyboard_draft")
+    )
+    assert storyboard_contract._resolve_terminal_paid_budget_resolution_v2(
+        draft_resolution,
+        (historical_capability,),
+    ) is None
+
+    image_context = _valid_verified_image_request()
+    image_receipt = StoryboardImageProviderReceiptV1.model_validate(
+        _image_provider_receipt(image_context["payload"], 0)
+    )
+    assert storyboard_contract._image_receipt_binds_operation_proof_v2(
+        image_receipt,
+        image_context["capability"],
+    )
+    assert not storyboard_contract._image_receipt_binds_operation_proof_v2(
+        image_receipt,
+        object(),
+    )
+
+
+def _progress_receipt_payload() -> dict[str, Any]:
+    authority = FactoryPaidBudgetAuthorityV2.model_validate(
+        _authority_bound_to_receipt(_paid_approval_receipt_v2("storyboard_draft"))
+    )
+    body: dict[str, Any] = {
+        "contract_version": "ReelsFactoryProgressReceipt.v3",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "factory_revision": 7,
+        "idempotency_key": authority.idempotency_key,
+        "revision": 1,
+        "purpose": "storyboard_draft",
+        "stage": "script",
+        "all_beat_count": 16,
+        "storyboard_scene_count": None,
+        "paid_budget_authority_digest": authority.authority_digest,
+        "storyboard_execution_manifest_digest": None,
+        "provider_attempts": {
+            "script": 1,
+            "image": 0,
+            "video": 0,
+            "voice": 0,
+            "render": 0,
+        },
+        "provider_replays": {
+            "script": 0,
+            "image": 0,
+            "video": 0,
+            "voice": 0,
+            "render": 0,
+        },
+        "fallbacks": 0,
+    }
+    body["receipt_digest"] = (
+        hiob_contracts.derive_reels_factory_progress_receipt_digest_v3(body)
+    )
+    return body
+
+
+def _failure_receipt_payload() -> dict[str, Any]:
+    progress = _progress_receipt_payload()
+    body = {
+        **progress,
+        "contract_version": "ReelsFactoryFailureReceipt.v3",
+        "stage": "authority",
+        "provider_attempts": {
+            "script": 0,
+            "image": 0,
+            "video": 0,
+            "voice": 0,
+            "render": 0,
+        },
+        "code": "AUTHORITY_REJECTED",
+        "provider_call": "none",
+    }
+    body.pop("receipt_digest")
+    body["receipt_digest"] = (
+        hiob_contracts.derive_reels_factory_failure_receipt_digest_v3(body)
+    )
+    return body
+
+
+def test_v3_progress_and_failure_receipt_edges_are_covered() -> None:
+    attempts_type = storyboard_contract.ReelsFactoryProviderAttemptsV3
+    zero_attempts = attempts_type.model_validate(
+        {"script": 0, "image": 0, "video": 0, "voice": 0, "render": 0}
+    )
+    with pytest.raises(ValueError, match="storyboard_scene_count"):
+        storyboard_contract._v3_attempt_limits(
+            purpose="final_production",
+            storyboard_scene_count=None,
+        )
+    with pytest.raises(ValueError, match="scene count and execution manifest"):
+        storyboard_contract._validate_v3_progress_scope(
+            purpose="final_production",
+            storyboard_scene_count=None,
+            storyboard_execution_manifest_digest=None,
+            provider_attempts=zero_attempts,
+            stage="video",
+            allowed_stages=storyboard_contract._PROGRESS_STAGES_BY_PURPOSE_V3,
+        )
+    with pytest.raises(ValueError, match="cannot carry scene count"):
+        storyboard_contract._validate_v3_progress_scope(
+            purpose="storyboard_draft",
+            storyboard_scene_count=8,
+            storyboard_execution_manifest_digest=None,
+            provider_attempts=zero_attempts,
+            stage="script",
+            allowed_stages=storyboard_contract._PROGRESS_STAGES_BY_PURPOSE_V3,
+        )
+    with pytest.raises(ValueError, match="attempts exceed"):
+        storyboard_contract._validate_v3_progress_scope(
+            purpose="storyboard_draft",
+            storyboard_scene_count=None,
+            storyboard_execution_manifest_digest=None,
+            provider_attempts=attempts_type.model_validate(
+                {"script": 0, "image": 0, "video": 1, "voice": 0, "render": 0}
+            ),
+            stage="script",
+            allowed_stages=storyboard_contract._PROGRESS_STAGES_BY_PURPOSE_V3,
+        )
+
+    progress = storyboard_contract.ReelsFactoryProgressReceiptV3.model_validate(
+        _progress_receipt_payload()
+    )
+    with pytest.raises(ValueError, match="progress payload"):
+        progress.model_copy(
+            update={"receipt_digest": sha256_digest({"wrong": "progress"})}
+        )._bind_progress()
+    failure = storyboard_contract.ReelsFactoryFailureReceiptV3.model_validate(
+        _failure_receipt_payload()
+    )
+    with pytest.raises(ValueError, match="provider_call"):
+        failure.model_copy(update={"provider_call": "confirmed"})._bind_failure()
+    with pytest.raises(ValueError, match="failure payload"):
+        failure.model_copy(
+            update={"receipt_digest": sha256_digest({"wrong": "failure"})}
+        )._bind_failure()

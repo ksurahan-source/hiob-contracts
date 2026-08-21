@@ -1,4 +1,7 @@
 """런타임 계약 검증 어댑터 테스트 — 경계 fail-loud (2026-07-05 seam)."""
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
 import pytest
 
 from hiob_contracts import (
@@ -71,6 +74,7 @@ def test_beatplan_from_list_path():
 
 # ── B3: _parse 타입 우선 분기 (list가 from_dict로 새지 않게, 2026-07-05 버그헌팅) ──
 from hiob_contracts.envelope_validation import _parse
+import hiob_contracts.envelope_validation as envelope_validation
 
 
 class _DictOnly:
@@ -486,3 +490,161 @@ def test_apollo_plan_input_roundtrip():
     obj = ApolloPlanInput.from_dict({"cues": [{"beat_index": 1, "text": "boom"}]})
     assert obj.validate() == []
     assert ApolloPlanInput.from_dict(obj.to_dict()).cues[0]["text"] == "boom"
+
+
+def test_resolution_and_parser_fail_closed_edges(monkeypatch):
+    monkeypatch.setattr(
+        envelope_validation,
+        "import_module",
+        lambda _name: (_ for _ in ()).throw(ImportError("simulated")),
+    )
+    assert envelope_validation._resolve("JanusBrief") is None
+
+    with pytest.raises((TypeError, KeyError)):
+        _parse(_DictOnly, None)
+
+    class NoParser:
+        pass
+
+    with pytest.raises(TypeError, match="파싱 불가"):
+        _parse(NoParser, 1)
+
+
+def test_validate_payload_reports_validate_method_exception(monkeypatch):
+    class ExplodingContract:
+        @classmethod
+        def from_dict(cls, _payload):
+            return cls()
+
+        def validate(self):
+            raise RuntimeError("simulated validate failure")
+
+    monkeypatch.setattr(
+        envelope_validation,
+        "_resolve",
+        lambda _name: ExplodingContract,
+    )
+    result = validate_payload("Exploding", {})
+    assert not result.ok
+    assert result.errors == ("validate() raised: simulated validate failure",)
+
+
+def test_successful_edge_and_receipt_ensure_helpers_return_objects():
+    edge_obj = ensure_edge_target("a2orpheus", _edge_payloads()["a2orpheus"])
+    assert isinstance(edge_obj, OrpheusPlanInput)
+
+    receipt = _accepted_receipt(
+        edge_id="a2orpheus",
+        target_input=_edge_payloads()["a2orpheus"],
+        created_at="2026-07-15T00:00:00+00:00",
+    )
+    assert ensure_karma_edge_receipt(receipt, max_age_seconds=None) is receipt
+
+
+def test_unvalidated_edge_registry_reports_missing_contract(monkeypatch):
+    registry = dict(envelope_validation._REGISTRY)
+    registry.pop("OrpheusPlanInput")
+    monkeypatch.setattr(envelope_validation, "_REGISTRY", registry)
+    assert "a2orpheus" in unvalidated_edge_targets()
+
+
+def test_timestamp_normalization_edges_are_explicit():
+    assert envelope_validation._parse_iso("") is None
+    assert envelope_validation._parse_iso(123) is None
+    assert envelope_validation._parse_iso("not-a-time") is None
+    naive = envelope_validation._parse_iso("2026-07-15T01:00:00")
+    assert naive is not None and naive.tzinfo == timezone.utc
+    assert envelope_validation._normalized_now(None).tzinfo == timezone.utc
+    normalized = envelope_validation._normalized_now(
+        datetime(2026, 7, 15, 1, 0, 0)
+    )
+    assert normalized.tzinfo == timezone.utc
+
+
+def test_mapper_source_freshness_and_accepted_helpers_accumulate_errors():
+    errors: list[str] = []
+    envelope_validation._append_karma_mapper_errors(
+        SimpleNamespace(
+            mapper=SimpleNamespace(
+                planet="ares",
+                node_id="karma.edge.refine",
+            )
+        ),
+        errors,
+    )
+    assert any("origin planet" in error for error in errors)
+
+    errors = []
+    envelope_validation._append_source_digest_errors(
+        SimpleNamespace(source_output_digests=("got",)),
+        ("missing",),
+        errors,
+    )
+    assert "missing expected" in errors[0]
+    errors = []
+    envelope_validation._append_source_digest_errors(
+        SimpleNamespace(source_output_digests=("two", "one")),
+        ("one", "two"),
+        errors,
+    )
+    assert "order/set mismatch" in errors[0]
+
+    errors = []
+    envelope_validation._append_freshness_errors(
+        SimpleNamespace(created_at="invalid"),
+        max_age_seconds=60,
+        now="2026-07-15T00:00:00+00:00",
+        errors=errors,
+    )
+    assert "unparseable" in errors[0]
+    errors = []
+    envelope_validation._append_freshness_errors(
+        SimpleNamespace(created_at="2026-07-15T01:10:00+00:00"),
+        max_age_seconds=60,
+        now="2026-07-15T01:00:00+00:00",
+        errors=errors,
+    )
+    assert "future" in errors[0]
+
+    errors = []
+    envelope_validation._append_accepted_target_errors(
+        SimpleNamespace(decision="rejected", target_input=None),
+        None,
+        errors,
+    )
+    assert errors == []
+    envelope_validation._append_accepted_target_errors(
+        SimpleNamespace(decision="accepted", target_input=None),
+        None,
+        errors,
+    )
+    assert "missing target_input" in errors[-1]
+    errors = []
+    envelope_validation._append_accepted_target_errors(
+        SimpleNamespace(decision="accepted", target_input={"present": True}),
+        None,
+        errors,
+    )
+    assert errors == []
+
+
+def test_receipt_verifier_rejects_unsupported_unknown_and_expected_edge():
+    unsupported = verify_karma_edge_receipt(object(), max_age_seconds=None)
+    assert not unsupported.ok
+    assert "unsupported receipt type" in unsupported.errors[0]
+
+    receipt = _accepted_receipt(
+        edge_id="a2orpheus",
+        target_input=_edge_payloads()["a2orpheus"],
+        created_at="2026-07-15T00:00:00+00:00",
+    )
+    unknown = receipt.model_copy(update={"edge_id": "unknown-edge"})
+    result = verify_karma_edge_receipt(unknown, max_age_seconds=None)
+    assert any("unknown edge_id" in error for error in result.errors)
+
+    mismatch = verify_karma_edge_receipt(
+        receipt,
+        expected_edge_id="a2apollo",
+        max_age_seconds=None,
+    )
+    assert any("edge_id mismatch" in error for error in mismatch.errors)

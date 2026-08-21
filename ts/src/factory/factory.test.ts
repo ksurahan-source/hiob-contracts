@@ -7,7 +7,7 @@
  */
 import { canonicalJson, sha256Digest, isDigest } from './digest.js';
 import { buildPlanetOutput, verifyPlanetOutput, PlanetOutputSchema } from './planet-output.js';
-import { deriveIdempotencyKey, KarmaEdgeReceiptSchema, receiptAuthorizes } from './karma-edge.js';
+import { deriveIdempotencyKey, KarmaEdgeReceiptSchema, KarmaRefineRequestSchema, receiptAuthorizes } from './karma-edge.js';
 import { StageReceiptSchema, isStageSuccess } from './stage-receipt.js';
 import { ApprovalReceiptSchema, approvalAuthorizes, DegradationReceiptSchema } from './approval.js';
 import { FactoryState, canTransition } from './state.js';
@@ -123,6 +123,32 @@ test('accepted receipt authorizes matching digest only', () => {
   assert(receiptAuthorizes(r, sha256Digest(ti)), 'should authorize matching');
   assert(!receiptAuthorizes(r, sha256Digest({ other: 1 })), 'should reject mismatched');
 });
+test('Karma request binds its exact derived idempotency key', () => {
+  const source = buildPlanetOutput({
+    output_id: 'source-output', run_id: 'run-1', factory_revision: 0, workspace_id: 'ws-1',
+    trace_id: 'trace-1', execution_id: 'execution-1', attempt_no: 1,
+    producer: { planet: 'janus', node_id: 'janus.node', revision: 'r1' },
+    contract: { name: 'JanusBrief', version: 'v1', schema_digest: SCHEMA },
+    payload: { brief: 'grounded' }, emitted_at: '2026-07-14T00:00:00Z',
+  });
+  const body = {
+    edge_id: 'j2p', run_id: 'run-1', factory_revision: 0, workspace_id: 'ws-1',
+    trace_id: 'trace-1', sources: [source],
+    target: {
+      planet: 'parzifal', node_id: 'parzifal.node',
+      input_contract: { name: 'ParzifalTargetInput', version: 'v1', schema_digest: SCHEMA },
+    },
+    policy: { id: 'policy', version: 'v1', digest: POLICY },
+    deadline_at: '2026-07-14T00:01:00Z',
+  };
+  const idempotencyKey = deriveIdempotencyKey({
+    run_id: body.run_id, factory_revision: body.factory_revision, edge_id: body.edge_id,
+    source_output_digests: [source.output_digest], target_schema_digest: SCHEMA,
+    policy_digest: POLICY,
+  });
+  assert(KarmaRefineRequestSchema.safeParse({ ...body, idempotency_key: idempotencyKey }).success, 'valid request');
+  assert(!KarmaRefineRequestSchema.safeParse({ ...body, idempotency_key: POLICY }).success, 'drift must fail');
+});
 test('accepted receipt without target_input rejected', () => {
   const bad = KarmaEdgeReceiptSchema.safeParse({
     receipt_id: 'r', edge_id: 'j2p', run_id: 'r', factory_revision: 0, workspace_id: 'ws-1',
@@ -151,6 +177,15 @@ for (const decision of ['blocked', 'needs_human'] as const) {
     assert(!bad.success, `${decision} with target_input must fail`);
   });
 }
+test('blocked receipt without a projection is a valid terminal refusal', () => {
+  const blocked = KarmaEdgeReceiptSchema.safeParse({
+    receipt_id: 'r', edge_id: 'j2p', run_id: 'r', factory_revision: 0, workspace_id: 'ws-1',
+    source_output_digests: [sha256Digest({ a: 1 })],
+    target_contract: { name: 'X', version: 'v1', schema_digest: SCHEMA }, decision: 'blocked',
+    mapper: { node_id: 'k', revision: 'r', policy_digest: POLICY }, created_at: 't',
+  });
+  assert(blocked.success, 'blocked refusal without projection should parse');
+});
 
 // ── StageReceipt invariants ─────────────────────────────────────────────────
 test('succeeded stage requires output + completed', () => {

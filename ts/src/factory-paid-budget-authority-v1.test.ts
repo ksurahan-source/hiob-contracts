@@ -121,6 +121,13 @@ test('verified authority is non-serializable and is the only manifest capability
   );
   assert.equal(requireFactoryBeatManifestPaidAuthorityV1(manifest as never, verified), verified);
   assert.throws(
+    () => requireFactoryBeatManifestPaidAuthorityV1(
+      { ...manifest, workspace_id: '00000000-0000-4000-8000-000000000099' } as never,
+      verified,
+    ),
+    /does not bind factory manifest/,
+  );
+  assert.throws(
     () => requireFactoryBeatManifestPaidAuthorityV1(manifest as never, authority()),
     /VerifiedFactoryPaidBudgetAuthority/,
   );
@@ -231,4 +238,49 @@ test('mirror parity vectors match Python authority', () => {
     value.authority_digest,
     'sha256:c2cdbc6b4111fbba80ff3bea160d8391f4461eb1ae364f29c5bed3e8a2721e8b',
   );
+});
+
+test('paid authority rejects every malformed receipt binding and time window', () => {
+  assert.throws(() => deriveFactoryPaidBudgetApprovalSubjectDigestV1(null));
+  assert.throws(() => deriveFactoryPaidBudgetApprovalSubjectDigestV1([]));
+
+  const receipt = approvalReceipt();
+  const invalidReceipts = [
+    { ...receipt, transaction_audit_id: 'different-audit' },
+    { ...receipt, paid_calls: { ...receipt.paid_calls, video: 4 } },
+    { ...receipt, approval_subject_digest: sha256Digest({ wrong: 'subject' }) },
+    { ...receipt, expires_at_utc: receipt.approved_at_utc },
+    { ...receipt, revoked_at_utc: '2026-08-01T06:59:59Z' },
+    { ...receipt, revoked_at_utc: '2026-08-01T09:00:01Z' },
+    { ...receipt, receipt_digest: sha256Digest({ wrong: 'receipt' }) },
+  ];
+  for (const candidate of invalidReceipts) {
+    assert.equal(FactoryPaidBudgetApprovalReceiptV1Schema.safeParse(candidate).success, false);
+  }
+  assert.equal(approvalReceipt({ revoked_at_utc: '2026-08-01T08:00:00Z' }).revoked_at_utc,
+    '2026-08-01T08:00:00Z');
+  assert.doesNotThrow(() => FactoryPaidBudgetApprovalReceiptV1Schema.safeParse({
+    ...receipt,
+    approver_account_id: '\ud800',
+  }));
+  assert.equal(FactoryPaidBudgetApprovalReceiptV1Schema.safeParse({
+    ...receipt,
+    approver_account_id: '\ud800',
+  }).success, false);
+
+  const value = authority();
+  assert.equal(factoryPaidBudgetApprovalReceiptAuthorizesV1(
+    receipt, { ...value, workspace_id: '00000000-0000-4000-8000-000000000099' },
+    '2026-08-01T08:00:00Z', resolver,
+  ), false);
+  assert.equal(factoryPaidBudgetApprovalReceiptAuthorizesV1(
+    receipt, value, '2026-08-01T06:59:59Z', resolver,
+  ), false);
+  assert.equal(factoryPaidBudgetApprovalReceiptAuthorizesV1(
+    receipt, value, receipt.expires_at_utc, resolver,
+  ), false);
+  assert.equal(factoryPaidBudgetApprovalReceiptAuthorizesV1(
+    { ...receipt, revoked_at_utc: '2026-08-01T08:00:00Z' }, value,
+    '2026-08-01T08:00:00Z', resolver,
+  ), false);
 });

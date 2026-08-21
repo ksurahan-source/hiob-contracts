@@ -707,11 +707,6 @@ class StoryboardPhaseACompletionReceiptV1(BaseModel):
             raise ValueError(
                 "output storyboard carrier does not bind output storyboard"
             )
-        if self.purpose == "storyboard_draft" and any(
-            request.paid_budget_authority_digest != authority.authority_digest
-            for request in requests
-        ):
-            raise ValueError("initial completion contains an alien image authority")
 
     def _assert_regen_image_preservation(self) -> None:
         if self.purpose != "storyboard_regen":

@@ -199,3 +199,41 @@ test('Ares generation digest matches the fixed Python vector', () => {
     'sha256:43b376a18dbdb3fda7035ce06bd36188dff58191a2f9cdb6edf1078a6aa21f3f',
   );
 });
+
+test('Ares generation rejects every nested identity, voice, subject, and Unicode-key drift', () => {
+  const lowSurrogate = payload();
+  lowSurrogate.current_character = '\udc00';
+  assert.throws(
+    () => deriveAresScriptGenerationInputDigestV1(lowSurrogate),
+    /Unicode scalar/,
+  );
+
+  const invalidKey = payload();
+  invalidKey.memories = [{ text: 'memory', provenance: 'receipt', ['\ud800']: 'invalid' }];
+  assert.throws(
+    () => deriveAresScriptGenerationInputDigestV1(invalidKey),
+    /Unicode scalar/,
+  );
+  const missing = payload();
+  delete missing.current_character;
+  assert.throws(
+    () => deriveAresScriptGenerationInputDigestV1(missing),
+    /current_character is required/,
+  );
+
+  const identityDrift = payload();
+  identityDrift.character_lock.identity_binding_digest = `sha256:${'0'.repeat(64)}`;
+  assert.equal(AresScriptGenerationInputV1Schema.safeParse(identityDrift).success, false);
+
+  const voiceDrift = payload();
+  voiceDrift.voice_spec.voice_spec_digest = `sha256:${'0'.repeat(64)}`;
+  assert.equal(AresScriptGenerationInputV1Schema.safeParse(voiceDrift).success, false);
+
+  const subjectDrift = payload();
+  subjectDrift.voice_spec.subject_id = 'other-subject';
+  subjectDrift.voice_spec.voice_spec_digest = deriveVoiceSpecDigestV1(subjectDrift.voice_spec);
+  const unsigned = { ...subjectDrift };
+  delete unsigned.generation_input_digest;
+  subjectDrift.generation_input_digest = deriveAresScriptGenerationInputDigestV1(unsigned);
+  assert.equal(AresScriptGenerationInputV1Schema.safeParse(subjectDrift).success, false);
+});

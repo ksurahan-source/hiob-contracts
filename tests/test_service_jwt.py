@@ -13,6 +13,7 @@ from hiob_contracts.service_jwt import (
     mint_service_token,
     verify_service_token,
 )
+import hiob_contracts.service_jwt as service_jwt
 
 
 SECRET = "unit-test-service-jwt-secret-xyz"
@@ -334,3 +335,107 @@ def test_missing_scope_forbidden():
             secret=SECRET,
         )
     assert ei.value.code == "PLANET_FORBIDDEN"
+
+
+def test_environment_secret_lookup_and_empty_secret_fail_closed(monkeypatch):
+    for name in (
+        "HIOB_SERVICE_JWT_SECRET",
+        "HIOB_PLANET_NODE_SECRET",
+        "MODAL_DISPATCH_SECRET",
+        "HIOB_WORKER_DISPATCH_SECRET",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HIOB_PLANET_NODE_SECRET", SECRET)
+    assert service_jwt.signing_secret() == SECRET
+    monkeypatch.delenv("HIOB_PLANET_NODE_SECRET")
+
+    with pytest.raises(ServiceJwtError, match="secret not configured"):
+        mint_service_token(
+            audience="hiob-ares",
+            workspace_id="ws",
+            scopes=["node:*:execute"],
+            secret="",
+        )
+    with pytest.raises(ServiceJwtError, match="secret not configured"):
+        verify_service_token(
+            "header.payload.signature",
+            expected_audience="hiob-ares",
+            secret="",
+        )
+
+
+def test_signing_error_is_wrapped_without_key_material() -> None:
+    class FailingJwt:
+        PyJWTError = jwt.PyJWTError
+
+        @staticmethod
+        def encode(*_args, **_kwargs):
+            raise jwt.PyJWTError("simulated")
+
+    with pytest.raises(ServiceJwtError, match="invalid service JWT HS256 signing key"):
+        service_jwt._encode_service_payload(
+            FailingJwt,
+            {"sub": "service"},
+            signing_key="not-reported",
+            algorithm="HS256",
+            kid="hs256-v1",
+        )
+
+
+def test_malformed_expired_issuer_signature_and_workspace_failures() -> None:
+    with pytest.raises(ServiceJwtError, match="missing or malformed"):
+        verify_service_token("not-a-token", expected_audience="hiob-ares", secret=SECRET)
+    with pytest.raises(ServiceJwtError, match="invalid service JWT header"):
+        verify_service_token("a.b.c", expected_audience="hiob-ares", secret=SECRET)
+
+    now = int(service_jwt.time.time())
+    base = {
+        "iss": "hiob-control-plane",
+        "sub": "hiob-star",
+        "aud": "hiob-ares",
+        "scope": "node:*:execute node:ares:execute",
+        "workspace_id": "ws-1",
+        "iat": now - 120,
+        "exp": now - 60,
+        "jti": "expired",
+        "kid": "hs256-v1",
+    }
+    expired = jwt.encode(
+        base,
+        SECRET,
+        algorithm="HS256",
+        headers={"kid": "hs256-v1"},
+    )
+    with pytest.raises(ServiceJwtError, match="expired"):
+        verify_service_token(expired, expected_audience="hiob-ares", secret=SECRET, leeway_s=0)
+
+    wrong_issuer = jwt.encode(
+        {**base, "iss": "other", "exp": now + 60},
+        SECRET,
+        algorithm="HS256",
+        headers={"kid": "hs256-v1"},
+    )
+    with pytest.raises(ServiceJwtError, match="issuer mismatch"):
+        verify_service_token(wrong_issuer, expected_audience="hiob-ares", secret=SECRET)
+
+    valid = jwt.encode(
+        {**base, "exp": now + 60},
+        SECRET,
+        algorithm="HS256",
+        headers={"kid": "hs256-v1"},
+    )
+    claims = verify_service_token(valid, expected_audience="hiob-ares", secret=SECRET)
+    assert claims.scope == ("node:*:execute", "node:ares:execute")
+    with pytest.raises(ServiceJwtError, match="workspace_id claim mismatch"):
+        verify_service_token(
+            valid,
+            expected_audience="hiob-ares",
+            workspace_id="ws-2",
+            secret=SECRET,
+        )
+    with pytest.raises(ServiceJwtError, match="invalid service JWT"):
+        verify_service_token(
+            valid,
+            expected_audience="hiob-ares",
+            secret="wrong-unit-test-service-jwt-secret-xyz",
+        )

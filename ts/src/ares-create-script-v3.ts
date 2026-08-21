@@ -166,12 +166,14 @@ function isValidUtcTimestamp(value: string): boolean {
   candidate.setUTCHours(0, 0, 0, 0);
   candidate.setUTCFullYear(year, month - 1, day);
   candidate.setUTCHours(hour, minute, second, 0);
-  return candidate.getUTCFullYear() === year
-    && candidate.getUTCMonth() === month - 1
-    && candidate.getUTCDate() === day
-    && candidate.getUTCHours() === hour
-    && candidate.getUTCMinutes() === minute
-    && candidate.getUTCSeconds() === second;
+  return [
+    candidate.getUTCFullYear(),
+    candidate.getUTCMonth() + 1,
+    candidate.getUTCDate(),
+    candidate.getUTCHours(),
+    candidate.getUTCMinutes(),
+    candidate.getUTCSeconds(),
+  ].join(':') === [year, month, day, hour, minute, second].join(':');
 }
 
 const UtcTimestampSchema = z
@@ -199,7 +201,7 @@ const CanonicalJsonObjectSchema = z
     } catch (error) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: error instanceof Error ? error.message : 'invalid JSON value',
+        message: String(error),
       });
       return z.NEVER;
     }
@@ -903,8 +905,7 @@ export const ScriptPackageV3Schema = z
     const voiceIndices = value.voice_script.map((segment) => segment.beat_index);
     const captionIndices = value.caption_script.map((segment) => segment.beat_index);
     if (
-      Object.keys(value.master_sales_script).length === 0
-      || value.caption_script.length !== value.voice_script.length
+      value.caption_script.length !== value.voice_script.length
       || JSON.stringify(voiceIndices) !== JSON.stringify(expectedIndices)
       || JSON.stringify(captionIndices) !== JSON.stringify(expectedIndices)
       || value.voice_script.some((segment) => !segment.text.trim())
@@ -929,8 +930,8 @@ export const ScriptPackageV3Schema = z
           || typeof beat !== 'object'
           || Array.isArray(beat)
           || beat.beat_index !== index
-          || beat.text !== value.voice_script[index].text
-          || beat.caption !== value.caption_script[index].text
+          || beat.text !== value.voice_script[index]?.text
+          || beat.caption !== value.caption_script[index]?.text
         ) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
