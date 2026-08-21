@@ -17,6 +17,7 @@ from hiob_contracts import (
     derive_parzifal_identity_authority_record_digest_v1,
     sha256_digest,
 )
+import hiob_contracts.parzifal_identity_authority_v1 as identity_authority
 
 
 def _record_body() -> dict:
@@ -325,3 +326,30 @@ def test_identity_authority_material_rejects_wrapper_or_speaker_drift(mutate) ->
 
     with pytest.raises(ValidationError):
         ParzifalIdentityAuthorityMaterialV1.model_validate(value)
+
+
+def test_identity_record_digest_helper_rejects_each_structural_boundary() -> None:
+    with pytest.raises(ValueError, match="must not be blank"):
+        identity_authority._canonical_text("  ")
+
+    invalid_cases = [
+        ({key: value for key, value in _record_body().items() if key != "id"}, "missing id"),
+        ({**_record_body(), "version": True}, "positive integer"),
+        ({**_record_body(), "version": 0}, "positive integer"),
+        ({**_record_body(), "status": "draft"}, "approved or sealed"),
+        ({**_record_body(), "identity_lock": []}, "JSON object"),
+    ]
+    for value, message in invalid_cases:
+        with pytest.raises(ValueError, match=message):
+            derive_parzifal_identity_authority_record_digest_v1(value)
+
+
+def test_identity_document_defensive_type_guards(monkeypatch) -> None:
+    record = ParzifalIdentityAuthorityRecordV1.model_validate(_record())
+    monkeypatch.setattr(identity_authority, "_deep_freeze_json", lambda _value: ())
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        ParzifalIdentityAuthorityRecordV1._freeze_documents({"ok": True})
+
+    monkeypatch.setattr(identity_authority, "_json_value", lambda _value: [])
+    with pytest.raises(TypeError, match="serialize as an object"):
+        record._serialize_documents(record.identity_lock)

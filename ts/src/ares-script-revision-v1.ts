@@ -149,7 +149,7 @@ const JsonValueSchema = z
     } catch (error) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: error instanceof Error ? error.message : 'invalid JSON value',
+        message: String(error),
       });
       return z.NEVER;
     }
@@ -233,7 +233,7 @@ function utcMicros(value: string): bigint {
   }
   const wholeSecond = `${match[1]}-${match[2]}-${match[3]}T${match[4]}:${match[5]}:${match[6]}Z`;
   const wholeMs = Date.parse(wholeSecond);
-  const micros = BigInt((match[7] ?? '').padEnd(6, '0') || '0');
+  const micros = BigInt((match[7] ?? '').padEnd(6, '0'));
   return BigInt(wholeMs) * 1000n + micros;
 }
 
@@ -327,11 +327,7 @@ function digestMatchesV1(
   value: Record<string, unknown>,
   field: string,
 ): boolean {
-  try {
-    return value[field] === canonicalContractDigestV1(value, [field]);
-  } catch {
-    return false;
-  }
+  return value[field] === canonicalContractDigestV1(value, [field]);
 }
 
 export const AresScriptSegmentV1Schema = z

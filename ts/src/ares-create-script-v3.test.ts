@@ -18,6 +18,7 @@ import {
   authorityRefReceiptDigestV3,
 } from './ares-create-script-v3.js';
 import { deriveCharacterIdentityBindingDigestV1 } from './character-identity-v1.js';
+import { deriveVoiceSpecDigestV1 } from './voice-spec-v1.js';
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -359,6 +360,36 @@ function okResultWithCaption(caption = '자막') {
     block_reason: null,
   };
   return { ...payload, content_digest: digest(payload) };
+}
+
+function voiceSpec(subjectId = 'mom') {
+  const body = {
+    contract_version: 'VoiceSpec.v1' as const,
+    subject_id: subjectId,
+    rhythm: 'short and quick',
+    vocabulary: ['근데'],
+    forbidden_phrases: ['혁신적인'],
+    approved_examples: ['첫 문장', '둘째 문장', '셋째 문장'],
+  };
+  return { ...body, voice_spec_digest: deriveVoiceSpecDigestV1(body) };
+}
+
+function rehashPackage(value: ReturnType<typeof scriptPackage>) {
+  const { package_digest: _digest, ...payload } = value;
+  value.package_digest = digest(payload);
+  return value;
+}
+
+function rehashPlan(value: ReturnType<typeof semanticPlan>) {
+  const { plan_digest: _digest, ...payload } = value;
+  value.plan_digest = digest(payload);
+  return value;
+}
+
+function rehashResult<T extends Record<string, any> & { content_digest: string }>(value: T): T {
+  const { content_digest: _digest, ...payload } = value;
+  value.content_digest = digest(payload);
+  return value;
 }
 
 test('V3 accepts five producer-issued refs and full scope', () => {
@@ -706,4 +737,248 @@ test('projection schema digest binds nested types and invariants', () => {
       !== 'source_output_digests_cover_four_authority_outputs_and_command',
   );
   assert.notEqual(digest(driftedInvariant), baseline);
+});
+
+test('canonical JSON rejects symbols, exotic arrays, accessors, nonobjects, and unpaired text', () => {
+  const invalidMasters: unknown[] = [];
+  invalidMasters.push({ beats: [], [Symbol('hidden')]: true });
+  const namedArray = [1];
+  Object.defineProperty(namedArray, 'named', { enumerable: true, value: 2 });
+  invalidMasters.push({ beats: namedArray });
+  const accessorArray = [1];
+  Object.defineProperty(accessorArray, '0', { enumerable: true, get: () => 1 });
+  invalidMasters.push({ beats: accessorArray });
+  const hidden = { beats: [] as unknown[] };
+  Object.defineProperty(hidden, 'secret', { enumerable: false, value: 1 });
+  invalidMasters.push(hidden);
+  invalidMasters.push({ beats: [{ text: '\ud800' }] });
+  invalidMasters.push({ beats: [{ callback: () => true }] });
+  invalidMasters.push(null, [], 'text-only');
+
+  for (const masterSalesScript of invalidMasters) {
+    const pkg = scriptPackage();
+    pkg.master_sales_script = masterSalesScript as typeof pkg.master_sales_script;
+    assert.doesNotThrow(() => ScriptPackageV3Schema.safeParse(pkg));
+    assert.equal(ScriptPackageV3Schema.safeParse(pkg).success, false);
+  }
+
+  const canonicalPackage = scriptPackage();
+  (canonicalPackage.master_sales_script as Record<string, unknown>).metadata = {
+    nullable: null,
+    enabled: false,
+  };
+  rehashPackage(canonicalPackage);
+  assert.equal(ScriptPackageV3Schema.safeParse(canonicalPackage).success, true);
+});
+
+test('identity and evidence reject duplicate roles, VoiceSpec scope, and claim authority drift', () => {
+  const duplicateRoles = sampleRequest();
+  duplicateRoles.identity.speakers.push({
+    role: 'lead', subject_id: 'guest', display_name: 'Guest',
+    voice_id: null, face_id: null, identity_binding_digest: null,
+  });
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(duplicateRoles).success, false);
+
+  const multiSpeaker = sampleRequest();
+  multiSpeaker.identity.speakers.push({
+    role: 'guest', subject_id: 'guest', display_name: 'Guest',
+    voice_id: null, face_id: null, identity_binding_digest: null,
+  });
+  (multiSpeaker.identity as Record<string, any>).voice_spec = voiceSpec();
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(multiSpeaker).success, false);
+
+  const wrongVoiceSubject = sampleRequest();
+  (wrongVoiceSubject.identity as Record<string, any>).voice_spec = voiceSpec('other');
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(wrongVoiceSubject).success, false);
+
+  const duplicateClaims = sampleRequest();
+  duplicateClaims.evidence_and_claims.claims.push({
+    ...structuredClone(duplicateClaims.evidence_and_claims.claims[0]),
+    text: 'different text',
+  });
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(duplicateClaims).success, false);
+
+  const disallowedClaim = sampleRequest();
+  disallowedClaim.evidence_and_claims.allowed_claim_ids = ['other'];
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(disallowedClaim).success, false);
+});
+
+test('authority bundle rejects every producer and Karma receipt binding drift', () => {
+  const mutations: Array<(value: ReturnType<typeof sampleRequest>) => void> = [
+    value => {
+      value.authority.identity_ref.producer = 'janus';
+      value.authority.identity_ref.receipt_digest = authorityRefReceiptDigestV3(
+        value.authority.identity_ref,
+      );
+    },
+    value => { value.authority.accepted_p2a_receipt.edge_id = 'j2p'; },
+    value => { value.authority.accepted_p2a_receipt.target_contract.name = 'OtherProjection'; },
+    value => { value.authority.accepted_p2a_receipt.target_contract.version = 'v2'; },
+    value => { value.authority.p2a_ref.receipt_id = 'other-receipt'; },
+    value => { value.authority.p2a_ref.artifact_digest = digest({ other: 'target' }); },
+  ];
+  for (const mutate of mutations) {
+    const body = sampleRequest();
+    mutate(body);
+    body.authority.p2a_ref.receipt_digest = digest(body.authority.accepted_p2a_receipt);
+    assert.equal(AresCreateScriptRequestV3Schema.safeParse(body).success, false);
+  }
+
+  const blocked = sampleRequest();
+  const blockedReceipt = blocked.authority.accepted_p2a_receipt as Record<string, any>;
+  blockedReceipt.decision = 'blocked';
+  blockedReceipt.target_input = null;
+  blockedReceipt.target_input_digest = null;
+  blocked.authority.p2a_ref.receipt_digest = digest(blocked.authority.accepted_p2a_receipt);
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(blocked).success, false);
+});
+
+test('request rejects Karma scope, canonical projection, p2a digest, and sealed artifact drift', () => {
+  const authorityRefScope = sampleRequest();
+  authorityRefScope.authority.product_ref = structuredClone(
+    authorityRefScope.authority.product_ref,
+  );
+  authorityRefScope.authority.product_ref.workspace_id = 'ws-other';
+  authorityRefScope.authority.product_ref.receipt_digest = authorityRefReceiptDigestV3(
+    authorityRefScope.authority.product_ref,
+  );
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(authorityRefScope).success, false);
+
+  const receiptScope = sampleRequest();
+  receiptScope.authority.accepted_p2a_receipt.workspace_id = 'ws-other';
+  receiptScope.authority.p2a_ref.receipt_digest = digest(
+    receiptScope.authority.accepted_p2a_receipt,
+  );
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(receiptScope).success, false);
+
+  const projectionDrift = sampleRequest();
+  projectionDrift.authority.accepted_p2a_receipt.target_input = structuredClone(
+    projectionDrift.authority.accepted_p2a_receipt.target_input,
+  );
+  projectionDrift.authority.accepted_p2a_receipt.target_input.creative_constraints.n_beats = 3;
+  const targetDigest = digest(projectionDrift.authority.accepted_p2a_receipt.target_input);
+  projectionDrift.authority.accepted_p2a_receipt.target_input_digest = targetDigest;
+  projectionDrift.authority.p2a_ref.artifact_digest = targetDigest;
+  projectionDrift.authority.p2a_ref.payload_digest = targetDigest;
+  projectionDrift.authority.p2a_ref.receipt_digest = digest(
+    projectionDrift.authority.accepted_p2a_receipt,
+  );
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(projectionDrift).success, false);
+
+  const p2aDrift = sampleRequest();
+  p2aDrift.authority.p2a_ref.payload_digest = digest({ wrong: 'projection' });
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(p2aDrift).success, false);
+
+  const artifactDrift = sampleRequest();
+  artifactDrift.identity.identity_lock_digest = digest({ wrong: 'identity artifact' });
+  assert.equal(AresCreateScriptRequestV3Schema.safeParse(artifactDrift).success, false);
+});
+
+test('script package rejects sequence, master beat, and terminal digest drift independently', () => {
+  const invalidPackages: Array<ReturnType<typeof scriptPackage>> = [];
+  const unequal = scriptPackage();
+  unequal.caption_script = [];
+  invalidPackages.push(rehashPackage(unequal));
+  const voiceOrder = scriptPackage();
+  voiceOrder.voice_script[0].beat_index = 1;
+  invalidPackages.push(rehashPackage(voiceOrder));
+  const captionOrder = scriptPackage();
+  captionOrder.caption_script[0].beat_index = 1;
+  invalidPackages.push(rehashPackage(captionOrder));
+  const blankVoice = scriptPackage();
+  blankVoice.voice_script[0].text = '   ';
+  invalidPackages.push(rehashPackage(blankVoice));
+  const missingMasterBeats = scriptPackage();
+  delete (missingMasterBeats.master_sales_script as Record<string, unknown>).beats;
+  invalidPackages.push(rehashPackage(missingMasterBeats));
+  const wrongCount = scriptPackage();
+  (wrongCount.master_sales_script.beats as unknown[]).push({
+    beat_index: 1, text: 'extra', caption: 'extra',
+  });
+  invalidPackages.push(rehashPackage(wrongCount));
+  const nullBeat = scriptPackage();
+  nullBeat.master_sales_script.beats[0] = null as never;
+  invalidPackages.push(rehashPackage(nullBeat));
+  const arrayBeat = scriptPackage();
+  arrayBeat.master_sales_script.beats[0] = [] as never;
+  invalidPackages.push(rehashPackage(arrayBeat));
+  const wrongIndex = scriptPackage();
+  wrongIndex.master_sales_script.beats[0].beat_index = 1;
+  invalidPackages.push(rehashPackage(wrongIndex));
+  for (const pkg of invalidPackages) {
+    assert.equal(ScriptPackageV3Schema.safeParse(pkg).success, false);
+  }
+  assert.equal(ScriptPackageV3Schema.safeParse({
+    ...scriptPackage(), package_digest: digest({ wrong: 'package' }),
+  }).success, false);
+});
+
+test('semantic plan and result enforce indices, digests, artifacts, segments, and terminal reason', () => {
+  const pkg = scriptPackage();
+  const badIndex = semanticPlan(pkg.package_digest);
+  badIndex.beats[0].beat_index = 1;
+  rehashPlan(badIndex);
+  assert.equal(AresCreateScriptResultV3Schema.safeParse(rehashResult({
+    ...okResultWithCaption(),
+    script_package: pkg,
+    semantic_beat_plan: badIndex,
+  })).success, false);
+  assert.equal(AresCreateScriptResultV3Schema.safeParse(rehashResult({
+    ...okResultWithCaption(),
+    semantic_beat_plan: {
+      ...semanticPlan(pkg.package_digest),
+      plan_digest: digest({ wrong: 'plan' }),
+    },
+  })).success, false);
+
+  const base = okResultWithCaption();
+  assert.equal(AresCreateScriptResultV3Schema.safeParse(rehashResult({
+    ...base, script_package: null, semantic_beat_plan: null,
+  })).success, false);
+
+  const differentPackageDigest = semanticPlan(digest({ other: 'package' }));
+  assert.equal(AresCreateScriptResultV3Schema.safeParse(rehashResult({
+    ...okResultWithCaption(), semantic_beat_plan: differentPackageDigest,
+  })).success, false);
+
+  const extraBeatPlan = semanticPlan(base.script_package.package_digest);
+  extraBeatPlan.beats.push({
+    beat_index: 1, text: 'extra', caption: 'extra', scene_intent: 'extra', role_intents: ['lead'],
+  });
+  rehashPlan(extraBeatPlan);
+  assert.equal(AresCreateScriptResultV3Schema.safeParse(rehashResult({
+    ...okResultWithCaption(), semantic_beat_plan: extraBeatPlan,
+  })).success, false);
+
+  const textDriftPlan = semanticPlan(base.script_package.package_digest);
+  textDriftPlan.beats[0].text = 'different text';
+  rehashPlan(textDriftPlan);
+  assert.equal(AresCreateScriptResultV3Schema.safeParse(rehashResult({
+    ...okResultWithCaption(), semantic_beat_plan: textDriftPlan,
+  })).success, false);
+
+  assert.equal(AresCreateScriptResultV3Schema.safeParse(rehashResult({
+    ...okResultWithCaption(), block_reason: 'not allowed',
+  })).success, false);
+
+  const blocked = blockedResult();
+  assert.equal(AresCreateScriptResultV3Schema.safeParse({
+    ...blocked,
+    script_package: scriptPackage(),
+    content_digest: digest({ placeholder: 'blocked artifacts' }),
+  }).success, false);
+  const { content_digest: _blockedDigest, ...blockedPayload } = blocked;
+  const noReasonPayload = { ...blockedPayload, block_reason: null };
+  assert.equal(AresCreateScriptResultV3Schema.safeParse({
+    ...noReasonPayload, content_digest: digest(noReasonPayload),
+  }).success, false);
+});
+
+test('V3 UTC validation rejects malformed and year-zero timestamps without throwing', () => {
+  for (const producedAt of ['not-a-timestamp', '0000-01-01T00:00:00Z']) {
+    const value = blockedResult();
+    (value.provenance as Record<string, any>).produced_at = producedAt;
+    assert.doesNotThrow(() => AresCreateScriptResultV3Schema.safeParse(value));
+    assert.equal(AresCreateScriptResultV3Schema.safeParse(value).success, false);
+  }
 });

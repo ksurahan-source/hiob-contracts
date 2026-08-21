@@ -6,6 +6,7 @@ from hiob_contracts import (
     ElementLockPackageV1,
 )
 from hiob_contracts.factory import sha256_digest
+import hiob_contracts.element_lock_v3 as element_lock_v3
 
 
 def _source() -> ElementArtifactRefV1:
@@ -116,3 +117,84 @@ def test_package_requires_review_artifact_and_human_approval():
                 "lock_digest": None,
             }
         )
+
+
+def test_request_rejects_duplicate_and_non_source_refs() -> None:
+    source = _source()
+    with pytest.raises(ValueError, match="duplicate artifact_id"):
+        CreateElementLockRequestV1.build(
+            operation_id="op-duplicate",
+            workspace_id="ws-1",
+            run_id="run-1",
+            subject_id="hero",
+            identity_spec={"name": "Sora"},
+            source_refs=(source, source),
+            paid_policy_digest=sha256_digest("policy"),
+        )
+    wrong_role = ElementArtifactRefV1(
+        artifact_id="sheet",
+        sha256=sha256_digest("sheet"),
+        role="character_sheet",
+    )
+    with pytest.raises(ValueError, match="role=source"):
+        CreateElementLockRequestV1.build(
+            operation_id="op-role",
+            workspace_id="ws-1",
+            run_id="run-1",
+            subject_id="hero",
+            identity_spec={"name": "Sora"},
+            source_refs=(wrong_role,),
+            paid_policy_digest=sha256_digest("policy"),
+        )
+    assert element_lock_v3._contains_url([{"portrait": "https://example.com"}])
+
+
+def test_package_reports_each_required_review_and_ready_binding() -> None:
+    source = _source()
+    sheet = ElementArtifactRefV1(
+        artifact_id="sheet",
+        sha256=sha256_digest("sheet"),
+        role="character_sheet",
+    )
+    base = {
+        "lock_id": "lock-1",
+        "version": 1,
+        "operation_id": "op-1",
+        "workspace_id": "ws-1",
+        "run_id": "run-1",
+        "subject_id": "hero",
+        "status": "review",
+        "provider_receipt_digest": sha256_digest("receipt"),
+    }
+    with pytest.raises(ValueError, match="character_sheet_ref is required"):
+        ElementLockPackageV1.build(**base)
+    with pytest.raises(ValueError, match="role=character_sheet"):
+        ElementLockPackageV1.build(**base, character_sheet_ref=source)
+    with pytest.raises(ValueError, match="provider_receipt_digest is required"):
+        ElementLockPackageV1.build(
+            **{**base, "provider_receipt_digest": None},
+            character_sheet_ref=sheet,
+        )
+    with pytest.raises(ValueError, match="new version"):
+        ElementLockPackageV1.build(
+            **{
+                **base,
+                "status": "ready",
+                "approved_by": "founder",
+            },
+            character_sheet_ref=sheet,
+        )
+
+    ready = ElementLockPackageV1.build(
+        **{
+            **base,
+            "version": 2,
+            "status": "ready",
+            "approved_by": "founder",
+        },
+        character_sheet_ref=sheet,
+    )
+    with pytest.raises(ValueError, match="lock_digest"):
+        ready.model_copy(
+            update={"lock_digest": sha256_digest("wrong")}
+        )._check()

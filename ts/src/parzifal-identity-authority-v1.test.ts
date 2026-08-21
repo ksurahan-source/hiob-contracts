@@ -551,3 +551,70 @@ test('Parzifal material rejects hidden and accessor properties in nested voice s
     sealed_payload: accessorPayload,
   }), 'accessor property');
 });
+
+test('Parzifal text, time, and JSON validators cover every fail-closed boundary', () => {
+  const canonicalBody = recordBody();
+  canonicalBody.id = `\u001c  ${String.fromCodePoint(0x1f680)}  \u3000`;
+  const canonical = ParzifalIdentityAuthorityRecordV1Schema.parse({
+    ...canonicalBody,
+    digest: deriveParzifalIdentityAuthorityRecordDigestV1(canonicalBody),
+  });
+  assert.equal(canonical.id, String.fromCodePoint(0x1f680));
+
+  for (const invalidId of ['   ', '\ud800', '\udc00']) {
+    const invalid = recordBody();
+    invalid.id = invalidId;
+    assert.throws(() => deriveParzifalIdentityAuthorityRecordDigestV1(invalid));
+    assert.equal(ParzifalIdentityAuthorityRecordV1Schema.safeParse({
+      ...invalid,
+      digest: sha256Digest({ placeholder: invalidId.length }),
+    }).success, false);
+  }
+
+  for (const invalidTimestamp of [
+    'not-a-time',
+    '2026-02-30T01:02:03+00:00',
+  ]) {
+    const invalid = record();
+    invalid.emitted_at = invalidTimestamp;
+    assert.equal(ParzifalIdentityAuthorityRecordV1Schema.safeParse(invalid).success, false);
+  }
+
+  const extraArrayProperty = ['value'];
+  Object.defineProperty(extraArrayProperty, 'named', {
+    enumerable: true,
+    value: 'not-an-index',
+  });
+  const invalidValues = [
+    extraArrayProperty,
+    Number.MAX_SAFE_INTEGER + 1,
+    undefined,
+  ];
+  for (const invalidValue of invalidValues) {
+    const invalid = recordBody();
+    (invalid.identity_lock as Record<string, unknown>).invalid = invalidValue;
+    assert.throws(() => deriveParzifalIdentityAuthorityRecordDigestV1(invalid));
+    assert.equal(ParzifalIdentityAuthorityRecordV1Schema.safeParse({
+      ...invalid,
+      digest: sha256Digest({ placeholder: typeof invalidValue }),
+    }).success, false);
+  }
+});
+
+test('Parzifal sealed material preserves explicit optional identity fields', () => {
+  const payload = sealedPayload();
+  payload.voice_spec = voiceSpec();
+  payload.locale = 'en';
+  payload.audience_lock = 'founder-creators';
+  const parsed = ParzifalIdentityAuthorityMaterialV1Schema.parse({
+    artifact_type: 'identity_lock',
+    artifact_digest: payload.identity_lock_digest,
+    payload_digest: deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(payload),
+    receipt_id: 'parzifal:identity_lock:receipt-explicit',
+    sealed_payload: payload,
+  });
+
+  assert.equal(parsed.sealed_payload.locale, 'en');
+  assert.equal(parsed.sealed_payload.audience_lock, 'founder-creators');
+  assert.equal(parsed.sealed_payload.voice_spec?.subject_id, 'mom');
+});

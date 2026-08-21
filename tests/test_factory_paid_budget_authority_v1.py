@@ -164,6 +164,11 @@ def test_verified_authority_is_nonserializable_capability_and_manifest_guard() -
         copy.copy(verified)
     with pytest.raises(TypeError):
         copy.deepcopy(verified)
+    with pytest.raises(TypeError, match="immutable"):
+        verified.any_field = "value"
+    with pytest.raises(TypeError, match="immutable"):
+        del verified.any_field
+    assert repr(verified) == "VerifiedFactoryPaidBudgetAuthorityV1(<sealed>)"
     with pytest.raises(TypeError, match="only be minted"):
         VerifiedFactoryPaidBudgetAuthorityV1(parsed, _token=object())
 
@@ -182,6 +187,17 @@ def test_verified_authority_is_nonserializable_capability_and_manifest_guard() -
     assert require_factory_beat_manifest_paid_authority_v1(
         manifest, verified
     ) is verified
+    mismatched_manifest = SimpleNamespace(
+        workspace_id=parsed.workspace_id,
+        run_id=parsed.run_id,
+        factory_revision=parsed.factory_revision,
+        beats=[object()] * (parsed.all_beat_count - 1),
+        paid_budget_authority_digest=parsed.authority_digest,
+    )
+    with pytest.raises(ValueError, match="does not bind"):
+        require_factory_beat_manifest_paid_authority_v1(
+            mismatched_manifest, verified
+        )
     with pytest.raises(TypeError, match="VerifiedFactoryPaidBudgetAuthority"):
         require_factory_beat_manifest_paid_authority_v1(manifest, parsed)
 
@@ -412,6 +428,67 @@ def test_rehashed_approval_or_idempotency_substitution_is_rejected() -> None:
     )
     with pytest.raises(ValidationError, match="idempotency_key"):
         FactoryPaidBudgetAuthorityV1.model_validate(payload)
+
+    payload = _authority()
+    payload["authority_digest"] = sha256_digest({"authority": "other"})
+    with pytest.raises(ValidationError, match="authority_digest"):
+        FactoryPaidBudgetAuthorityV1.model_validate(payload)
+
+
+def test_unminted_verified_capability_is_rejected() -> None:
+    ghost = object.__new__(VerifiedFactoryPaidBudgetAuthorityV1)
+    with pytest.raises(TypeError, match="unminted"):
+        _ = ghost.authority
+
+
+def test_approval_receipt_late_guards_are_independently_fail_closed() -> None:
+    receipt = _approval_receipt()
+    invalid_cases = [
+        (
+            {"transaction_audit_id": "other"},
+            "transaction_audit_id",
+        ),
+        (
+            {
+                "paid_calls": receipt.paid_calls.model_copy(
+                    update={"image": receipt.all_beat_count - 1}
+                )
+            },
+            "paid_calls",
+        ),
+        (
+            {"approval_subject_digest": sha256_digest({"subject": "other"})},
+            "approval_subject_digest",
+        ),
+        (
+            {"expires_at_utc": receipt.approved_at_utc},
+            "must follow",
+        ),
+        (
+            {"revoked_at_utc": "2026-08-01T06:59:59Z"},
+            "approval lifetime",
+        ),
+        (
+            {"receipt_digest": sha256_digest({"receipt": "other"})},
+            "receipt_digest",
+        ),
+    ]
+    for update, message in invalid_cases:
+        with pytest.raises(ValueError, match=message):
+            receipt.model_copy(update=update)._bind_receipt()
+
+
+def test_approval_authorizer_rejects_structurally_unbound_authority() -> None:
+    receipt = _approval_receipt()
+    authority = FactoryPaidBudgetAuthorityV1.model_validate(_authority())
+    alien = authority.model_copy(
+        update={"run_id": "00000000-0000-4000-8000-000000000099"}
+    )
+    assert not receipt.authorizes(
+        alien,
+        at_utc="2026-08-01T08:00:00Z",
+        resolver=_Resolver(),
+    )
 
 
 def test_distinct_budget_or_approval_mints_distinct_idempotency() -> None:

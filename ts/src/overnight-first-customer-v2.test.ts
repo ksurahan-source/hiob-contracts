@@ -272,3 +272,200 @@ test('verified receipt requires QA PASS, exact lowercase sha, and exact editor b
     assert(!VerifiedRenderReceiptV2Schema.safeParse({ ...verifiedRenderData(), output_sha256: badSha }).success, 'bad sha shape');
   }
 });
+
+test('identity helpers fail closed at every text and digest boundary', () => {
+  for (const [workspace, external] of [
+    ['', 'EXT-1'],
+    ['   ', 'EXT-1'],
+    ['ws-1', ''],
+    ['ws-1', '   '],
+  ]) {
+    let threw = false;
+    try {
+      deriveCustomerOrderKeyV2(workspace, external);
+    } catch {
+      threw = true;
+    }
+    assert(threw, 'blank customer identity component must throw');
+  }
+
+  const effectCases = [
+    ['bad-order-key', SCRIPT_DIGEST, 'visual', 'hero'],
+    [ORDER_KEY, 'bad-digest', 'visual', 'hero'],
+    [ORDER_KEY, SCRIPT_DIGEST, '', 'hero'],
+    [ORDER_KEY, SCRIPT_DIGEST, 'visual', '   '],
+  ] as const;
+  for (const args of effectCases) {
+    let threw = false;
+    try {
+      deriveEffectKeyV2(args[0], args[1], args[2], args[3]);
+    } catch {
+      threw = true;
+    }
+    assert(threw, 'invalid effect identity component must throw');
+  }
+
+  for (const args of [
+    ['bad-order-key', SCRIPT_DIGEST, TIMELINE_DIGEST, MEDIA_DIGEST, POLICY_DIGEST],
+    [ORDER_KEY, 'bad-digest', TIMELINE_DIGEST, MEDIA_DIGEST, POLICY_DIGEST],
+    [ORDER_KEY, SCRIPT_DIGEST, 'bad-digest', MEDIA_DIGEST, POLICY_DIGEST],
+    [ORDER_KEY, SCRIPT_DIGEST, TIMELINE_DIGEST, 'bad-digest', POLICY_DIGEST],
+    [ORDER_KEY, SCRIPT_DIGEST, TIMELINE_DIGEST, MEDIA_DIGEST, 'bad-digest'],
+  ] as const) {
+    let threw = false;
+    try {
+      deriveEditorApprovalDigestV2(args[0], args[1], args[2], args[3], args[4]);
+    } catch {
+      threw = true;
+    }
+    assert(threw, 'invalid editor approval identity component must throw');
+  }
+});
+
+test('creative order validates canonical JSON, key, digest, revisions, and UTC', () => {
+  for (const payload of [
+    { value: null },
+    { value: 'text' },
+    { value: true },
+    { value: 7 },
+    { value: [null, 'text', false, 3, { nested: 'ok' }] },
+    { value: { nested: 'ok' } },
+  ]) {
+    assert(CreativeOrderV2Schema.safeParse({
+      ...orderData(),
+      canonical_order_payload: payload,
+      canonical_order_digest: sha256Digest(payload),
+    }).success, 'canonical JSON value must parse');
+  }
+
+  for (const payload of [
+    {},
+    { value: Number.POSITIVE_INFINITY },
+    { value: () => 'not-json' },
+    { value: { provider_job_id: 'runtime-only' } },
+  ]) {
+    assert(!CreativeOrderV2Schema.safeParse({
+      ...orderData(),
+      canonical_order_payload: payload,
+      canonical_order_digest: ORDER_DIGEST,
+    }).success, 'noncanonical payload must reject');
+  }
+
+  assert(!CreativeOrderV2Schema.safeParse({
+    ...orderData(), canonical_order_digest: POLICY_DIGEST,
+  }).success, 'mismatched order digest must reject');
+  assert(!CreativeOrderV2Schema.safeParse({
+    ...orderData(), customer_order_key: 'a'.repeat(64),
+  }).success, 'mismatched order key must reject');
+  assert(!CreativeOrderV2Schema.safeParse({
+    ...orderData(), created_at_utc: '2026-99-99T00:00:00Z',
+  }).success, 'impossible UTC date must reject');
+
+  for (const mutation of [
+    { source_revisions: {} },
+    { source_revisions: { ' ': 'revision' } },
+    { deployed_revisions: {} },
+    { output_url: 'http://cdn.hi-ob.com/customer/final.mp4' },
+  ]) {
+    assert(!VerifiedRenderReceiptV2Schema.safeParse({
+      ...verifiedRenderData(), ...mutation,
+    }).success, 'invalid render provenance must reject');
+  }
+});
+
+test('signed receipt digests and paid attempt invariants reject every mismatch', () => {
+  assert(!EditorApprovalReceiptV2Schema.safeParse({
+    ...editorApprovalData(), editor_approval_digest: POLICY_DIGEST,
+  }).success, 'mismatched editor digest must reject');
+  assert(!PaidEffectIntentV2Schema.safeParse({
+    ...effectIntentData(), effect_key: 'a'.repeat(64),
+  }).success, 'mismatched effect key must reject');
+
+  const invalidAttempts = [
+    { effect_key: 'a'.repeat(64) },
+    { state: 'CLAIMED', fencing_token: 0 },
+    { state: 'CLAIMED', lease_owner: null },
+    { state: 'CLAIMED', lease_expires_at_utc: null },
+    { state: 'PROVIDER_STARTING', lease_owner: null, lease_expires_at_utc: null },
+    { state: 'PROVIDER_STARTED', provider_job_id: null },
+    { state: 'SUCCEEDED', provider_job_id: 'job-1', response_digest: null },
+    { cost_currency: 'USD', cost_amount: null },
+    { cost_currency: null, cost_amount: 1 },
+    { cost_currency: 'KRW', cost_amount: 1 },
+    { cost_currency: 'USD', cost_amount: 2.51 },
+    { created_at_utc: '2026-07-16T00:03:00.000002Z', updated_at_utc: '2026-07-16T00:03:00.000001Z' },
+  ];
+  for (const mutation of invalidAttempts) {
+    assert(!PaidEffectAttemptV2Schema.safeParse({
+      ...effectAttemptData(), ...mutation,
+    }).success, `invalid paid attempt must reject: ${JSON.stringify(mutation)}`);
+  }
+
+  for (const valid of [
+    { state: 'PLANNED', fencing_token: 0, lease_owner: null, lease_expires_at_utc: null },
+    { state: 'PROVIDER_STARTED', provider_job_id: 'job-1', lease_owner: null, lease_expires_at_utc: null },
+    {
+      state: 'SUCCEEDED',
+      provider_job_id: 'job-1',
+      response_digest: sha256Digest({ response: 'ok' }),
+      cost_currency: 'USD',
+      cost_amount: 2.5,
+      lease_owner: null,
+      lease_expires_at_utc: null,
+    },
+  ]) {
+    assert(PaidEffectAttemptV2Schema.safeParse({
+      ...effectAttemptData(), ...valid,
+    }).success, `valid paid attempt must parse: ${String(valid.state)}`);
+  }
+});
+
+test('receipt binding helpers deny each independently mismatched field', () => {
+  const order = CreativeOrderV2Schema.parse(orderData());
+  const script = ScriptApprovalReceiptV2Schema.parse(scriptApprovalData());
+  const editor = EditorApprovalReceiptV2Schema.parse(editorApprovalData());
+  const intent = PaidEffectIntentV2Schema.parse(effectIntentData());
+  const attempt = PaidEffectAttemptV2Schema.parse(effectAttemptData());
+  const render = VerifiedRenderReceiptV2Schema.parse(verifiedRenderData());
+
+  for (const mutation of [
+    { customer_order_key: 'a'.repeat(64) },
+    { workspace_id: 'other' },
+    { order_digest: POLICY_DIGEST },
+    { script_digest: TIMELINE_DIGEST },
+    { policy_digest: MEDIA_DIGEST },
+  ]) {
+    assert(!scriptReceiptBindsOrder({ ...script, ...mutation }, order, SCRIPT_DIGEST, POLICY_DIGEST), 'script mismatch must deny');
+  }
+  for (const mutation of [
+    { customer_order_key: 'a'.repeat(64) },
+    { workspace_id: 'other' },
+    { approved_script_digest: TIMELINE_DIGEST },
+    { render_policy_digest: MEDIA_DIGEST },
+  ]) {
+    assert(!editorReceiptBindsScriptApproval({ ...editor, ...mutation }, script), 'editor mismatch must deny');
+  }
+  for (const mutation of [
+    { effect_key: 'a'.repeat(64) },
+    { customer_order_key: 'a'.repeat(64) },
+    { workspace_id: 'other' },
+    { approved_script_digest: TIMELINE_DIGEST },
+    { effect_kind: 'video' as const },
+    { asset_slot: 'other' },
+    { request_digest: POLICY_DIGEST },
+    { spend_ceiling: 3 },
+    { currency: 'KRW' },
+  ]) {
+    assert(!paidEffectAttemptBindsIntent({ ...attempt, ...mutation }, intent), 'paid attempt mismatch must deny');
+  }
+  for (const mutation of [
+    { customer_order_key: 'a'.repeat(64) },
+    { workspace_id: 'other' },
+    { editor_approval_digest: POLICY_DIGEST },
+  ]) {
+    assert(!verifiedReceiptBindsEditorApproval({ ...render, ...mutation }, editor), 'render mismatch must deny');
+  }
+  for (const state of ['PLANNED', 'FAILED_CONFIRMED', 'NOT_STARTED_CONFIRMED'] as const) {
+    assert(paidEffectAttemptAllowsNewAttempt({ ...attempt, state }), `${state} permits a new attempt`);
+  }
+});

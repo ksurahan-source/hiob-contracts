@@ -299,7 +299,7 @@ const ParzifalIdentitySealedPayloadV1Schema = StrictJsonValueSchema
   .transform((value) => deepFreeze({
     ...value,
     voice_spec: value.voice_spec ?? null,
-    locale: value.locale ?? 'ko',
+    locale: value.locale,
     audience_lock: value.audience_lock ?? null,
   }));
 
@@ -326,21 +326,13 @@ const ParzifalIdentityAuthorityMaterialBodyV1Schema = z
         path: ['artifact_digest'],
       });
     }
-    try {
-      if (
-        value.payload_digest
-        !== deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(value.sealed_payload)
-      ) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'payload_digest does not match sealed_payload',
-          path: ['payload_digest'],
-        });
-      }
-    } catch (error) {
+    if (
+      value.payload_digest
+      !== deriveParzifalIdentityAuthorityMaterialPayloadDigestV1(value.sealed_payload)
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: String(error),
+        message: 'payload_digest does not match sealed_payload',
         path: ['payload_digest'],
       });
     }

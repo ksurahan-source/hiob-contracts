@@ -65,8 +65,6 @@ def _canonical_utc_offset_timestamp(value: str) -> str:
         parsed = datetime.fromisoformat(source)
     except ValueError as exc:
         raise ValueError("timestamp must be an ISO-8601 UTC value") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() != timezone.utc.utcoffset(parsed):
-        raise ValueError("timestamp must be UTC")
     canonical = parsed.astimezone(timezone.utc)
     fraction = f".{canonical.microsecond:06d}" if canonical.microsecond else ""
     return (

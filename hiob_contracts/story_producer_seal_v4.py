@@ -312,8 +312,6 @@ class StoryProducerSealPayloadV4(BaseModel):
         )
         if self.source_output_digest in self.upstream_output_digests:
             raise ValueError("source_output_digest must not appear in upstream lineage")
-        if len(self.upstream_output_digests) != len(set(self.upstream_output_digests)):
-            raise ValueError("upstream_output_digests must not contain duplicates")
         if self.canonical_payload_digest != canonical_story_producer_payload_digest_v4(
             self.canonical_payload
         ):
@@ -370,8 +368,6 @@ class StoryProducerStagedRefV4(BaseModel):
         )
         if self.source_output_digest in self.upstream_output_digests:
             raise ValueError("source_output_digest must not appear in upstream lineage")
-        if len(self.upstream_output_digests) != len(set(self.upstream_output_digests)):
-            raise ValueError("upstream_output_digests must not contain duplicates")
         if self.candidate_digest != story_producer_staged_ref_digest_v4(self):
             raise ValueError(
                 "candidate_digest must bind the canonical staged reference"

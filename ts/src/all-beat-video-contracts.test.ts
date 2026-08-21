@@ -11,6 +11,7 @@ import {
   HephaestusFinalRenderReceiptV2Schema,
   ReelsFactoryReceiptV2Schema,
   beatVideoRequestBindsManifestV1,
+  beatVideoReceiptBindsRequestV1,
   reelsFactoryReceiptBindsChainV2,
   deriveFactoryBeatManifestIdempotencyKeyV1,
   deriveAtroposFanInManifestDigestV2,
@@ -348,6 +349,7 @@ test('TypeScript mirror rejects gaps, partial fan-in, and output substitution', 
 
 test('TypeScript mirror rejects invalid or misbound V3 fan-in audio artifacts', () => {
   for (const mutate of [
+    (value: ReturnType<typeof fanInV3>) => { value.audio_artifacts[0].uri = '/absolute/audio.mp3'; },
     (value: ReturnType<typeof fanInV3>) => { value.audio_artifacts[0].kind = 'video'; },
     (value: ReturnType<typeof fanInV3>) => { value.audio_artifacts[0].mime = 'application/octet-stream'; },
     (value: ReturnType<typeof fanInV3>) => { value.audio_artifacts[0].mime = 'audio/ '; },
@@ -393,4 +395,206 @@ test('Python-authoritative canonical digest vectors remain byte-identical', () =
     factoryReceipt(fanInV2()).receipt_digest,
     'sha256:8aaa8f391e121cffe978c0c2026ef3b10b0ebd06fefd520da440c437447bbd6f',
   );
+});
+
+test('digest helpers and reference artifacts fail closed on nonobjects, unsafe keys, beat drift, and aliases', () => {
+  for (const invalid of [null, [], 'not-an-object']) {
+    assert.throws(() => deriveFactoryBeatManifestDigestV1(invalid));
+  }
+
+  const badUri = manifest();
+  badUri.beats[0].reference_artifacts[0].uri = 'https://signed.example/image.png';
+  badUri.idempotency_key = deriveFactoryBeatManifestIdempotencyKeyV1(badUri);
+  badUri.manifest_digest = deriveFactoryBeatManifestDigestV1(badUri);
+  assert.equal(FactoryBeatManifestV1Schema.safeParse(badUri).success, false);
+
+  const beatDrift = manifest();
+  beatDrift.beats[0].reference_artifacts[0].beat_index = 1;
+  beatDrift.idempotency_key = deriveFactoryBeatManifestIdempotencyKeyV1(beatDrift);
+  beatDrift.manifest_digest = deriveFactoryBeatManifestDigestV1(beatDrift);
+  assert.equal(FactoryBeatManifestV1Schema.safeParse(beatDrift).success, false);
+
+  const duplicateReference = manifest();
+  duplicateReference.beats[0].reference_artifacts.push({
+    ...structuredClone(duplicateReference.beats[0].reference_artifacts[0]),
+    artifact_id: 'image-alias.png',
+  });
+  duplicateReference.idempotency_key = deriveFactoryBeatManifestIdempotencyKeyV1(duplicateReference);
+  duplicateReference.manifest_digest = deriveFactoryBeatManifestDigestV1(duplicateReference);
+  assert.equal(FactoryBeatManifestV1Schema.safeParse(duplicateReference).success, false);
+});
+
+test('manifest identity rejects duplicate nonces and independent digest drift', () => {
+  const duplicateNonce = manifest();
+  duplicateNonce.beats[1].generation_nonce = duplicateNonce.beats[0].generation_nonce;
+  duplicateNonce.idempotency_key = deriveFactoryBeatManifestIdempotencyKeyV1(duplicateNonce);
+  duplicateNonce.manifest_digest = deriveFactoryBeatManifestDigestV1(duplicateNonce);
+  assert.equal(FactoryBeatManifestV1Schema.safeParse(duplicateNonce).success, false);
+
+  assert.equal(FactoryBeatManifestV1Schema.safeParse({
+    ...manifest(),
+    manifest_digest: sha256Digest({ wrong: 'manifest' }),
+  }).success, false);
+});
+
+test('video receipt validates storage, media facts, request dimensions, and digest independently', () => {
+  const mutations: Array<(value: ReturnType<typeof videoReceipt>) => void> = [
+    value => { value.artifact.uri = '/absolute/video.mp4'; },
+    value => { value.artifact.kind = 'image'; },
+    value => { value.artifact.mime = 'image/png'; },
+    value => { value.artifact.beat_index = 1; },
+    value => { value.artifact.bytes_len = 0; },
+    value => { value.artifact.duration_ms = null; },
+    value => { value.artifact.width = 0; },
+    value => { value.artifact.height = null; },
+    value => { value.duration_ms = 4000; },
+  ];
+  for (const mutate of mutations) {
+    const invalid = videoReceipt(0);
+    mutate(invalid);
+    invalid.receipt_digest = deriveBeatVideoReceiptDigestV1(invalid);
+    assert.equal(BeatVideoReceiptV1Schema.safeParse(invalid).success, false);
+  }
+  assert.equal(BeatVideoReceiptV1Schema.safeParse({
+    ...videoReceipt(0),
+    receipt_digest: sha256Digest({ wrong: 'receipt' }),
+  }).success, false);
+});
+
+test('video receipt binding denies every independently drifted request field', () => {
+  const parsedRequest = BeatVideoRequestV1Schema.parse(request(0));
+  const parsedReceipt = BeatVideoReceiptV1Schema.parse(videoReceipt(0));
+  assert.equal(beatVideoReceiptBindsRequestV1(parsedReceipt, parsedRequest), true);
+  const mutations: Array<Record<string, unknown>> = [
+    { workspace_id: '00000000-0000-4000-8000-000000000099' },
+    { run_id: '00000000-0000-4000-8000-000000000099' },
+    { beat_index: 1 },
+    { factory_revision: 12 },
+    { plan_digest: sha256Digest({ other: 'plan' }) },
+    { paid_budget_authority_digest: sha256Digest({ other: 'authority' }) },
+    { factory_manifest_digest: sha256Digest({ other: 'manifest' }) },
+    { generation_nonce: '00000000-0000-4000-8000-000000000099' },
+    { request_digest: sha256Digest({ other: 'request' }) },
+    { duration_ms: 4000 },
+    { fps: 24 },
+    { width: 720 },
+    { height: 1280 },
+    { provider: 'piapi' },
+    { model: 'seedance-2.5' },
+  ];
+  for (const mutation of mutations) {
+    assert.equal(
+      beatVideoReceiptBindsRequestV1({ ...parsedReceipt, ...mutation }, parsedRequest),
+      false,
+    );
+  }
+});
+
+test('artifact set rejects scope drift, duplicate outputs, and digest drift independently', () => {
+  const scopeDrift = artifactSet();
+  scopeDrift.workspace_id = '00000000-0000-4000-8000-000000000099';
+  scopeDrift.receipt_digest = deriveBeatArtifactSetReceiptDigestV1(scopeDrift);
+  assert.equal(BeatArtifactSetReceiptV1Schema.safeParse(scopeDrift).success, false);
+
+  const duplicates = artifactSet();
+  duplicates.video_receipts = [videoReceipt(0), videoReceipt(0)];
+  duplicates.receipt_digest = deriveBeatArtifactSetReceiptDigestV1(duplicates);
+  assert.equal(BeatArtifactSetReceiptV1Schema.safeParse(duplicates).success, false);
+
+  assert.equal(BeatArtifactSetReceiptV1Schema.safeParse({
+    ...artifactSet(),
+    receipt_digest: sha256Digest({ wrong: 'set' }),
+  }).success, false);
+});
+
+test('V2 and V3 fan-in reject scope, ordered video, and terminal digest drift', () => {
+  const v2Scope = fanInV2();
+  v2Scope.workspace_id = '00000000-0000-4000-8000-000000000099';
+  v2Scope.manifest_digest = deriveAtroposFanInManifestDigestV2(v2Scope);
+  assert.equal(AtroposFanInManifestV2Schema.safeParse(v2Scope).success, false);
+  const v2Videos = fanInV2();
+  v2Videos.video_artifacts.reverse();
+  v2Videos.manifest_digest = deriveAtroposFanInManifestDigestV2(v2Videos);
+  assert.equal(AtroposFanInManifestV2Schema.safeParse(v2Videos).success, false);
+  assert.equal(AtroposFanInManifestV2Schema.safeParse({
+    ...fanInV2(),
+    manifest_digest: sha256Digest({ wrong: 'v2' }),
+  }).success, false);
+
+  const v3Scope = fanInV3();
+  v3Scope.workspace_id = '00000000-0000-4000-8000-000000000099';
+  v3Scope.manifest_digest = deriveAtroposFanInManifestDigestV3(v3Scope);
+  assert.equal(AtroposFanInManifestV3Schema.safeParse(v3Scope).success, false);
+  const v3Videos = fanInV3();
+  v3Videos.video_artifacts.reverse();
+  v3Videos.manifest_digest = deriveAtroposFanInManifestDigestV3(v3Videos);
+  assert.equal(AtroposFanInManifestV3Schema.safeParse(v3Videos).success, false);
+  const nullAudioBeat = fanInV3();
+  nullAudioBeat.audio_artifacts[0].beat_index = null;
+  nullAudioBeat.audio_mix_digest = sha256Digest({ audio_artifacts: nullAudioBeat.audio_artifacts });
+  nullAudioBeat.manifest_digest = deriveAtroposFanInManifestDigestV3(nullAudioBeat);
+  assert.equal(AtroposFanInManifestV3Schema.safeParse(nullAudioBeat).success, false);
+  assert.equal(AtroposFanInManifestV3Schema.safeParse({
+    ...fanInV3(),
+    manifest_digest: sha256Digest({ wrong: 'v3' }),
+  }).success, false);
+});
+
+test('final render and factory terminal receipts reject every independent binding drift', () => {
+  assert.equal(HephaestusFinalRenderReceiptV2Schema.safeParse({
+    ...finalRender(),
+    receipt_digest: sha256Digest({ wrong: 'render' }),
+  }).success, false);
+
+  const factoryMutations: Array<(value: ReturnType<typeof factoryReceipt>) => void> = [
+    value => { value.workspace_id = '00000000-0000-4000-8000-000000000099'; },
+    value => { value.fan_in_manifest_digest = sha256Digest({ other: 'fan-in' }); },
+    value => { value.output_url = 'https://cdn.example/other.mp4'; },
+    value => { value.output_sha256 = sha256Digest({ other: 'output' }); },
+  ];
+  for (const mutate of factoryMutations) {
+    const invalid = factoryReceipt();
+    mutate(invalid);
+    invalid.receipt_digest = deriveReelsFactoryReceiptDigestV2(invalid);
+    assert.equal(ReelsFactoryReceiptV2Schema.safeParse(invalid).success, false);
+  }
+  assert.equal(ReelsFactoryReceiptV2Schema.safeParse({
+    ...factoryReceipt(),
+    receipt_digest: sha256Digest({ wrong: 'factory' }),
+  }).success, false);
+});
+
+test('output URLs reject whitespace, malformed authority, credentials, and accept IPv6 HTTPS', () => {
+  for (const outputUrl of [
+    'https://cdn.example/out file.mp4',
+    'https://',
+    'https://%/out.mp4',
+  ]) {
+    const invalid = finalRender();
+    invalid.output_url = outputUrl;
+    invalid.receipt_digest = deriveHephaestusFinalRenderReceiptDigestV2(invalid);
+    assert.equal(HephaestusFinalRenderReceiptV2Schema.safeParse(invalid).success, false);
+  }
+  const ipv6 = finalRender();
+  ipv6.output_url = 'https://[::1]/out.mp4';
+  ipv6.receipt_digest = deriveHephaestusFinalRenderReceiptDigestV2(ipv6);
+  assert.equal(HephaestusFinalRenderReceiptV2Schema.safeParse(ipv6).success, true);
+});
+
+test('request-to-manifest binding denies every remaining beat and provider drift', () => {
+  const parsedManifest = FactoryBeatManifestV1Schema.parse(manifest());
+  const valid = BeatVideoRequestV1Schema.parse(request(0));
+  const invalidIndex = { ...valid, beat_index: 99 };
+  assert.equal(beatVideoRequestBindsManifestV1(invalidIndex, parsedManifest), false);
+  for (const mutation of [
+    { duration_ms: 4000 },
+    { fps: 24 },
+    { width: 720 },
+    { height: 1280 },
+    { reference_artifacts: [artifact(0, 'image', 'other.png', 'other')] },
+    { provider: 'piapi' },
+    { model: 'seedance-2.5' },
+  ]) {
+    assert.equal(beatVideoRequestBindsManifestV1({ ...valid, ...mutation }, parsedManifest), false);
+  }
 });

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from hiob_contracts import ParzifalMasterSheet, CharacterMasterSheet, ProductMasterSheet, SheetPanel
+import hiob_contracts.parzifal_master_sheet as master_sheet
 
 
 def _panel(label, slot="angle", key="k.png"):
@@ -91,6 +92,7 @@ def test_character_master_sheet_from_dict_none():
     assert empty.persona_id == ""
     assert empty.hero_panel() is None
     assert empty.to_dict()["angles"] == []
+    assert any("persona_id" in error for error in empty.validate())
 
 
 def test_organic_role_and_scope_roundtrip():
@@ -128,3 +130,52 @@ def test_organic_role_and_scope_roundtrip():
     # CharacterMasterSheet standalone roundtrip
     ch2 = CharacterMasterSheet.from_dict(ch.to_dict())
     assert ch2.role == "lead" and ch2.kind == "lead_link"
+
+
+def test_panel_serialization_validation_and_digest_normalization_edges():
+    panel = SheetPanel(
+        slot="invalid",
+        label="",
+        storage_key="panel.png",
+        content_digest="sha256:" + "1" * 64,
+    )
+    assert panel.to_dict()["content_digest"] == panel.content_digest
+    errors = panel.validate()
+    assert len(errors) == 2
+
+    parsed = master_sheet._panel_from_dict(
+        {"slot": "detail", "label": "detail", "sha256": "2" * 64}
+    )
+    assert parsed.content_digest == "sha256:" + "2" * 64
+    rows = master_sheet._panels_to_dict([parsed], include_digest=True)
+    assert rows[0]["content_digest"] == parsed.content_digest
+    assert rows[0]["sha256"] == parsed.content_digest
+
+
+def test_character_and_product_sheet_fallbacks_and_approved_panels():
+    fallback = CharacterMasterSheet(
+        persona_id="hero",
+        angles=[_panel("side")],
+        expressions=[_panel("smile", slot="expression")],
+    )
+    assert fallback.hero_panel().label == "side"
+    assert [panel.label for panel in fallback.approved_panels()] == ["side", "smile"]
+    assert ProductMasterSheet().hero_panel() is None
+    assert master_sheet._characters_from_dict([]) == {}
+
+
+def test_master_sheet_background_and_invalid_state_edges():
+    approved = _approved()
+    bg_dict = ParzifalMasterSheet(
+        **{
+            **approved.__dict__,
+            "background": {"ref": {"url": "https://cdn.example/bg.png"}},
+        }
+    )
+    assert bg_dict.approved_refs("heroine")[-1].kind == "background"
+    assert approved.constraint_prompt("missing") == ""
+    assert any("status" in error for error in ParzifalMasterSheet(status="other").validate())
+
+    assert master_sheet._bg_to_dict(None) == {}
+    assert master_sheet._bg_to_dict({"ref": {"url": "u"}})["ref"] == {"url": "u"}
+    assert master_sheet._bg_from_dict(None) == {}

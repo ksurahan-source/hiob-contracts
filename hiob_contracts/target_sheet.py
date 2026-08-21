@@ -402,6 +402,7 @@ class TargetProfile:
             narrative_arc=_text_value(d, "narrative_arc"),
             voice_persona=_text_value(d, "voice_persona"),
             speaking_style=_text_value(d, "speaking_style"),
+            gender_axis=_text_value(d, "gender_axis"),
             source_tags=[SourceTag.from_dict(st) for st in (d.get("source_tags") or [])],
             approval_status=_text_value(d, "approval_status", "approved"),
         )
@@ -422,7 +423,9 @@ class TargetSheet:
     identity: IdentityLayer = field(default_factory=IdentityLayer)
     grounding: GroundingLayer = field(default_factory=GroundingLayer)
     persona: PersonaLayer = field(default_factory=PersonaLayer)
-    visual: CharacterMasterSheet = field(default_factory=lambda: CharacterMasterSheet())
+    visual: CharacterMasterSheet = field(
+        default_factory=lambda: CharacterMasterSheet(persona_id="")
+    )
 
     def validate(self) -> list[str]:
         """모든 계층 검증."""
@@ -700,7 +703,7 @@ def build_target_sheet(
 
     변경 0, 입력 4개 결합.
     """
-    visual = visual or CharacterMasterSheet()
+    visual = visual or CharacterMasterSheet(persona_id="")
     return TargetSheet(
         persona_id=persona_id,
         identity=identity,

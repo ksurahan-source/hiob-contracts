@@ -862,3 +862,258 @@ def test_v3_projection_schema_digest_binds_nested_structure_and_invariants():
         "source_output_digests_cover_four_authority_outputs_and_command"
     )
     assert sha256_digest(drifted) != baseline
+
+
+def test_v3_authority_freezer_and_all_late_receipt_guards() -> None:
+    request = AresCreateScriptRequestV3.model_validate(request_data())
+    authority = request.authority
+    receipt = authority.accepted_p2a_receipt
+    assert authority._freeze_p2a_receipt(
+        receipt.model_copy(update={"target_input": None})
+    ).target_input is None
+
+    wrong_owner = authority.identity_ref.model_copy(update={"producer": "janus"})
+    with pytest.raises(ValueError, match="identity_ref must be issued"):
+        authority.model_copy(
+            update={"identity_ref": wrong_owner}
+        )._validate_authority_owners_and_p2a()
+
+    receipt_cases = [
+        ({"edge_id": "other"}, "edge_id"),
+        ({"decision": "blocked"}, "decision"),
+        (
+            {
+                "target_contract": receipt.target_contract.model_copy(
+                    update={"name": "OtherContract"}
+                )
+            },
+            "target_contract.name",
+        ),
+        (
+            {
+                "target_contract": receipt.target_contract.model_copy(
+                    update={"version": "v2"}
+                )
+            },
+            "target_contract.version",
+        ),
+        (
+            {
+                "target_contract": receipt.target_contract.model_copy(
+                    update={"schema_digest": sha256_digest({"schema": "wrong"})}
+                )
+            },
+            "schema digest",
+        ),
+        ({"target_input_digest": None}, "target_input_digest"),
+    ]
+    for update, message in receipt_cases:
+        with pytest.raises(ValueError, match=message):
+            authority.model_copy(
+                update={"accepted_p2a_receipt": receipt.model_copy(update=update)}
+            )._validate_authority_owners_and_p2a()
+
+    with pytest.raises(ValueError, match="receipt_id"):
+        authority.model_copy(
+            update={
+                "p2a_ref": authority.p2a_ref.model_copy(
+                    update={"receipt_id": "other"}
+                )
+            }
+        )._validate_authority_owners_and_p2a()
+    with pytest.raises(ValueError, match="artifact_digest"):
+        authority.model_copy(
+            update={
+                "p2a_ref": authority.p2a_ref.model_copy(
+                    update={"artifact_digest": sha256_digest({"artifact": "wrong"})}
+                )
+            }
+        )._validate_authority_owners_and_p2a()
+    with pytest.raises(ValueError, match="payload_digest"):
+        authority.model_copy(
+            update={
+                "p2a_ref": authority.p2a_ref.model_copy(
+                    update={"payload_digest": sha256_digest({"payload": "wrong"})}
+                )
+            }
+        )._validate_authority_owners_and_p2a()
+
+
+def test_v3_request_late_scope_projection_and_payload_guards() -> None:
+    request = AresCreateScriptRequestV3.model_validate(request_data())
+    authority = request.authority
+    for field in ("workspace_id", "run_id"):
+        alien_ref = authority.identity_ref.model_copy(update={field: "other"})
+        with pytest.raises(ValueError, match=field):
+            request.model_copy(
+                update={
+                    "authority": authority.model_copy(
+                        update={"identity_ref": alien_ref}
+                    )
+                }
+            )._assert_authority_scope()
+
+    for field in ("workspace_id", "run_id"):
+        alien_receipt = authority.accepted_p2a_receipt.model_copy(
+            update={field: "other"}
+        )
+        with pytest.raises(ValueError, match=field):
+            request.model_copy(
+                update={
+                    "authority": authority.model_copy(
+                        update={"accepted_p2a_receipt": alien_receipt}
+                    )
+                }
+            )._assert_authority_scope()
+
+    _projection, payload, digest = request._canonical_p2a_projection()
+    with pytest.raises(ValueError, match="target_input_digest"):
+        request._assert_projection_binding(payload, sha256_digest({"wrong": 1}))
+    alien_p2a = authority.p2a_ref.model_copy(
+        update={"artifact_digest": sha256_digest({"wrong": 2})}
+    )
+    with pytest.raises(ValueError, match="p2a_ref digests"):
+        request.model_copy(
+            update={
+                "authority": authority.model_copy(update={"p2a_ref": alien_p2a})
+            }
+        )._assert_projection_binding(payload, digest)
+
+    alien_identity = authority.identity_ref.model_copy(
+        update={"artifact_digest": sha256_digest({"identity": "wrong"})}
+    )
+    with pytest.raises(ValueError, match="identity_ref.artifact_digest"):
+        request.model_copy(
+            update={
+                "authority": authority.model_copy(
+                    update={"identity_ref": alien_identity}
+                )
+            }
+        )._assert_sealed_payload_bindings()
+
+
+def test_v3_script_package_all_structural_guards() -> None:
+    package = ScriptPackageV3.model_validate(script_package_data())
+    with pytest.raises(ValueError, match="must not be empty"):
+        ScriptPackageV3._freeze_master({})
+    with pytest.raises(ValueError, match="at least one"):
+        package.model_copy(
+            update={"voice_script": (), "caption_script": ()}
+        )._assert_segment_shape()
+    with pytest.raises(ValueError, match="equal length"):
+        package.model_copy(update={"caption_script": ()})._assert_segment_shape()
+    with pytest.raises(ValueError, match="voice_script beat indices"):
+        package.model_copy(
+            update={
+                "voice_script": (
+                    package.voice_script[0].model_copy(update={"beat_index": 1}),
+                )
+            }
+        )._assert_segment_shape()
+    with pytest.raises(ValueError, match="caption_script beat indices"):
+        package.model_copy(
+            update={
+                "caption_script": (
+                    package.caption_script[0].model_copy(update={"beat_index": 1}),
+                )
+            }
+        )._assert_segment_shape()
+    with pytest.raises(ValueError, match="non-empty dialogue"):
+        package.model_copy(
+            update={
+                "voice_script": (
+                    package.voice_script[0].model_copy(update={"text": " "}),
+                )
+            }
+        )._assert_segment_shape()
+
+    invalid_master_cases = [
+        ({"beats": "not-an-array"}, "canonical beat array"),
+        ({"beats": []}, "match script segment count"),
+        ({"beats": ["not-an-object"]}, "JSON objects"),
+        (
+            {"beats": [{"beat_index": 1}]},
+            "beat indices",
+        ),
+    ]
+    for master, message in invalid_master_cases:
+        with pytest.raises(ValueError, match=message):
+            package.model_copy(
+                update={"master_sales_script": master}
+            )._assert_master_beats(1)
+    with pytest.raises(ValueError, match="package_digest"):
+        package.model_copy(
+            update={"package_digest": sha256_digest({"package": "wrong"})}
+        )._bind_content()
+
+
+def test_v3_plan_and_result_late_guards() -> None:
+    package = ScriptPackageV3.model_validate(script_package_data())
+    plan = SemanticBeatPlanV3.model_validate(
+        semantic_plan_data(package.package_digest)
+    )
+    with pytest.raises(ValueError, match="semantic beat indices"):
+        plan.model_copy(
+            update={
+                "beats": (
+                    plan.beats[0].model_copy(update={"beat_index": 1}),
+                )
+            }
+        )._bind_content()
+    with pytest.raises(ValueError, match="plan_digest"):
+        plan.model_copy(
+            update={"plan_digest": sha256_digest({"plan": "wrong"})}
+        )._bind_content()
+
+    result = AresCreateScriptResultV3.model_validate(ok_result_data())
+    with pytest.raises(ValueError, match="requires script_package"):
+        result.model_copy(update={"script_package": None})._assert_ok_artifacts()
+    with pytest.raises(ValueError, match="script_package_digest"):
+        result.model_copy(
+            update={
+                "semantic_beat_plan": result.semantic_beat_plan.model_copy(
+                    update={"script_package_digest": sha256_digest({"package": "other"})}
+                )
+            }
+        )._assert_ok_artifacts()
+    with pytest.raises(ValueError, match="beat count"):
+        result.model_copy(
+            update={
+                "semantic_beat_plan": result.semantic_beat_plan.model_copy(
+                    update={"beats": ()}
+                )
+            }
+        )._assert_ok_artifacts()
+    with pytest.raises(ValueError, match="beat text"):
+        result.model_copy(
+            update={
+                "semantic_beat_plan": result.semantic_beat_plan.model_copy(
+                    update={
+                        "beats": (
+                            result.semantic_beat_plan.beats[0].model_copy(
+                                update={"text": "different"}
+                            ),
+                        )
+                    }
+                )
+            }
+        )._assert_ok_artifacts()
+    with pytest.raises(ValueError, match="block_reason"):
+        result.model_copy(update={"block_reason": "unexpected"})._assert_ok_artifacts()
+
+    blocked = result.model_copy(
+        update={
+            "status": "blocked",
+            "script_package": None,
+            "semantic_beat_plan": None,
+            "block_reason": "blocked",
+        }
+    )
+    with pytest.raises(ValueError, match="must not carry generated artifacts"):
+        blocked.model_copy(update={"script_package": package})._assert_non_ok_artifacts()
+    with pytest.raises(ValueError, match="requires block_reason"):
+        blocked.model_copy(update={"block_reason": None})._assert_non_ok_artifacts()
+    with pytest.raises(ValueError, match="content_digest"):
+        result.model_copy(
+            update={"content_digest": sha256_digest({"result": "wrong"})}
+        )._bind_status_and_content()

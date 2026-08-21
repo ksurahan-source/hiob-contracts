@@ -42,6 +42,19 @@ class SheetPanel:
     def has_image(self) -> bool:
         return bool(self.storage_key or self.url)
 
+    def to_dict(self) -> dict:
+        row = {
+            "slot": self.slot,
+            "label": self.label,
+            "storage_key": self.storage_key,
+            "url": self.url,
+            "engine": self.engine,
+            "derived_from": self.derived_from,
+        }
+        if self.content_digest:
+            row["content_digest"] = self.content_digest
+        return row
+
     def to_ref(self, kind: str) -> ElementRef:
         """ElementLocks 소비 호환용 ElementRef 변환(브릿지)."""
         return ElementRef(kind=kind, storage_key=self.storage_key, url=self.url,

@@ -105,6 +105,8 @@ def _assert_video_artifact(
     _assert_relative_storage_key(artifact.uri, "artifact uri")
     if artifact.kind != "video" or artifact.mime != "video/mp4":
         raise ValueError("artifact must be a video/mp4 video")
+    if final and artifact.beat_index is not None:
+        raise ValueError("final artifact must not be bound to one beat")
     if artifact.beat_index != beat_index:
         raise ValueError("artifact beat_index does not match receipt")
     if artifact.bytes_len <= 0:
@@ -115,8 +117,6 @@ def _assert_video_artifact(
         raise ValueError("artifact width must be positive")
     if artifact.height is None or artifact.height <= 0:
         raise ValueError("artifact height must be positive")
-    if final and artifact.beat_index is not None:
-        raise ValueError("final artifact must not be bound to one beat")
 
 
 def _assert_audio_artifact(artifact: "StrictAllBeatArtifactRefV1") -> None:
@@ -564,8 +564,6 @@ class AtroposFanInManifestV3(AtroposFanInManifestV2):
             raise ValueError(
                 "audio_mix_digest must exactly bind ordered audio_artifacts"
             )
-        if self.manifest_digest != derive_atropos_fan_in_manifest_digest_v3(self):
-            raise ValueError("manifest_digest does not match Atropos fan-in")
         return self
 
 

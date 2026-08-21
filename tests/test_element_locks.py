@@ -5,6 +5,7 @@ from hiob_contracts import (
     ElementLocks, ElementRef, CharacterLock, ProductLock, BackgroundLock,
     ensure_valid, validate_payload, registered_contracts, standing_lookup,
 )
+import hiob_contracts.element_locks as element_locks
 
 APPROVED = {
     "version": 3,
@@ -161,3 +162,52 @@ def test_partial_locks_only_available_refs():
     refs = el.approved_refs("x")
     assert [r.kind for r in refs] == ["product"]
     assert el.validate() == []
+
+
+def test_safe_integer_and_reference_parsing_fallbacks():
+    assert element_locks._safe_int(None, 7) == 7
+    assert element_locks._safe_int(True, 7) == 7
+    assert element_locks._safe_int(4) == 4
+    assert element_locks._safe_int(2.9) == 2
+    assert element_locks._safe_int("3") == 3
+    assert element_locks._safe_int("bad", 7) == 7
+
+    ref = ElementRef(kind="character", storage_key="hero.png")
+    assert element_locks._ref_from(None, "character") is None
+    assert element_locks._ref_from(ref, "character") is ref
+    assert element_locks._ref_from("invalid", "character") is None
+
+
+def test_lock_validation_and_empty_constraint_helpers():
+    assert ElementRef(kind="invalid").validate()
+    assert CharacterLock(persona_id="").validate()
+    assert element_locks._character_constraint_parts(None) == []
+    assert element_locks._product_constraint_parts(None) == []
+    assert element_locks._background_constraint_parts(None) == []
+    assert element_locks._background_constraint_parts(
+        BackgroundLock(text_lock="수영장")
+    ) == ["배경 락: 수영장"]
+    assert element_locks._product_lock_from_dict({}) is None
+
+
+def test_approve_empty_character_and_invalid_metadata_paths():
+    draft = ElementLocks(version=2, status="draft")
+    approved = draft.approve(by="founder")
+    assert approved.status == "approved"
+    assert approved.version == 3
+    assert approved.version_history[-1]["by"] == "founder"
+    assert approved.character("") is None
+
+    invalid = ElementLocks(version=-1, status="unknown")
+    errors = invalid.validate()
+    assert len(errors) == 2
+
+
+def test_standing_lookup_skips_none_and_accepts_wire_dict():
+    hit = standing_lookup(
+        [None, APPROVED],
+        workspace_id="ws-viewok",
+        brand_slug="viewok",
+    )
+    assert hit is not None
+    assert hit.matches_scope("ws-viewok", "viewok")

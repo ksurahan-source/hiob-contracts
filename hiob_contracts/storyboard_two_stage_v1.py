@@ -1591,8 +1591,6 @@ class StoryboardImageSetReceiptV1(BaseModel):
             return False
         if paid_authority.purpose == "storyboard_draft":
             return self._binds_all_initial_image_receipts(paid_authority)
-        if previous_image_set is None:
-            return False
         return self._binds_unchanged_regen_images(previous_image_set)
 
     def _binds_paid_image_authority(
@@ -3645,8 +3643,6 @@ class FactoryPaidBudgetResolutionV2(BaseModel):
             or profile.pricing_policy_revision != authority.pricing_policy_revision
         ):
             raise ValueError("cost_profile does not match paid authority")
-        if profile.currency != authority.currency:
-            raise ValueError("cost_profile currency does not match paid authority")
         if authority.max_total_cost_microunits != (
             profile.worst_case_cost_microunits(authority.paid_calls)
         ):

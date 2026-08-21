@@ -256,7 +256,7 @@ class ExecutionBackend(ABC):
     @abstractmethod
     def is_configured(self) -> bool:
         """Check if this backend is configured and available."""
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def submit(
@@ -284,7 +284,7 @@ class ExecutionBackend(ABC):
             ExecutionContractError: If envelope invalid or provider unavailable.
             IdempotencyError: If idempotency_key already processed.
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def status(self, operation_id: str) -> OperationStatus:
@@ -302,7 +302,7 @@ class ExecutionBackend(ABC):
         Returns:
             OperationStatus with current state.
         """
-        pass
+        raise NotImplementedError
 
     @abstractmethod
     def cancel(self, operation_id: str) -> CancelResult:
@@ -321,4 +321,4 @@ class ExecutionBackend(ABC):
         Returns:
             CancelResult with cancellation details.
         """
-        pass
+        raise NotImplementedError

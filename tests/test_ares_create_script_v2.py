@@ -572,3 +572,142 @@ def test_receipt_object_roundtrip_via_model():
         receipt.target_contract.model_dump()
     ).name == "AresScriptInput"
     assert MapperRef.model_validate(receipt.mapper.model_dump()).planet == "karma"
+
+
+def test_authority_rejects_wrong_target_contract_name_after_valid_receipt() -> None:
+    authority = AresAuthorityV2.model_validate(request_data()["authority"])
+    receipt = authority.accepted_p2a_receipt.model_copy(
+        update={
+            "target_contract": authority.accepted_p2a_receipt.target_contract.model_copy(
+                update={"name": "OtherContract"}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="target_contract.name"):
+        authority.model_copy(
+            update={"accepted_p2a_receipt": receipt}
+        )._require_accepted_p2a()
+
+
+def test_identity_rejects_duplicate_roles_and_multi_speaker_voice_spec() -> None:
+    parsed = AresIdentitySealedV2.model_validate(_identity())
+    with pytest.raises(ValueError):
+        parsed.speakers[0].model_copy(
+            update={"voice_id": None}
+        )._atomic_face_and_voice()
+
+    identity = _identity()
+    identity["speakers"].append(deepcopy(identity["speakers"][0]))
+    with pytest.raises(ValidationError, match="roles must be unique"):
+        AresIdentitySealedV2.model_validate(identity)
+
+    identity = _identity()
+    second = deepcopy(identity["speakers"][0])
+    second["role"] = "narrator"
+    identity["speakers"].append(second)
+    identity["voice_spec"] = _voice_spec()
+    with pytest.raises(ValidationError, match="exactly one"):
+        AresIdentitySealedV2.model_validate(identity)
+
+
+def test_evidence_rejects_duplicate_claim_ids() -> None:
+    evidence = _evidence()
+    evidence["claims"].append(deepcopy(evidence["claims"][0]))
+    with pytest.raises(ValidationError, match="claim_id values must be unique"):
+        AresEvidenceAndClaimsSealedV2.model_validate(evidence)
+
+
+def test_script_package_late_content_guards_fail_independently() -> None:
+    package = ScriptPackageV2.model_validate(script_package_data())
+    with pytest.raises(ValueError, match="must not be empty"):
+        ScriptPackageV2._freeze_master({})
+    with pytest.raises(ValueError, match="at least one"):
+        package.model_copy(
+            update={"voice_script": (), "caption_script": ()}
+        )._bind_content()
+    with pytest.raises(ValueError, match="equal length"):
+        package.model_copy(
+            update={"caption_script": package.caption_script[:1]}
+        )._bind_content()
+    with pytest.raises(ValueError, match="voice_script beat indices"):
+        package.model_copy(
+            update={
+                "voice_script": (
+                    package.voice_script[0].model_copy(update={"beat_index": 1}),
+                    package.voice_script[1],
+                )
+            }
+        )._bind_content()
+    with pytest.raises(ValueError, match="caption_script beat indices"):
+        package.model_copy(
+            update={
+                "caption_script": (
+                    package.caption_script[0].model_copy(update={"beat_index": 1}),
+                    package.caption_script[1],
+                )
+            }
+        )._bind_content()
+    with pytest.raises(ValueError, match="non-empty dialogue"):
+        package.model_copy(
+            update={
+                "voice_script": (
+                    package.voice_script[0].model_copy(update={"text": " "}),
+                    package.voice_script[1],
+                )
+            }
+        )._bind_content()
+
+
+def test_beat_plan_late_content_guards_fail_independently() -> None:
+    package = ScriptPackageV2.model_validate(script_package_data())
+    plan = BeatPlanV2.model_validate(beat_plan_data(package.package_digest))
+    with pytest.raises(ValueError, match="at least one"):
+        plan.model_copy(update={"beats": ()})._bind_content()
+    with pytest.raises(ValueError, match="beat indices"):
+        plan.model_copy(
+            update={
+                "beats": (
+                    plan.beats[0].model_copy(update={"beat_index": 1}),
+                    plan.beats[1],
+                )
+            }
+        )._bind_content()
+    with pytest.raises(ValueError, match="must be ordered"):
+        plan.model_copy(
+            update={"beat_role_intents": tuple(reversed(plan.beat_role_intents))}
+        )._bind_content()
+    with pytest.raises(ValueError, match="out of range"):
+        plan.model_copy(
+            update={
+                "beat_role_intents": (
+                    plan.beat_role_intents[0].model_copy(update={"beat_index": 2}),
+                )
+            }
+        )._bind_content()
+    with pytest.raises(ValueError, match="plan_digest"):
+        plan.model_copy(
+            update={"plan_digest": sha256_digest({"plan": "wrong"})}
+        )._bind_content()
+
+
+def test_result_late_status_and_digest_guards_fail_independently() -> None:
+    result = AresCreateScriptResultV2.model_validate(ok_result_data())
+    with pytest.raises(ValueError, match="requires script_package and beat_plan"):
+        result.model_copy(update={"script_package": None})._status_payload_rules()
+    with pytest.raises(ValueError, match="must not carry block_reason"):
+        result.model_copy(update={"block_reason": "unexpected"})._status_payload_rules()
+
+    blocked_body = {
+        **result.model_dump(mode="python"),
+        "status": "blocked",
+        "script_package": None,
+        "beat_plan": None,
+        "block_reason": "blocked",
+    }
+    blocked = AresCreateScriptResultV2.model_construct(**blocked_body)
+    with pytest.raises(ValueError, match="requires block_reason"):
+        blocked.model_copy(update={"block_reason": None})._status_payload_rules()
+    with pytest.raises(ValueError, match="content_digest"):
+        result.model_copy(
+            update={"content_digest": sha256_digest({"result": "wrong"})}
+        )._status_payload_rules()

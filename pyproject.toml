@@ -22,4 +22,5 @@ hiob_contracts = ["runtime_node_manifest.json"]
 [dependency-groups]
 dev = [
     "pytest==9.0.2",
+    "pytest-cov>=7.0,<8",
 ]

@@ -12,6 +12,7 @@ import {
   ScriptPackageV1Schema,
   approvalCommandBindsRevisionV1,
   approvalReceiptAuthorizesV1,
+  planRevisionBindsScriptRevisionV1,
   canonicalContractJsonV1,
   canonicalContractDigestV1,
   deriveAresG1SubjectDigestV1,
@@ -595,4 +596,226 @@ test('begin command binds selected candidate and initial CAS state', () => {
     AresApprovalBeginCommandV1Schema.safeParse(changedCandidate).success,
     false,
   );
+});
+
+test('strict JSON and pronunciation parsing rejects every hidden JavaScript value', () => {
+  const invalidMasterValues: unknown[] = [];
+  const symbolObject = { safe: 1, [Symbol('hidden')]: 2 };
+  invalidMasterValues.push(symbolObject);
+  const namedArray = [1];
+  Object.defineProperty(namedArray, 'named', { enumerable: true, value: 2 });
+  invalidMasterValues.push({ namedArray });
+  const hiddenObject = { visible: 1 };
+  Object.defineProperty(hiddenObject, 'hidden', { enumerable: false, value: 2 });
+  invalidMasterValues.push(hiddenObject);
+  invalidMasterValues.push({ callback: () => true });
+  for (const masterSalesScript of invalidMasterValues) {
+    const payload = scriptPackageData();
+    payload.master_sales_script = masterSalesScript as typeof payload.master_sales_script;
+    assert.doesNotThrow(() => ScriptPackageV1Schema.safeParse(payload));
+    assert.equal(ScriptPackageV1Schema.safeParse(payload).success, false);
+  }
+
+  const invalidPronunciations: unknown[] = [null, [], 'not-an-object'];
+  const symbolPronunciation = { XL: '엑스엘', [Symbol('hidden')]: 'bad' };
+  invalidPronunciations.push(symbolPronunciation, { XL: '' }, { '   ': 'blank-key' });
+  const accessorPronunciation = Object.defineProperty({}, 'XL', {
+    enumerable: true,
+    get: () => '엑스엘',
+  });
+  invalidPronunciations.push(accessorPronunciation);
+  for (const pronunciationOverrides of invalidPronunciations) {
+    const payload = scriptPackageData();
+    payload.pronunciation_overrides = pronunciationOverrides as typeof payload.pronunciation_overrides;
+    assert.equal(ScriptPackageV1Schema.safeParse(payload).success, false);
+  }
+
+  assert.equal(canonicalContractJsonV1(false), 'false');
+  for (const invalidText of ['\ud800', '\udc00']) {
+    assert.throws(() => canonicalContractJsonV1(invalidText), /surrogate/);
+  }
+});
+
+test('script package and beat plan cover every sequence invariant', () => {
+  const emptyVoice = scriptPackageData();
+  emptyVoice.voice_script = [];
+  emptyVoice.caption_script = [];
+  emptyVoice.package_digest = canonicalContractDigestV1(emptyVoice, ['package_digest']);
+  assert.equal(ScriptPackageV1Schema.safeParse(emptyVoice).success, false);
+
+  const unequal = scriptPackageData();
+  unequal.caption_script = unequal.caption_script.slice(0, 1);
+  unequal.package_digest = canonicalContractDigestV1(unequal, ['package_digest']);
+  assert.equal(ScriptPackageV1Schema.safeParse(unequal).success, false);
+
+  const captionOrder = scriptPackageData();
+  captionOrder.caption_script[0].beat_index = 1;
+  captionOrder.package_digest = canonicalContractDigestV1(captionOrder, ['package_digest']);
+  assert.equal(ScriptPackageV1Schema.safeParse(captionOrder).success, false);
+
+  const blankVoice = scriptPackageData();
+  blankVoice.voice_script[0].text = '   ';
+  blankVoice.package_digest = canonicalContractDigestV1(blankVoice, ['package_digest']);
+  assert.equal(ScriptPackageV1Schema.safeParse(blankVoice).success, false);
+
+  const beatOrder = beatPlanData();
+  beatOrder.beats[0].beat_index = 1;
+  beatOrder.plan_digest = canonicalContractDigestV1(beatOrder, ['plan_digest']);
+  assert.equal(BeatPlanV1Schema.safeParse(beatOrder).success, false);
+});
+
+test('script and plan revisions reject every outer-to-inner binding drift', () => {
+  const scriptMutations: Array<(value: ReturnType<typeof scriptRevisionData>) => void> = [
+    value => { value.workspace_id = '00000000-0000-4000-8000-000000000099'; },
+    value => { value.run_id = '00000000-0000-4000-8000-000000000099'; },
+    value => { value.revision_id = '00000000-0000-4000-8000-000000000099'; },
+    value => { value.candidate_id = '00000000-0000-4000-8000-000000000099'; },
+    value => { value.factory_revision = 8; },
+  ];
+  for (const mutate of scriptMutations) {
+    const value = scriptRevisionData();
+    mutate(value);
+    value.revision_digest = canonicalContractDigestV1(value, ['revision_digest']);
+    assert.equal(AresScriptRevisionV1Schema.safeParse(value).success, false);
+  }
+  assert.equal(AresScriptRevisionV1Schema.safeParse({
+    ...scriptRevisionData(), revision_digest: sha256Digest({ wrong: 'script revision' }),
+  }).success, false);
+
+  const planMutations: Array<(value: ReturnType<typeof planRevisionData>) => void> = [
+    value => { value.workspace_id = '00000000-0000-4000-8000-000000000099'; },
+    value => { value.run_id = '00000000-0000-4000-8000-000000000099'; },
+    value => { value.revision_id = '00000000-0000-4000-8000-000000000099'; },
+    value => { value.script_revision_id = '00000000-0000-4000-8000-000000000099'; },
+    value => { value.factory_revision = 8; },
+    value => { value.approved_script_package_digest = sha256Digest({ wrong: 'approved package' }); },
+  ];
+  for (const mutate of planMutations) {
+    const value = planRevisionData();
+    mutate(value);
+    value.revision_digest = canonicalContractDigestV1(value, ['revision_digest']);
+    assert.equal(AresBeatPlanRevisionV1Schema.safeParse(value).success, false);
+  }
+  assert.equal(AresBeatPlanRevisionV1Schema.safeParse({
+    ...planRevisionData(), revision_digest: sha256Digest({ wrong: 'plan revision' }),
+  }).success, false);
+});
+
+test('approval commands and receipts reject incomplete or substituted artifacts', () => {
+  const badScriptCommand = commandData();
+  badScriptCommand.artifact_digest = sha256Digest({ wrong: 'script artifact' });
+  badScriptCommand.command_digest = canonicalContractDigestV1(badScriptCommand, ['command_digest']);
+  assert.equal(AresApprovalCommandV1Schema.safeParse(badScriptCommand).success, false);
+
+  const incompleteProductionCommand = commandData('production_plan');
+  incompleteProductionCommand.beat_plan_digest = null;
+  incompleteProductionCommand.g1_subject_digest = null;
+  incompleteProductionCommand.command_digest = canonicalContractDigestV1(
+    incompleteProductionCommand,
+    ['command_digest'],
+  );
+  assert.equal(AresApprovalCommandV1Schema.safeParse(incompleteProductionCommand).success, false);
+
+  const substitutedProductionCommand = commandData('production_plan');
+  substitutedProductionCommand.g1_subject_digest = sha256Digest({ wrong: 'g1' });
+  substitutedProductionCommand.artifact_digest = substitutedProductionCommand.g1_subject_digest;
+  substitutedProductionCommand.command_digest = canonicalContractDigestV1(
+    substitutedProductionCommand,
+    ['command_digest'],
+  );
+  assert.equal(AresApprovalCommandV1Schema.safeParse(substitutedProductionCommand).success, false);
+
+  const badScriptReceipt = receiptData();
+  badScriptReceipt.artifact_digest = sha256Digest({ wrong: 'script receipt artifact' });
+  badScriptReceipt.receipt_digest = canonicalContractDigestV1(badScriptReceipt, ['receipt_digest']);
+  assert.equal(AresApprovalReceiptV1Schema.safeParse(badScriptReceipt).success, false);
+
+  const incompleteProductionReceipt = receiptData('production_plan');
+  incompleteProductionReceipt.beat_plan_digest = null;
+  incompleteProductionReceipt.g1_subject_digest = null;
+  incompleteProductionReceipt.receipt_digest = canonicalContractDigestV1(
+    incompleteProductionReceipt,
+    ['receipt_digest'],
+  );
+  assert.equal(AresApprovalReceiptV1Schema.safeParse(incompleteProductionReceipt).success, false);
+
+  const substitutedProductionReceipt = receiptData('production_plan');
+  substitutedProductionReceipt.g1_subject_digest = sha256Digest({ wrong: 'receipt g1' });
+  substitutedProductionReceipt.artifact_digest = substitutedProductionReceipt.g1_subject_digest;
+  substitutedProductionReceipt.receipt_digest = canonicalContractDigestV1(
+    substitutedProductionReceipt,
+    ['receipt_digest'],
+  );
+  assert.equal(AresApprovalReceiptV1Schema.safeParse(substitutedProductionReceipt).success, false);
+
+  const malformedProductionReceipt = receiptData('production_plan');
+  malformedProductionReceipt.target_profile_digest = 'not-a-digest';
+  assert.doesNotThrow(() => AresApprovalReceiptV1Schema.safeParse(malformedProductionReceipt));
+  assert.equal(AresApprovalReceiptV1Schema.safeParse(malformedProductionReceipt).success, false);
+});
+
+test('receipt timestamps and authorization windows reject every invalid ordering', () => {
+  for (const mutation of [
+    { expires_at_utc: '2026-07-23T01:02:04Z' },
+    { revoked_at_utc: '2026-07-23T01:02:03Z' },
+    { revoked_at_utc: '2026-07-23T02:02:05Z' },
+  ]) {
+    const value = { ...receiptData(), ...mutation } as Record<string, any>;
+    value.receipt_digest = canonicalContractDigestV1(value, ['receipt_digest']);
+    assert.equal(AresApprovalReceiptV1Schema.safeParse(value).success, false);
+  }
+
+  const command = AresApprovalCommandV1Schema.parse(commandData());
+  const revision = AresScriptRevisionV1Schema.parse(scriptRevisionData());
+  const earlyApprovalData = receiptData();
+  earlyApprovalData.approved_at_utc = '2026-07-23T01:02:02Z';
+  earlyApprovalData.receipt_digest = canonicalContractDigestV1(earlyApprovalData, ['receipt_digest']);
+  const earlyApproval = AresApprovalReceiptV1Schema.parse(earlyApprovalData);
+  assert.equal(approvalReceiptAuthorizesV1(
+    earlyApproval, command, revision, '2026-07-23T01:30:00Z',
+    { isCurrentApproval: () => true },
+  ), false);
+
+  const receipt = AresApprovalReceiptV1Schema.parse(receiptData());
+  for (const atUtc of ['2026-07-23T01:02:03Z', '2026-07-23T02:02:04Z']) {
+    assert.equal(approvalReceiptAuthorizesV1(
+      receipt, command, revision, atUtc, { isCurrentApproval: () => true },
+    ), false);
+  }
+
+  const revokedData = receiptData() as Record<string, any>;
+  revokedData.revoked_at_utc = '2026-07-23T01:30:00.123456Z';
+  revokedData.receipt_digest = canonicalContractDigestV1(revokedData, ['receipt_digest']);
+  const revoked = AresApprovalReceiptV1Schema.parse(revokedData);
+  assert.equal(approvalReceiptAuthorizesV1(
+    revoked, command, revision, '2026-07-23T01:20:00Z',
+    { isCurrentApproval: () => true },
+  ), false);
+});
+
+test('revision binding helpers reject cross-kind and independently drifted plan content', () => {
+  const script = AresScriptRevisionV1Schema.parse(scriptRevisionData());
+  const plan = AresBeatPlanRevisionV1Schema.parse(planRevisionData());
+  const scriptCommand = AresApprovalCommandV1Schema.parse(commandData());
+  const productionCommand = AresApprovalCommandV1Schema.parse(commandData('production_plan'));
+  assert.equal(approvalCommandBindsRevisionV1(scriptCommand, plan), false);
+  assert.equal(approvalCommandBindsRevisionV1(productionCommand, script), false);
+
+  assert.equal(planRevisionBindsScriptRevisionV1(plan, script), true);
+  for (const mutation of [
+    { workspace_id: '00000000-0000-4000-8000-000000000099' },
+    { run_id: '00000000-0000-4000-8000-000000000099' },
+    { script_revision_id: '00000000-0000-4000-8000-000000000099' },
+    { factory_revision: 8 },
+    { approved_script_package_digest: sha256Digest({ wrong: 'package' }) },
+    { beat_plan: { ...plan.beat_plan, beats: plan.beat_plan.beats.slice(0, 1) } },
+    {
+      beat_plan: {
+        ...plan.beat_plan,
+        beats: [{ ...plan.beat_plan.beats[0], caption: 'wrong caption' }, plan.beat_plan.beats[1]],
+      },
+    },
+  ]) {
+    assert.equal(planRevisionBindsScriptRevisionV1({ ...plan, ...mutation }, script), false);
+  }
 });
