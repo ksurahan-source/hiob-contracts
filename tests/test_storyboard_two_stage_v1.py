@@ -3848,13 +3848,16 @@ def test_registry_and_root_exports_are_additive_and_v1_remains_unchanged() -> No
         "FactoryCostProfile",
         "ReelsFactoryProgressReceiptV3",
         "ReelsFactoryFailureReceiptV3",
+        "ReelsFactoryFailedProviderOperationV3",
         "AthenaFramePlanReceipt",
         "StoryboardImageArtifactRef",
         "StoryboardImageProviderRequest",
         "StoryboardImageProviderReceipt",
         "StoryboardImageSetReceipt",
         "StoryboardPhaseACompletionReceipt",
+        "StoryboardPhaseACompletionReceiptV2",
         "StoryboardPhaseACompletionSummary",
+        "StoryboardPhaseACompletionSummaryV2",
         "StoryboardScene",
         "StoryboardSceneVideoReceipt",
         "StoryboardSceneVideoRequest",
@@ -4092,6 +4095,56 @@ def _verified_historical_voice_evidence(
     )
 
 
+def _phase_a_v2_completion_fixture(
+) -> tuple[Any, Any, tuple[Any, ...], tuple[Any, ...]]:
+    legacy = _phase_a_completion()
+    resolution = _paid_resolution_v2(legacy.paid_budget_approval_receipt)
+    image_proofs = tuple(
+        _verified_historical_evidence(
+            resolution=resolution,
+            receipt=receipt,
+        )
+        for receipt in legacy.output_image_set_receipt.provider_receipts
+    )
+    voice_proofs = tuple(
+        _verified_historical_voice_evidence(
+            resolution=resolution,
+            source_index=source_index,
+        )
+        for source_index in range(16)
+    )
+    voice_evidence = tuple(
+        hiob_contracts.require_verified_factory_paid_operation_historical_evidence_v2(
+            proof
+        )
+        for proof in voice_proofs
+    )
+    body = legacy.model_dump(mode="json")
+    voice_digests = tuple(item.evidence_digest for item in voice_evidence)
+    body.update(
+        {
+            "contract_version": "StoryboardPhaseACompletionReceipt.v2",
+            "paid_voice_operation_evidence_digests": voice_digests,
+            "voice_evidence_set_digest": (
+                hiob_contracts.derive_storyboard_phase_a_voice_evidence_set_digest_v2(
+                    paid_budget_authority_digest=(
+                        legacy.paid_budget_authority_digest
+                    ),
+                    evidence_digests=voice_digests,
+                )
+            ),
+            "completed_at_utc": "2026-08-14T06:22:00Z",
+        }
+    )
+    body["receipt_digest"] = (
+        hiob_contracts.derive_storyboard_phase_a_completion_receipt_digest_v2(body)
+    )
+    completion = hiob_contracts.StoryboardPhaseACompletionReceiptV2.model_validate(
+        body
+    )
+    return completion, resolution, image_proofs, voice_proofs
+
+
 @pytest.mark.parametrize("source_index", [0, 15])
 def test_historical_voice_evidence_accepts_exact_phase_a_scope(
     source_index: int,
@@ -4157,54 +4210,8 @@ def test_historical_voice_evidence_requires_one_of_sixteen_phase_a_slots() -> No
 
 
 def test_phase_a_v2_completion_binds_exact_verified_voice_operation_set() -> None:
-    legacy = _phase_a_completion()
-    resolution = _paid_resolution_v2(legacy.paid_budget_approval_receipt)
-    image_proofs = tuple(
-        _verified_historical_evidence(
-            resolution=resolution,
-            receipt=receipt,
-        )
-        for receipt in legacy.output_image_set_receipt.provider_receipts
-    )
-    voice_proofs = tuple(
-        _verified_historical_voice_evidence(
-            resolution=resolution,
-            source_index=source_index,
-        )
-        for source_index in range(16)
-    )
-    voice_evidence = tuple(
-        hiob_contracts.require_verified_factory_paid_operation_historical_evidence_v2(
-            proof
-        )
-        for proof in voice_proofs
-    )
-    body = legacy.model_dump(mode="json")
-    body.update(
-        {
-            "contract_version": "StoryboardPhaseACompletionReceipt.v2",
-            "paid_voice_operation_evidence_digests": [
-                evidence.evidence_digest for evidence in voice_evidence
-            ],
-            "voice_evidence_set_digest": (
-                hiob_contracts.derive_storyboard_phase_a_voice_evidence_set_digest_v2(
-                    paid_budget_authority_digest=(
-                        legacy.paid_budget_authority_digest
-                    ),
-                    evidence_digests=tuple(
-                        evidence.evidence_digest for evidence in voice_evidence
-                    ),
-                )
-            ),
-            "completed_at_utc": "2026-08-14T06:22:00Z",
-        }
-    )
-    body["receipt_digest"] = (
-        hiob_contracts.derive_storyboard_phase_a_completion_receipt_digest_v2(body)
-    )
-
-    completion = hiob_contracts.StoryboardPhaseACompletionReceiptV2.model_validate(
-        body
+    completion, resolution, image_proofs, voice_proofs = (
+        _phase_a_v2_completion_fixture()
     )
 
     assert completion.binds_paid_operations(
@@ -4295,6 +4302,153 @@ def test_phase_a_v2_rejects_duplicate_voice_receipts_and_v1_stays_parse_only() -
         hiob_contracts.require_verified_storyboard_image_provider_request_v1(
             voice_proofs[0]
         )
+
+
+def test_phase_a_v2_voice_and_regen_failure_edges_are_fail_closed() -> None:
+    completion, resolution, image_proofs, voice_proofs = (
+        _phase_a_v2_completion_fixture()
+    )
+    evidence = tuple(
+        hiob_contracts.require_verified_factory_paid_operation_historical_evidence_v2(
+            proof
+        )
+        for proof in voice_proofs
+    )
+
+    assert not completion.binds_paid_operations(
+        resolution,
+        image_operation_proofs=(),
+        voice_operation_proofs=voice_proofs,
+    )
+    assert not completion.binds_paid_operations(
+        resolution,
+        image_operation_proofs=image_proofs,
+        voice_operation_proofs=tuple(object() for _ in range(16)),
+    )
+    duplicate_output = evidence[0].model_copy(
+        update={
+            "provider_result_output_digest": evidence[1].provider_result_output_digest
+        }
+    )
+    assert not completion._binds_exact_voice_evidence(
+        (duplicate_output, *evidence[1:])
+    )
+    digest_drift = completion.model_copy(
+        update={
+            "paid_voice_operation_evidence_digests": tuple(
+                reversed(completion.paid_voice_operation_evidence_digests)
+            )
+        }
+    )
+    assert not digest_drift._binds_exact_voice_evidence(evidence)
+    wrong_operation = evidence[0].model_copy(update={"operation": "image"})
+    assert not completion._binds_exact_voice_evidence(
+        (wrong_operation, *evidence[1:])
+    )
+    early = completion.model_copy(update={"completed_at_utc": "2026-08-14T06:20:00Z"})
+    assert not early._binds_exact_voice_evidence(evidence)
+
+    wrong_set_digest = completion.model_copy(
+        update={"voice_evidence_set_digest": PLAN_DIGEST}
+    )
+    with pytest.raises(ValueError, match="voice_evidence_set_digest"):
+        wrong_set_digest._bind_voice_evidence_set()
+    wrong_receipt_digest = completion.model_copy(update={"receipt_digest": PLAN_DIGEST})
+    with pytest.raises(ValueError, match="V2 completion"):
+        wrong_receipt_digest._bind_voice_evidence_set()
+
+    initial = _phase_a_completion()
+    legacy_regen = _phase_a_completion(
+        purpose="storyboard_regen",
+        input_draft=initial.output_storyboard_draft,
+        input_image_set=initial.output_image_set_receipt,
+    )
+    regen_body = legacy_regen.model_dump(mode="json")
+    regen_body.update(
+        {
+            "contract_version": "StoryboardPhaseACompletionReceipt.v2",
+            "paid_voice_operation_evidence_digests": [],
+            "voice_evidence_set_digest": None,
+        }
+    )
+    regen_body["receipt_digest"] = (
+        hiob_contracts.derive_storyboard_phase_a_completion_receipt_digest_v2(
+            regen_body
+        )
+    )
+    regen = hiob_contracts.StoryboardPhaseACompletionReceiptV2.model_validate(
+        regen_body
+    )
+    regen_resolution = _paid_resolution_v2(regen.paid_budget_approval_receipt)
+    regen_image_proof = _verified_historical_evidence(
+        resolution=regen_resolution,
+        receipt=regen.output_image_set_receipt.provider_receipts[0],
+    )
+    assert regen.binds_paid_operations(
+        regen_resolution,
+        image_operation_proofs=(regen_image_proof,),
+        voice_operation_proofs=(),
+    )
+    assert not regen.binds_paid_operations(
+        regen_resolution,
+        image_operation_proofs=(regen_image_proof,),
+        voice_operation_proofs=(object(),),
+    )
+    regen_summary = hiob_contracts.StoryboardPhaseACompletionSummaryV2.from_completion(
+        regen,
+        authority=regen_resolution,
+        image_operation_proofs=(regen_image_proof,),
+        voice_operation_proofs=(),
+    )
+    assert regen_summary.voice_count == 0
+    assert regen_summary.voice_evidence_set_digest is None
+    invalid_regen = regen.model_copy(
+        update={
+            "paid_voice_operation_evidence_digests": (PLAN_DIGEST,),
+            "voice_evidence_set_digest": PLAN_DIGEST,
+        }
+    )
+    with pytest.raises(ValueError, match="regen.*voice"):
+        invalid_regen._bind_voice_evidence_set()
+
+
+def test_phase_a_v2_summary_rejects_drift_and_binds_exact_completion() -> None:
+    completion, resolution, image_proofs, voice_proofs = (
+        _phase_a_v2_completion_fixture()
+    )
+    summary = hiob_contracts.StoryboardPhaseACompletionSummaryV2.from_completion(
+        completion,
+        authority=resolution,
+        image_operation_proofs=image_proofs,
+        voice_operation_proofs=voice_proofs,
+    )
+    assert summary.binds(
+        completion,
+        authority=resolution,
+        image_operation_proofs=image_proofs,
+        voice_operation_proofs=voice_proofs,
+    )
+    with pytest.raises(ValueError, match="exact verified"):
+        hiob_contracts.StoryboardPhaseACompletionSummaryV2.from_completion(
+            completion,
+            authority=resolution,
+            image_operation_proofs=image_proofs,
+            voice_operation_proofs=voice_proofs[:-1],
+        )
+    with pytest.raises(ValueError, match="16 bound voice"):
+        summary.model_copy(update={"voice_count": 15})._bind_v2_summary()
+    with pytest.raises(ValueError, match="V2 summary"):
+        summary.model_copy(update={"summary_digest": PLAN_DIGEST})._bind_v2_summary()
+
+    regen_summary = summary.model_copy(
+        update={
+            "purpose": "storyboard_regen",
+            "voice_count": 1,
+            "voice_evidence_set_digest": PLAN_DIGEST,
+        }
+    )
+    with pytest.raises(ValueError, match="regen.*voice"):
+        regen_summary._bind_v2_summary()
 
 
 def test_initial_image_set_rejects_one_current_and_fifteen_alien_authorities() -> None:
@@ -5792,6 +5946,9 @@ def test_historical_operation_scope_timeline_and_output_edges_are_covered() -> N
         evidence_type.model_construct(operation="render", source_index=None)._bind_historical_operation_scope(
             draft_authority
         )
+    evidence_type.model_construct(operation="render", source_index=None)._bind_historical_operation_scope(
+        final_authority
+    )
     with pytest.raises(ValueError, match="image evidence"):
         evidence_type.model_construct(operation="image", source_index=0)._bind_historical_image_scope(
             final_authority

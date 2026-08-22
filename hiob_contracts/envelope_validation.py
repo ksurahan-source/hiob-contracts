@@ -122,6 +122,10 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         _STORYBOARD_TWO_STAGE_MODULE,
         "ReelsFactoryFailureReceiptV3",
     ),
+    "ReelsFactoryFailedProviderOperationV3": (
+        _STORYBOARD_TWO_STAGE_MODULE,
+        "ReelsFactoryFailedProviderOperationV3",
+    ),
     "StoryboardImageArtifactRef": (
         _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardImageArtifactRefV1",
@@ -146,9 +150,17 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "hiob_contracts.star_reels_view_v1",
         "StoryboardPhaseACompletionReceiptV1",
     ),
+    "StoryboardPhaseACompletionReceiptV2": (
+        "hiob_contracts.star_reels_view_v1",
+        "StoryboardPhaseACompletionReceiptV2",
+    ),
     "StoryboardPhaseACompletionSummary": (
         "hiob_contracts.star_reels_view_v1",
         "StoryboardPhaseACompletionSummaryV1",
+    ),
+    "StoryboardPhaseACompletionSummaryV2": (
+        "hiob_contracts.star_reels_view_v1",
+        "StoryboardPhaseACompletionSummaryV2",
     ),
     "StoryboardScene": (
         _STORYBOARD_TWO_STAGE_MODULE,

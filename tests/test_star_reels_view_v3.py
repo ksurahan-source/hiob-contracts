@@ -716,7 +716,129 @@ def test_v3_storyboard_voice_failure_binds_exact_attempt_and_provider_receipt() 
         ReelsFactoryFailureReceiptV3.model_validate(wrong_authority)
 
 
-def test_v3_legacy_non_voice_failure_remains_accepted_without_provider_binding() -> None:
+def test_v3_failed_provider_binding_rejects_identity_and_stage_drift() -> None:
+    pair = _paid_pair("storyboard_draft")
+    attempts = {
+        "script": 1,
+        "image": 16,
+        "video": 0,
+        "voice": 7,
+        "render": 0,
+    }
+    binding = _failed_voice_operation_v3(
+        pair[1],
+        source_index=6,
+        attempt_number=7,
+    )
+
+    missing_source = deepcopy(binding)
+    missing_source["source_index"] = None
+    missing_source["binding_digest"] = (
+        derive_reels_factory_failed_provider_operation_digest_v3(missing_source)
+    )
+    with pytest.raises(ValidationError, match="source_index"):
+        hiob_contracts.ReelsFactoryFailedProviderOperationV3.model_validate(
+            missing_source
+        )
+
+    wrong_provider = deepcopy(binding)
+    wrong_provider["provider"] = "alien-provider"
+    wrong_provider["binding_digest"] = (
+        derive_reels_factory_failed_provider_operation_digest_v3(wrong_provider)
+    )
+    with pytest.raises(ValidationError, match="provider identity"):
+        hiob_contracts.ReelsFactoryFailedProviderOperationV3.model_validate(
+            wrong_provider
+        )
+
+    wrong_binding_digest = deepcopy(binding)
+    wrong_binding_digest["binding_digest"] = DIGEST_D
+    with pytest.raises(ValidationError, match="binding_digest"):
+        hiob_contracts.ReelsFactoryFailedProviderOperationV3.model_validate(
+            wrong_binding_digest
+        )
+
+    provider_free = _failure_receipt_v3(
+        pair[1],
+        revision=8,
+        stage="voice",
+        provider_attempts={
+            "script": 0,
+            "image": 0,
+            "video": 0,
+            "voice": 0,
+            "render": 0,
+        },
+        storyboard_execution_manifest_digest=None,
+        provider_call="none",
+        failed_provider_operation=binding,
+    )
+    with pytest.raises(ValidationError, match="provider-free"):
+        ReelsFactoryFailureReceiptV3.model_validate(provider_free)
+
+    image_binding = deepcopy(binding)
+    image_binding.update(
+        {
+            "operation": "image",
+            "attempt_number": 16,
+            "provider": "seedream",
+            "model": "seedream-5-pro",
+        }
+    )
+    image_binding["binding_digest"] = (
+        derive_reels_factory_failed_provider_operation_digest_v3(image_binding)
+    )
+    wrong_stage = _failure_receipt_v3(
+        pair[1],
+        revision=8,
+        stage="voice",
+        provider_attempts=attempts,
+        storyboard_execution_manifest_digest=None,
+        failed_provider_operation=image_binding,
+    )
+    with pytest.raises(ValidationError, match="operation.*stage"):
+        ReelsFactoryFailureReceiptV3.model_validate(wrong_stage)
+
+    missing_provider_id = deepcopy(binding)
+    missing_provider_id["provider_operation_id"] = None
+    missing_provider_id["binding_digest"] = (
+        derive_reels_factory_failed_provider_operation_digest_v3(
+            missing_provider_id
+        )
+    )
+    missing_confirmed_id = _failure_receipt_v3(
+        pair[1],
+        revision=8,
+        stage="voice",
+        provider_attempts=attempts,
+        storyboard_execution_manifest_digest=None,
+        failed_provider_operation=missing_provider_id,
+    )
+    with pytest.raises(ValidationError, match="provider operation id"):
+        ReelsFactoryFailureReceiptV3.model_validate(missing_confirmed_id)
+
+    receipt = ReelsFactoryFailureReceiptV3.model_validate(
+        _failure_receipt_v3(
+            pair[1],
+            revision=8,
+            stage="voice",
+            provider_attempts=attempts,
+            storyboard_execution_manifest_digest=None,
+            failed_provider_operation=binding,
+        )
+    )
+    cost_drift = receipt.model_copy(
+        update={
+            "failed_provider_operation": receipt.failed_provider_operation.model_copy(
+                update={"cost_profile_digest": DIGEST_D}
+            )
+        }
+    )
+    assert not cost_drift.structurally_binds(pair[1])
+
+
+def test_v3_legacy_non_voice_failure_remains_accepted_without_provider_binding(
+) -> None:
     pair = _paid_pair("final_production")
     payload = _failure_receipt_v3(
         pair[1],

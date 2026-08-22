@@ -1,9 +1,10 @@
 """Strict contracts for a two-stage, editor-approved storyboard workflow.
 
-Phase A produces one script and exactly sixteen still images.  A provider-free
-editor may then reorder/group cards, adjust framing metadata, or select a
-server-verified replacement image.  Phase B remains impossible to authorize
-until an approval receipt binds the current draft and its base image set.
+Phase A produces one script, exactly sixteen still images, and exactly sixteen
+voice clips.  A provider-free editor may then reorder/group cards, adjust
+framing metadata, or select a server-verified replacement image.  Phase B
+remains impossible to authorize until an approval receipt binds the current
+draft and its base image set.
 
 Signed preview URLs are deliberately absent.  Browser state carries only the
 opaque artifact id and the binary SHA-256 lookup digest; storage and provider
@@ -76,6 +77,9 @@ REELS_FACTORY_RECEIPT_VERSION_V3 = "ReelsFactoryReceipt.v3"
 REELS_FACTORY_COMPLETION_SUMMARY_VERSION_V3 = "ReelsFactoryCompletionSummary.v3"
 REELS_FACTORY_PROGRESS_RECEIPT_VERSION_V3 = "ReelsFactoryProgressReceipt.v3"
 REELS_FACTORY_FAILURE_RECEIPT_VERSION_V3 = "ReelsFactoryFailureReceipt.v3"
+REELS_FACTORY_FAILED_PROVIDER_OPERATION_VERSION_V3 = (
+    "ReelsFactoryFailedProviderOperation.v3"
+)
 FACTORY_COST_PROFILE_VERSION_V1 = "FactoryCostProfile.v1"
 STORYBOARD_DRAFT_VERSION_V1 = "StoryboardDraft.v1"
 STORYBOARD_APPROVAL_RECEIPT_VERSION_V1 = "StoryboardApprovalReceipt.v1"
@@ -109,6 +113,9 @@ STORYBOARD_CONTRACT_VERSIONS_V1 = {
     "reels_factory_completion_summary": REELS_FACTORY_COMPLETION_SUMMARY_VERSION_V3,
     "reels_factory_progress_receipt": REELS_FACTORY_PROGRESS_RECEIPT_VERSION_V3,
     "reels_factory_failure_receipt": REELS_FACTORY_FAILURE_RECEIPT_VERSION_V3,
+    "reels_factory_failed_provider_operation": (
+        REELS_FACTORY_FAILED_PROVIDER_OPERATION_VERSION_V3
+    ),
     "factory_cost_profile": FACTORY_COST_PROFILE_VERSION_V1,
     "draft": STORYBOARD_DRAFT_VERSION_V1,
     "approval_receipt": STORYBOARD_APPROVAL_RECEIPT_VERSION_V1,
@@ -782,7 +789,17 @@ def derive_reels_factory_progress_receipt_digest_v3(
 def derive_reels_factory_failure_receipt_digest_v3(
     value: Mapping[str, Any] | BaseModel,
 ) -> str:
-    return _derive_digest(value, "receipt_digest")
+    data = _as_json_dict(value)
+    data.pop("receipt_digest", None)
+    if data.get("failed_provider_operation") is None:
+        data.pop("failed_provider_operation", None)
+    return canonical_contract_digest_v1(data)
+
+
+def derive_reels_factory_failed_provider_operation_digest_v3(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    return _derive_digest(value, "binding_digest")
 
 
 class FactoryPaidBudgetApprovalResolverV2(Protocol):
@@ -4092,6 +4109,7 @@ _FAILURE_STAGES_BY_PURPOSE_V3: dict[str, frozenset[str]] = {
             "project_plan",
             "scheduler",
             "image",
+            "voice",
         }
     ),
     "storyboard_regen": frozenset({"authority", "scheduler", "image"}),
@@ -4235,6 +4253,49 @@ class ReelsFactoryProgressReceiptV3(BaseModel):
         )
 
 
+class ReelsFactoryFailedProviderOperationV3(BaseModel):
+    """Exact provider-attempt identity embedded in a terminal V3 failure."""
+
+    model_config = _FROZEN_STRICT
+
+    contract_version: Literal["ReelsFactoryFailedProviderOperation.v3"]
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    purpose: FactoryPaidBudgetPurposeV2
+    paid_budget_authority_digest: DigestStr
+    cost_profile_digest: DigestStr
+    pricing_policy_revision: NonNegativeInt
+    operation: Literal["script", "image", "video", "voice", "render"]
+    source_index: StoryboardBeatIndex | None
+    attempt_number: Annotated[int, Field(ge=1, le=16)]
+    provider: NonBlankStr
+    model: NonBlankStr
+    operation_key: NonBlankStr
+    execution_request_digest: DigestStr
+    provider_operation_id: NonBlankStr | None
+    provider_binding_receipt_digest: DigestStr
+    binding_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_failed_provider_operation(
+        self,
+    ) -> "ReelsFactoryFailedProviderOperationV3":
+        indexed_operation = self.operation in {"image", "video", "voice"}
+        if indexed_operation != (self.source_index is not None):
+            raise ValueError("failed provider source_index does not match operation")
+        expected_provider, expected_models, _unit, _rate, _max_units = (
+            _FACTORY_COST_OPERATION_POLICY_V1[self.operation]
+        )
+        if self.provider != expected_provider or self.model not in expected_models:
+            raise ValueError("failed provider identity does not match operation policy")
+        if self.binding_digest != (
+            derive_reels_factory_failed_provider_operation_digest_v3(self)
+        ):
+            raise ValueError("binding_digest does not match failed provider operation")
+        return self
+
+
 class ReelsFactoryFailureReceiptV3(BaseModel):
     """Purpose- and authority-bound terminal failure proof."""
 
@@ -4257,6 +4318,7 @@ class ReelsFactoryFailureReceiptV3(BaseModel):
     fallbacks: Literal[0]
     code: NonBlankStr
     provider_call: Literal["none", "confirmed", "unknown"]
+    failed_provider_operation: ReelsFactoryFailedProviderOperationV3 | None = None
     receipt_digest: DigestStr
 
     @model_validator(mode="after")
@@ -4274,12 +4336,42 @@ class ReelsFactoryFailureReceiptV3(BaseModel):
         attempt_count = sum(self.provider_attempts.model_dump(mode="python").values())
         if (attempt_count == 0) != (self.provider_call == "none"):
             raise ValueError("provider_call must match observed provider attempts")
+        self._bind_failed_provider_attempt()
         if self.receipt_digest != derive_reels_factory_failure_receipt_digest_v3(self):
             raise ValueError("receipt_digest does not match V3 failure payload")
         return self
 
+    def _bind_failed_provider_attempt(self) -> None:
+        binding = self.failed_provider_operation
+        if self.stage == "voice" and self.provider_call != "none" and binding is None:
+            raise ValueError("voice failure requires exact provider binding")
+        if binding is None:
+            return
+        if self.provider_call == "none":
+            raise ValueError("provider-free failure cannot carry provider binding")
+        if binding.operation != self.stage:
+            raise ValueError("failed provider operation does not match failure stage")
+        attempts = self.provider_attempts.model_dump(mode="python")
+        if attempts[binding.operation] != binding.attempt_number:
+            raise ValueError(
+                "failed provider attempt does not match exact attempt count"
+            )
+        if (
+            binding.workspace_id != self.workspace_id
+            or binding.run_id != self.run_id
+            or binding.factory_revision != self.factory_revision
+            or binding.purpose != self.purpose
+            or binding.paid_budget_authority_digest
+            != self.paid_budget_authority_digest
+        ):
+            raise ValueError("failed provider scope does not match failure authority")
+        if self.provider_call == "confirmed" and binding.provider_operation_id is None:
+            raise ValueError(
+                "confirmed provider failure requires provider operation id"
+            )
+
     def structurally_binds(self, authority: FactoryPaidBudgetAuthorityV2) -> bool:
-        return _v3_factory_receipt_structurally_binds(
+        structurally_bound = _v3_factory_receipt_structurally_binds(
             workspace_id=self.workspace_id,
             run_id=self.run_id,
             factory_revision=self.factory_revision,
@@ -4290,6 +4382,16 @@ class ReelsFactoryFailureReceiptV3(BaseModel):
             paid_budget_authority_digest=self.paid_budget_authority_digest,
             provider_attempts=self.provider_attempts,
             authority=authority,
+        )
+        binding = self.failed_provider_operation
+        return structurally_bound and (
+            binding is None
+            or (
+                binding.paid_budget_authority_digest == authority.authority_digest
+                and binding.cost_profile_digest == authority.cost_profile_digest
+                and binding.pricing_policy_revision
+                == authority.pricing_policy_revision
+            )
         )
 
 
@@ -4416,6 +4518,7 @@ __all__ = [
     "REELS_FACTORY_COMPLETION_SUMMARY_VERSION_V3",
     "REELS_FACTORY_PROGRESS_RECEIPT_VERSION_V3",
     "REELS_FACTORY_FAILURE_RECEIPT_VERSION_V3",
+    "REELS_FACTORY_FAILED_PROVIDER_OPERATION_VERSION_V3",
     "FACTORY_COST_PROFILE_VERSION_V1",
     "STORYBOARD_SCENE_VIDEO_PROVIDER_PROMPT_MAX_CHARS_V1",
     "STORYBOARD_DRAFT_VERSION_V1",
@@ -4473,6 +4576,7 @@ __all__ = [
     "ReelsFactoryProviderReplaysV3",
     "ReelsFactoryProgressReceiptV3",
     "ReelsFactoryFailureReceiptV3",
+    "ReelsFactoryFailedProviderOperationV3",
     "StoryboardExecutionManifestV1",
     "derive_storyboard_image_artifact_digest_v1",
     "derive_athena_frame_plan_receipt_digest_v1",
@@ -4512,6 +4616,7 @@ __all__ = [
     "derive_reels_factory_completion_summary_digest_v3",
     "derive_reels_factory_progress_receipt_digest_v3",
     "derive_reels_factory_failure_receipt_digest_v3",
+    "derive_reels_factory_failed_provider_operation_digest_v3",
     "derive_storyboard_draft_digest_v1",
     "derive_storyboard_approval_receipt_digest_v1",
     "derive_storyboard_execution_manifest_digest_v1",
