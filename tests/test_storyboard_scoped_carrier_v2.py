@@ -121,6 +121,21 @@ def test_phase_a_v2_completion_and_summary_seal_scoped_draft_and_voice() -> None
         hiob_contracts.StoryboardPhaseACompletionReceiptV2.model_validate(alien)
 
 
+def test_phase_a_v2_summary_and_registry_reject_resealed_carrier_digest() -> None:
+    forged = _completion_summary()
+    forged["output_storyboard_carrier_digest"] = DIGEST_A
+    forged["summary_digest"] = (
+        hiob_contracts.derive_storyboard_phase_a_completion_summary_digest_v2(forged)
+    )
+
+    with pytest.raises(ValidationError, match="carrier digest drifted"):
+        hiob_contracts.StoryboardPhaseACompletionSummaryV2.model_validate(forged)
+    assert not hiob_contracts.validate_payload(
+        "StoryboardPhaseACompletionSummaryV2",
+        forged,
+    ).ok
+
+
 def test_current_v3_accepts_v2_carrier_and_rejects_v1_or_alien_scope() -> None:
     payload = _storyboard_review_view()
     assert payload["storyboard"]["contract_version"] == "FactoryStoryboardCarrier.v2"
