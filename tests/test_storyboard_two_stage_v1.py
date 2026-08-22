@@ -4241,6 +4241,66 @@ def test_phase_a_v2_completion_binds_exact_verified_voice_operation_set() -> Non
     )
 
 
+def test_phase_a_v2_preserves_base_signature_and_fails_closed_without_voice() -> None:
+    completion, resolution, image_proofs, _voice_proofs = (
+        _phase_a_v2_completion_fixture()
+    )
+
+    assert completion.binds_paid_operations(resolution, image_proofs) is False
+
+
+def test_phase_a_v2_binds_typed_voice_inputs_and_exact_audio_results() -> None:
+    completion, _resolution, _image_proofs, voice_proofs = (
+        _phase_a_v2_completion_fixture()
+    )
+    evidence = tuple(
+        hiob_contracts.require_verified_factory_paid_operation_historical_evidence_v2(
+            proof
+        )
+        for proof in voice_proofs
+    )
+
+    assert len(completion.paid_voice_operation_bindings) == 16
+    for source_index, (binding, item) in enumerate(
+        zip(completion.paid_voice_operation_bindings, evidence, strict=True)
+    ):
+        card = completion.output_storyboard_draft.cards[source_index]
+        assert binding.source_beat_index == source_index
+        assert isinstance(
+            binding.voice_input,
+            hiob_contracts.OrpheusVoiceMaterializationInputV1,
+        )
+        assert binding.voice_input.source_text == card.voice_text
+        assert binding.voice_input.input_digest == item.execution_request_digest
+        assert binding.audio_artifact_digest == item.completed_claim_output_digest
+        assert binding.provider_result_receipt_id == item.provider_result_receipt_id
+        assert binding.provider_result_receipt_digest == (
+            item.provider_result_receipt_digest
+        )
+        assert binding.provider_result_output_digest == (
+            item.provider_result_output_digest
+        )
+
+
+def test_legacy_phase_a_summary_is_parse_only_and_cannot_be_minted() -> None:
+    completion = _phase_a_completion()
+    resolution = _paid_resolution_v2(completion.paid_budget_approval_receipt)
+    image_proofs = tuple(
+        _verified_historical_evidence(
+            resolution=resolution,
+            receipt=receipt,
+        )
+        for receipt in completion.output_image_set_receipt.provider_receipts
+    )
+
+    with pytest.raises(ValueError, match="historical|read.only|V2"):
+        hiob_contracts.StoryboardPhaseACompletionSummaryV1.from_completion(
+            completion,
+            authority=resolution,
+            operation_proofs=image_proofs,
+        )
+
+
 def test_phase_a_v2_rejects_duplicate_voice_receipts_and_v1_stays_parse_only() -> None:
     legacy = _phase_a_completion()
     resolution = _paid_resolution_v2(legacy.paid_budget_approval_receipt)
