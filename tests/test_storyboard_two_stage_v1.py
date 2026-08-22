@@ -4006,6 +4006,62 @@ def _historical_paid_operation_evidence(
     return body
 
 
+def _historical_voice_operation_evidence(
+    *,
+    resolution: FactoryPaidBudgetResolutionV2,
+    source_index: int | None,
+) -> dict[str, Any]:
+    authority = resolution.paid_budget_authority
+    voice_profile = resolution.cost_profile.operations.voice
+    operation_key = (
+        f"reels:{authority.workspace_id}:{authority.run_id}:"
+        f"factory:{authority.factory_revision}:{authority.purpose}:voice:{source_index}"
+    )
+    output_digest = sha256_digest(
+        {"operation_key": operation_key, "voice_output": source_index}
+    )
+    body: dict[str, Any] = {
+        "contract_version": "FactoryPaidOperationHistoricalEvidence.v2",
+        "evidence_id": f"historical-voice-{source_index}",
+        "workspace_id": authority.workspace_id,
+        "run_id": authority.run_id,
+        "factory_revision": authority.factory_revision,
+        "purpose": authority.purpose,
+        "operation": "voice",
+        "source_index": source_index,
+        "resolution": resolution,
+        "paid_budget_authority_digest": authority.authority_digest,
+        "cost_profile_digest": resolution.cost_profile.profile_digest,
+        "pricing_policy_revision": resolution.cost_profile.pricing_policy_revision,
+        "provider": voice_profile.provider,
+        "model": voice_profile.model,
+        "operation_key": operation_key,
+        "execution_request_digest": sha256_digest(
+            {"voice_execution_request": operation_key}
+        ),
+        "provider_operation_id": f"voice-provider-{source_index}",
+        "provider_binding_receipt_digest": sha256_digest(
+            {"voice_provider_binding": operation_key}
+        ),
+        "provider_result_receipt_id": f"voice-result-{source_index}",
+        "provider_result_receipt_digest": sha256_digest(
+            {"voice_result_receipt": operation_key}
+        ),
+        "provider_result_output_digest": output_digest,
+        "provider_result_recorded_at_utc": "2026-08-14T06:20:00Z",
+        "completed_claim_output_digest": output_digest,
+        "claim_status": "completed",
+        "reserved_at_utc": "2026-08-14T06:00:00Z",
+        "completed_at_utc": "2026-08-14T06:21:00Z",
+    }
+    body["evidence_digest"] = (
+        hiob_contracts.derive_factory_paid_operation_historical_evidence_digest_v2(
+            body
+        )
+    )
+    return body
+
+
 def _verified_historical_evidence(
     *,
     resolution: FactoryPaidBudgetResolutionV2,
@@ -4019,6 +4075,70 @@ def _verified_historical_evidence(
         ),
         resolver=resolver or _PaidOperationEvidenceResolverV2(),
     )
+
+
+@pytest.mark.parametrize("source_index", [0, 15])
+def test_historical_voice_evidence_accepts_exact_phase_a_scope(
+    source_index: int,
+) -> None:
+    resolution = _paid_resolution_v2(
+        _paid_approval_receipt_v2("storyboard_draft")
+    )
+    resolver = _PaidOperationEvidenceResolverV2()
+
+    capability = (
+        hiob_contracts.FactoryPaidOperationHistoricalEvidenceV2.from_verified(
+            _historical_voice_operation_evidence(
+                resolution=resolution,
+                source_index=source_index,
+            ),
+            resolver=resolver,
+        )
+    )
+    evidence = (
+        hiob_contracts.require_verified_factory_paid_operation_historical_evidence_v2(
+            capability
+        )
+    )
+
+    assert evidence.purpose == "storyboard_draft"
+    assert evidence.operation == "voice"
+    assert evidence.source_index == source_index
+    assert resolver.call_count == 1
+    assert resolver.last_identity is not None
+    assert resolver.last_identity["operation"] == "voice"
+    assert resolver.last_identity["source_index"] == source_index
+
+
+@pytest.mark.parametrize("purpose", ["storyboard_regen", "final_production"])
+def test_historical_voice_evidence_rejects_non_phase_a_scope(purpose: str) -> None:
+    receipt = _paid_approval_receipt_v2(
+        purpose,
+        image_source_beat_indices=[4] if purpose == "storyboard_regen" else [],
+    )
+    resolution = _paid_resolution_v2(receipt)
+
+    with pytest.raises(ValidationError, match="historical voice evidence.*paid scope"):
+        hiob_contracts.FactoryPaidOperationHistoricalEvidenceV2.model_validate(
+            _historical_voice_operation_evidence(
+                resolution=resolution,
+                source_index=4,
+            )
+        )
+
+
+def test_historical_voice_evidence_requires_one_of_sixteen_phase_a_slots() -> None:
+    resolution = _paid_resolution_v2(
+        _paid_approval_receipt_v2("storyboard_draft")
+    )
+
+    with pytest.raises(ValidationError, match="historical voice evidence.*paid scope"):
+        hiob_contracts.FactoryPaidOperationHistoricalEvidenceV2.model_validate(
+            _historical_voice_operation_evidence(
+                resolution=resolution,
+                source_index=None,
+            )
+        )
 
 
 def test_initial_image_set_rejects_one_current_and_fifteen_alien_authorities() -> None:
