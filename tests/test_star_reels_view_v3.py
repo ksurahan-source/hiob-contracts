@@ -20,6 +20,7 @@ from hiob_contracts import (
     derive_factory_paid_budget_authority_digest_v2,
     derive_factory_paid_budget_idempotency_key_v2,
     derive_reels_factory_failure_receipt_digest_v3,
+    derive_reels_factory_failed_provider_operation_digest_v3,
     derive_reels_factory_progress_receipt_digest_v3,
 )
 
@@ -270,6 +271,7 @@ def _failure_receipt_v3(
     provider_attempts: dict[str, int],
     storyboard_execution_manifest_digest: str | None,
     provider_call: str = "confirmed",
+    failed_provider_operation: dict[str, object] | None = None,
 ) -> dict[str, object]:
     body = _progress_receipt_v3(
         authority,
@@ -282,10 +284,51 @@ def _failure_receipt_v3(
     body["contract_version"] = "ReelsFactoryFailureReceipt.v3"
     body["code"] = "PROVIDER_TERMINAL"
     body["provider_call"] = provider_call
+    if failed_provider_operation is not None:
+        body["failed_provider_operation"] = failed_provider_operation
     return {
         **body,
         "receipt_digest": derive_reels_factory_failure_receipt_digest_v3(body),
     }
+
+
+def _failed_voice_operation_v3(
+    authority: FactoryPaidBudgetAuthorityV2,
+    *,
+    source_index: int,
+    attempt_number: int,
+) -> dict[str, object]:
+    operation_key = (
+        f"reels:{authority.workspace_id}:{authority.run_id}:"
+        f"factory:{authority.factory_revision}:storyboard_draft:voice:{source_index}"
+    )
+    body: dict[str, object] = {
+        "contract_version": "ReelsFactoryFailedProviderOperation.v3",
+        "workspace_id": authority.workspace_id,
+        "run_id": authority.run_id,
+        "factory_revision": authority.factory_revision,
+        "purpose": "storyboard_draft",
+        "paid_budget_authority_digest": authority.authority_digest,
+        "cost_profile_digest": authority.cost_profile_digest,
+        "pricing_policy_revision": authority.pricing_policy_revision,
+        "operation": "voice",
+        "source_index": source_index,
+        "attempt_number": attempt_number,
+        "provider": "typecast",
+        "model": "ssfm-v30",
+        "operation_key": operation_key,
+        "execution_request_digest": hiob_contracts.sha256_digest(
+            {"voice_execution_request": operation_key}
+        ),
+        "provider_operation_id": f"typecast-voice-{source_index}",
+        "provider_binding_receipt_digest": hiob_contracts.sha256_digest(
+            {"provider_binding": operation_key}
+        ),
+    }
+    body["binding_digest"] = (
+        derive_reels_factory_failed_provider_operation_digest_v3(body)
+    )
+    return body
 
 
 def _storyboard_review_view(*, purpose: str = "storyboard_draft") -> dict:
@@ -601,6 +644,98 @@ def test_v3_progress_and_failure_attempts_cannot_exceed_paid_authority_mask() ->
     )
     with pytest.raises(ValidationError, match="attempt"):
         ReelsFactoryFailureReceiptV3.model_validate(failure_overflow)
+
+
+def test_v3_storyboard_voice_failure_binds_exact_attempt_and_provider_receipt() -> None:
+    pair = _paid_pair("storyboard_draft")
+    attempts = {
+        "script": 1,
+        "image": 16,
+        "video": 0,
+        "voice": 7,
+        "render": 0,
+    }
+    binding = _failed_voice_operation_v3(
+        pair[1],
+        source_index=6,
+        attempt_number=attempts["voice"],
+    )
+    payload = _failure_receipt_v3(
+        pair[1],
+        revision=8,
+        stage="voice",
+        provider_attempts=attempts,
+        storyboard_execution_manifest_digest=None,
+        failed_provider_operation=binding,
+    )
+
+    receipt = ReelsFactoryFailureReceiptV3.model_validate(payload)
+
+    assert receipt.stage == "voice"
+    assert receipt.provider_attempts.voice == 7
+    assert receipt.failed_provider_operation is not None
+    assert receipt.failed_provider_operation.operation == "voice"
+    assert receipt.failed_provider_operation.source_index == 6
+    assert receipt.failed_provider_operation.attempt_number == 7
+    assert receipt.structurally_binds(pair[1])
+
+    missing_binding = deepcopy(payload)
+    missing_binding.pop("failed_provider_operation")
+    missing_binding["receipt_digest"] = derive_reels_factory_failure_receipt_digest_v3(
+        missing_binding
+    )
+    with pytest.raises(ValidationError, match="voice.*provider.*binding"):
+        ReelsFactoryFailureReceiptV3.model_validate(missing_binding)
+
+    wrong_attempt = deepcopy(payload)
+    wrong_attempt["failed_provider_operation"]["attempt_number"] = 6
+    wrong_attempt["failed_provider_operation"]["binding_digest"] = (
+        derive_reels_factory_failed_provider_operation_digest_v3(
+            wrong_attempt["failed_provider_operation"]
+        )
+    )
+    wrong_attempt["receipt_digest"] = derive_reels_factory_failure_receipt_digest_v3(
+        wrong_attempt
+    )
+    with pytest.raises(ValidationError, match="attempt"):
+        ReelsFactoryFailureReceiptV3.model_validate(wrong_attempt)
+
+    wrong_authority = deepcopy(payload)
+    wrong_authority["failed_provider_operation"][
+        "paid_budget_authority_digest"
+    ] = DIGEST_D
+    wrong_authority["failed_provider_operation"]["binding_digest"] = (
+        derive_reels_factory_failed_provider_operation_digest_v3(
+            wrong_authority["failed_provider_operation"]
+        )
+    )
+    wrong_authority["receipt_digest"] = derive_reels_factory_failure_receipt_digest_v3(
+        wrong_authority
+    )
+    with pytest.raises(ValidationError, match="provider.*scope|authority"):
+        ReelsFactoryFailureReceiptV3.model_validate(wrong_authority)
+
+
+def test_v3_legacy_non_voice_failure_remains_accepted_without_provider_binding() -> None:
+    pair = _paid_pair("final_production")
+    payload = _failure_receipt_v3(
+        pair[1],
+        revision=10,
+        stage="video",
+        provider_attempts={
+            "script": 0,
+            "image": 0,
+            "video": 1,
+            "voice": 0,
+            "render": 0,
+        },
+        storyboard_execution_manifest_digest=DIGEST_A,
+    )
+
+    receipt = ReelsFactoryFailureReceiptV3.model_validate(payload)
+
+    assert receipt.failed_provider_operation is None
+    assert receipt.structurally_binds(pair[1])
 
 
 def test_v3_failed_view_requires_authority_bound_v3_failure_receipt() -> None:
