@@ -252,3 +252,49 @@ def test_post_phase_a_views_reject_resealed_carrier_digest_drift(
 
     with pytest.raises(ValidationError, match="carrier digest drifted"):
         StarReelsViewV3.model_validate(payload)
+
+
+def test_rendering_view_rejects_resealed_scene_summary_draft_drift() -> None:
+    payload = _run_status_payload()
+    pointer = payload["storyboard"]
+    authority = payload["receipts"]["paid_budget_authority"]
+    scene_body = _valid_final_storyboard_chain()["scene_summary"].model_dump(
+        mode="json"
+    )
+    scene_body.update(
+        {
+            "workspace_id": pointer["workspace_id"],
+            "run_id": pointer["run_id"],
+            "factory_revision": pointer["factory_revision"],
+            "plan_digest": pointer["plan_digest"],
+            "storyboard_draft_id": pointer["storyboard_draft_id"],
+            "storyboard_draft_revision": pointer["storyboard_revision"],
+            "storyboard_draft_digest": pointer["storyboard_digest"],
+            "image_set_receipt_digest": pointer["image_set_receipt_digest"],
+            "storyboard_approval_receipt_digest": pointer[
+                "approval_receipt_digest"
+            ],
+            "storyboard_execution_manifest_digest": pointer[
+                "execution_manifest_digest"
+            ],
+            "final_production_authority_digest": authority.authority_digest,
+        }
+    )
+    scene_body["summary_digest"] = (
+        hiob_contracts.derive_storyboard_scene_video_set_summary_digest_v1(
+            scene_body
+        )
+    )
+    payload["budget"]["storyboard_scene_video_set_summary"] = scene_body
+    StarReelsViewV3.model_validate(payload)
+
+    scene_body["storyboard_draft_id"] = (
+        "00000000-0000-4000-8000-000000000099"
+    )
+    scene_body["summary_digest"] = (
+        hiob_contracts.derive_storyboard_scene_video_set_summary_digest_v1(
+            scene_body
+        )
+    )
+    with pytest.raises(ValidationError, match="scene summary lineage"):
+        StarReelsViewV3.model_validate(payload)

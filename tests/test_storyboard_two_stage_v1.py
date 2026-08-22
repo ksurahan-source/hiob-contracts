@@ -3877,6 +3877,35 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
     with pytest.raises(ValidationError, match="ready summary"):
         StarReelsViewV3.model_validate(scene_lineage_drift)
 
+    alien_scene_scope = deepcopy(payload)
+    alien_scene_body = scene_summary.model_dump(mode="json")
+    alien_scene_body["workspace_id"] = (
+        "00000000-0000-4000-8000-000000000099"
+    )
+    alien_scene_body["storyboard_execution_manifest_digest"] = sha256_digest(
+        {"alien": "manifest"}
+    )
+    alien_scene_body["summary_digest"] = (
+        hiob_contracts.derive_storyboard_scene_video_set_summary_digest_v1(
+            alien_scene_body
+        )
+    )
+    alien_scene_scope["budget"]["storyboard_scene_video_set_summary"] = (
+        alien_scene_body
+    )
+    alien_factory_body = factory.model_dump(mode="json")
+    alien_factory_body["storyboard_scene_video_set_summary_digest"] = (
+        alien_scene_body["summary_digest"]
+    )
+    alien_factory_body["summary_digest"] = (
+        hiob_contracts.derive_reels_factory_completion_summary_digest_v3(
+            alien_factory_body
+        )
+    )
+    alien_scene_scope["receipts"]["factory"] = alien_factory_body
+    with pytest.raises(ValidationError, match="scene summary lineage"):
+        StarReelsViewV3.model_validate(alien_scene_scope)
+
     factory_lineage_drift = deepcopy(payload)
     factory_body = factory.model_dump(mode="json")
     factory_body["storyboard_draft_id"] = (
