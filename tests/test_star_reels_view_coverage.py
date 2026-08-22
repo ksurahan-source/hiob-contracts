@@ -369,12 +369,12 @@ def test_phase_a_regen_preserves_every_unpaid_card_image_and_receipt() -> None:
 
 def test_phase_a_summary_rejects_digest_and_unverified_operation_proof() -> None:
     summary = StoryboardPhaseACompletionSummaryV1.model_validate(
-        _completion_summary()
+        _completion_summary(version=1)
     )
     with pytest.raises(ValueError, match="summary_digest"):
         summary.model_copy(update={"summary_digest": DIGEST_A})._bind_summary_digest()
 
-    with pytest.raises(ValueError, match="verified live or historical"):
+    with pytest.raises(ValueError, match="historical read-only"):
         StoryboardPhaseACompletionSummaryV1.from_completion(
             _phase_a_completion(),
             authority=object(),

@@ -34,6 +34,7 @@ from .reels_factory_progress_v1 import (
     ReelsFactoryProgressReceiptV2,
     ReelsFactoryProviderAttemptsV1,
 )
+from .orpheus_voice_materialization_v1 import OrpheusVoiceMaterializationInputV1
 from .storyboard_two_stage_v1 import (
     FactoryPaidBudgetApprovalReceiptV2,
     FactoryPaidBudgetAuthorityV2,
@@ -249,11 +250,7 @@ class _StarReelsViewReceiptsV3(BaseModel):
     plan_approval: AresApprovalReceiptV1 | None
     paid_budget_approval_receipt: FactoryPaidBudgetApprovalReceiptV2 | None
     paid_budget_authority: FactoryPaidBudgetAuthorityV2 | None
-    storyboard_phase_a_completion_summary: (
-        StoryboardPhaseACompletionSummaryV2
-        | StoryboardPhaseACompletionSummaryV1
-        | None
-    )
+    storyboard_phase_a_completion_summary: StoryboardPhaseACompletionSummaryV2 | None
 
 
 def derive_star_product_lock_review_digest_v1(
@@ -543,22 +540,67 @@ def derive_storyboard_phase_a_voice_evidence_set_digest_v2(
     *,
     paid_budget_authority_digest: str,
     evidence_digests: tuple[str, ...],
+    operation_binding_digests: tuple[str, ...],
 ) -> str:
     return canonical_contract_digest_v1(
         {
             "contract_version": "StoryboardPhaseAVoiceEvidenceSet.v2",
             "paid_budget_authority_digest": paid_budget_authority_digest,
             "evidence_digests": list(evidence_digests),
+            "operation_binding_digests": list(operation_binding_digests),
         }
     )
 
 
-class StoryboardPhaseACompletionReceiptV1(BaseModel):
-    """Legacy server proof of image completion, retained for historical reads."""
+def derive_storyboard_phase_a_voice_operation_binding_digest_v2(
+    value: BaseModel | dict[str, Any],
+) -> str:
+    return canonical_contract_digest_v1(value, exclude={"binding_digest"})
+
+
+class StoryboardPhaseAVoiceOperationBindingV2(BaseModel):
+    """Exact typed voice input and durable result identity for one beat."""
 
     model_config = _STRICT_FROZEN
 
-    contract_version: Literal["StoryboardPhaseACompletionReceipt.v1"]
+    contract_version: Literal["StoryboardPhaseAVoiceOperationBinding.v2"]
+    source_beat_index: Annotated[int, Field(ge=0, le=15)]
+    voice_input: OrpheusVoiceMaterializationInputV1
+    voice_input_digest: DigestStr
+    historical_evidence_digest: DigestStr
+    audio_artifact_digest: DigestStr
+    provider_result_receipt_id: NonBlankStr
+    provider_result_receipt_digest: DigestStr
+    provider_result_output_digest: DigestStr
+    binding_digest: DigestStr
+
+    @model_validator(mode="after")
+    def _bind_voice_input_and_result(
+        self,
+    ) -> "StoryboardPhaseAVoiceOperationBindingV2":
+        if (
+            self.voice_input.beat_index != self.source_beat_index
+            or self.voice_input.input_digest != self.voice_input_digest
+        ):
+            raise ValueError("voice input does not bind source beat and input digest")
+        if self.audio_artifact_digest != self.provider_result_output_digest:
+            raise ValueError("audio artifact digest does not bind provider result")
+        if self.binding_digest != (
+            derive_storyboard_phase_a_voice_operation_binding_digest_v2(self)
+        ):
+            raise ValueError("binding_digest does not match Phase-A voice operation")
+        return self
+
+
+class _StoryboardPhaseACompletionReceiptBase(BaseModel):
+    """Shared structural validation for historical V1 and authoritative V2."""
+
+    model_config = _STRICT_FROZEN
+
+    contract_version: Literal[
+        "StoryboardPhaseACompletionReceipt.v1",
+        "StoryboardPhaseACompletionReceipt.v2",
+    ]
     workspace_id: UuidStr
     run_id: UuidStr
     factory_revision: NonNegativeInt
@@ -786,7 +828,7 @@ class StoryboardPhaseACompletionReceiptV1(BaseModel):
             raise ValueError("receipt_digest does not match Phase-A completion")
 
     @model_validator(mode="after")
-    def _bind_completion(self) -> "StoryboardPhaseACompletionReceiptV1":
+    def _bind_completion(self) -> "_StoryboardPhaseACompletionReceiptBase":
         self._assert_completion_authority_scope()
         self._assert_purpose_lineage()
         self._assert_output_evidence()
@@ -795,7 +837,7 @@ class StoryboardPhaseACompletionReceiptV1(BaseModel):
         self._assert_completion_terminal()
         return self
 
-    def binds_paid_operations(
+    def _binds_image_operations(
         self,
         authority: object,
         operation_proofs: tuple[object, ...],
@@ -807,7 +849,30 @@ class StoryboardPhaseACompletionReceiptV1(BaseModel):
         )
 
 
-class StoryboardPhaseACompletionReceiptV2(StoryboardPhaseACompletionReceiptV1):
+class StoryboardPhaseACompletionReceiptV1(_StoryboardPhaseACompletionReceiptBase):
+    """Legacy server proof retained strictly for historical reads."""
+
+    contract_version: Literal["StoryboardPhaseACompletionReceipt.v1"]
+
+    def binds_paid_operations(
+        self,
+        authority: object,
+        operation_proofs: tuple[object, ...],
+    ) -> bool:
+        del authority, operation_proofs
+        return False
+
+    def reconciles_historical_image_operations(
+        self,
+        authority: object,
+        operation_proofs: tuple[object, ...],
+    ) -> bool:
+        """Check archived image evidence without granting execution authority."""
+
+        return self._binds_image_operations(authority, operation_proofs)
+
+
+class StoryboardPhaseACompletionReceiptV2(_StoryboardPhaseACompletionReceiptBase):
     """Phase-A completion sealed to all sixteen verified voice claims.
 
     V1 remains readable as historical image-only evidence.  Only this additive
@@ -818,9 +883,16 @@ class StoryboardPhaseACompletionReceiptV2(StoryboardPhaseACompletionReceiptV1):
     paid_voice_operation_evidence_digests: tuple[DigestStr, ...] = Field(
         max_length=16
     )
+    paid_voice_operation_bindings: tuple[
+        StoryboardPhaseAVoiceOperationBindingV2, ...
+    ] = Field(max_length=16)
     voice_evidence_set_digest: DigestStr | None
 
-    @field_validator("paid_voice_operation_evidence_digests", mode="before")
+    @field_validator(
+        "paid_voice_operation_evidence_digests",
+        "paid_voice_operation_bindings",
+        mode="before",
+    )
     @classmethod
     def _voice_evidence_tuple(cls, value: Any) -> Any:
         return tuple(value) if isinstance(value, list) else value
@@ -828,20 +900,33 @@ class StoryboardPhaseACompletionReceiptV2(StoryboardPhaseACompletionReceiptV1):
     @model_validator(mode="after")
     def _bind_voice_evidence_set(self) -> "StoryboardPhaseACompletionReceiptV2":
         digests = self.paid_voice_operation_evidence_digests
+        bindings = self.paid_voice_operation_bindings
         if self.purpose == "storyboard_draft":
-            if len(digests) != 16 or len(set(digests)) != 16:
+            if (
+                len(digests) != 16
+                or len(set(digests)) != 16
+                or len(bindings) != 16
+                or len({item.binding_digest for item in bindings}) != 16
+                or tuple(item.source_beat_index for item in bindings)
+                != tuple(range(16))
+                or tuple(item.historical_evidence_digest for item in bindings)
+                != digests
+            ):
                 raise ValueError(
-                    "storyboard_draft voice evidence must contain 16 unique receipts"
+                    "storyboard_draft voice evidence must bind 16 unique typed receipts"
                 )
             expected = derive_storyboard_phase_a_voice_evidence_set_digest_v2(
                 paid_budget_authority_digest=self.paid_budget_authority_digest,
                 evidence_digests=digests,
+                operation_binding_digests=tuple(
+                    item.binding_digest for item in bindings
+                ),
             )
             if self.voice_evidence_set_digest != expected:
                 raise ValueError(
                     "voice_evidence_set_digest does not match voice receipts"
                 )
-        elif digests or self.voice_evidence_set_digest is not None:
+        elif digests or bindings or self.voice_evidence_set_digest is not None:
             raise ValueError("storyboard_regen cannot carry paid voice evidence")
         if self.receipt_digest != (
             derive_storyboard_phase_a_completion_receipt_digest_v2(self)
@@ -852,11 +937,22 @@ class StoryboardPhaseACompletionReceiptV2(StoryboardPhaseACompletionReceiptV1):
     def binds_paid_operations(
         self,
         authority: object,
+        operation_proofs: tuple[object, ...] | None = None,
         *,
-        image_operation_proofs: tuple[object, ...],
-        voice_operation_proofs: tuple[object, ...],
+        image_operation_proofs: tuple[object, ...] | None = None,
+        voice_operation_proofs: tuple[object, ...] = (),
     ) -> bool:
-        if not super().binds_paid_operations(authority, image_operation_proofs):
+        if (operation_proofs is None) == (image_operation_proofs is None):
+            return False
+        image_proofs = (
+            operation_proofs
+            if operation_proofs is not None
+            else image_operation_proofs
+        )
+        if image_proofs is None or not self._binds_image_operations(
+            authority,
+            image_proofs,
+        ):
             return False
         if self.purpose == "storyboard_regen":
             return not voice_operation_proofs
@@ -897,14 +993,39 @@ class StoryboardPhaseACompletionReceiptV2(StoryboardPhaseACompletionReceiptV1):
             self.paid_voice_operation_evidence_digests
         ):
             return False
-        for item in evidence:
+        cards_by_source = {
+            card.source_beat_index: card
+            for card in self.output_storyboard_draft.cards
+        }
+        for item, binding in zip(
+            evidence,
+            self.paid_voice_operation_bindings,
+            strict=True,
+        ):
             profile = item.resolution.cost_profile
+            voice_input = binding.voice_input
+            card = cards_by_source[binding.source_beat_index]
             if (
                 item.operation != "voice"
                 or item.purpose != "storyboard_draft"
                 or item.resolution.paid_budget_authority != authority
                 or item.provider != profile.operations.voice.provider
                 or item.model != profile.operations.voice.model
+                or voice_input.workspace_id != self.workspace_id
+                or voice_input.run_id != self.run_id
+                or voice_input.source_text != card.voice_text
+                or voice_input.voice_receipt.beat_plan_revision_digest
+                != self.plan_digest
+                or binding.voice_input_digest != item.execution_request_digest
+                or binding.historical_evidence_digest != item.evidence_digest
+                or binding.audio_artifact_digest
+                != item.completed_claim_output_digest
+                or binding.provider_result_receipt_id
+                != item.provider_result_receipt_id
+                or binding.provider_result_receipt_digest
+                != item.provider_result_receipt_digest
+                or binding.provider_result_output_digest
+                != item.provider_result_output_digest
             ):
                 return False
         return _parse_utc(self.completed_at_utc) >= max(
@@ -912,12 +1033,15 @@ class StoryboardPhaseACompletionReceiptV2(StoryboardPhaseACompletionReceiptV1):
         )
 
 
-class StoryboardPhaseACompletionSummaryV1(BaseModel):
-    """Legacy browser projection retained for historical display only."""
+class _StoryboardPhaseACompletionSummaryBase(BaseModel):
+    """Shared historical and authoritative summary wire fields."""
 
     model_config = _STRICT_FROZEN
 
-    contract_version: Literal["StoryboardPhaseACompletionSummary.v1"]
+    contract_version: Literal[
+        "StoryboardPhaseACompletionSummary.v1",
+        "StoryboardPhaseACompletionSummary.v2",
+    ]
     workspace_id: UuidStr
     run_id: UuidStr
     factory_revision: NonNegativeInt
@@ -936,12 +1060,18 @@ class StoryboardPhaseACompletionSummaryV1(BaseModel):
     summary_digest: DigestStr
 
     @model_validator(mode="after")
-    def _bind_summary_digest(self) -> "StoryboardPhaseACompletionSummaryV1":
+    def _bind_summary_digest(self) -> "_StoryboardPhaseACompletionSummaryBase":
         if self.summary_digest != (
             derive_storyboard_phase_a_completion_summary_digest_v1(self)
         ):
             raise ValueError("summary_digest does not match Phase-A summary")
         return self
+
+
+class StoryboardPhaseACompletionSummaryV1(_StoryboardPhaseACompletionSummaryBase):
+    """Legacy browser projection retained strictly for historical parsing."""
+
+    contract_version: Literal["StoryboardPhaseACompletionSummary.v1"]
 
     @classmethod
     def from_completion(
@@ -951,42 +1081,10 @@ class StoryboardPhaseACompletionSummaryV1(BaseModel):
         authority: object,
         operation_proofs: tuple[object, ...],
     ) -> "StoryboardPhaseACompletionSummaryV1":
-        if not completion.binds_paid_operations(authority, operation_proofs):
-            raise ValueError(
-                "Phase-A summary requires verified live or historical operation proof"
-            )
-        body: dict[str, Any] = {
-            "contract_version": "StoryboardPhaseACompletionSummary.v1",
-            "workspace_id": completion.workspace_id,
-            "run_id": completion.run_id,
-            "factory_revision": completion.factory_revision,
-            "purpose": completion.purpose,
-            "plan_digest": completion.plan_digest,
-            "paid_budget_authority_digest": (completion.paid_budget_authority_digest),
-            "max_total_cost_microunits": (
-                completion.paid_budget_authority.max_total_cost_microunits
-            ),
-            "currency": completion.paid_budget_authority.currency,
-            "output_storyboard_revision": (completion.output_storyboard_draft.revision),
-            "output_storyboard_digest": (
-                completion.output_storyboard_draft.draft_digest
-            ),
-            "output_image_set_receipt_digest": (
-                completion.output_image_set_receipt.receipt_digest
-            ),
-            "output_storyboard_carrier_digest": (
-                derive_factory_storyboard_carrier_digest_v1(
-                    completion.output_storyboard_carrier
-                )
-            ),
-            "image_count": 16,
-            "completed_at_utc": completion.completed_at_utc,
-            "completion_receipt_digest": completion.receipt_digest,
-        }
-        body["summary_digest"] = derive_storyboard_phase_a_completion_summary_digest_v1(
-            body
+        del completion, authority, operation_proofs
+        raise ValueError(
+            "legacy V1 completion summary is historical read-only; mint V2"
         )
-        return cls.model_validate(body)
 
     def binds(
         self,
@@ -995,14 +1093,11 @@ class StoryboardPhaseACompletionSummaryV1(BaseModel):
         authority: object,
         operation_proofs: tuple[object, ...],
     ) -> bool:
-        return self == self.from_completion(
-            completion,
-            authority=authority,
-            operation_proofs=operation_proofs,
-        )
+        del completion, authority, operation_proofs
+        return False
 
 
-class StoryboardPhaseACompletionSummaryV2(StoryboardPhaseACompletionSummaryV1):
+class StoryboardPhaseACompletionSummaryV2(_StoryboardPhaseACompletionSummaryBase):
     """Browser-safe proof that V2 completion included the exact voice claim set."""
 
     contract_version: Literal["StoryboardPhaseACompletionSummary.v2"]
@@ -1025,7 +1120,7 @@ class StoryboardPhaseACompletionSummaryV2(StoryboardPhaseACompletionSummaryV1):
     @classmethod
     def from_completion(
         cls,
-        completion: StoryboardPhaseACompletionReceiptV1,
+        completion: StoryboardPhaseACompletionReceiptV2,
         *,
         authority: object,
         image_operation_proofs: tuple[object, ...],
@@ -1076,7 +1171,7 @@ class StoryboardPhaseACompletionSummaryV2(StoryboardPhaseACompletionSummaryV1):
 
     def binds(
         self,
-        completion: StoryboardPhaseACompletionReceiptV1,
+        completion: StoryboardPhaseACompletionReceiptV2,
         *,
         authority: object,
         image_operation_proofs: tuple[object, ...],
@@ -1567,7 +1662,7 @@ class StarReelsViewV3(BaseModel):
 
     @staticmethod
     def _bind_phase_a_summary_lineage(
-        summary: StoryboardPhaseACompletionSummaryV1,
+        summary: StoryboardPhaseACompletionSummaryV2,
         pointer: FactoryStoryboardCarrierV1,
     ) -> None:
         if (
@@ -1582,7 +1677,7 @@ class StarReelsViewV3(BaseModel):
 
     def _bind_phase_a_review_authority(
         self,
-        summary: StoryboardPhaseACompletionSummaryV1,
+        summary: StoryboardPhaseACompletionSummaryV2,
         pointer: FactoryStoryboardCarrierV1,
     ) -> None:
         authority = self.receipts.paid_budget_authority
@@ -1651,6 +1746,7 @@ __all__ = [
     "StoryboardPhaseACompletionSummaryV1",
     "StoryboardPhaseACompletionReceiptV2",
     "StoryboardPhaseACompletionSummaryV2",
+    "StoryboardPhaseAVoiceOperationBindingV2",
     "StarReelsBudgetV3",
     "StarReelsViewV1",
     "StarReelsViewV2",
@@ -1662,5 +1758,6 @@ __all__ = [
     "derive_storyboard_phase_a_completion_receipt_digest_v2",
     "derive_storyboard_phase_a_completion_summary_digest_v2",
     "derive_storyboard_phase_a_voice_evidence_set_digest_v2",
+    "derive_storyboard_phase_a_voice_operation_binding_digest_v2",
     "derive_star_product_lock_review_digest_v1",
 ]

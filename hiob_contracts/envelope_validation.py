@@ -162,6 +162,10 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "hiob_contracts.star_reels_view_v1",
         "StoryboardPhaseACompletionSummaryV2",
     ),
+    "StoryboardPhaseAVoiceOperationBindingV2": (
+        "hiob_contracts.star_reels_view_v1",
+        "StoryboardPhaseAVoiceOperationBindingV2",
+    ),
     "StoryboardScene": (
         _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardSceneV1",

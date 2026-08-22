@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
+from copy import copy, deepcopy
+import pickle
 
 import pytest
 from pydantic import ValidationError
@@ -175,6 +176,7 @@ def _completion_summary(
     purpose: str = "storyboard_draft",
     authority_digest: str | None = None,
     carrier: dict[str, object] | None = None,
+    version: int = 2,
 ) -> dict[str, object]:
     output = carrier if carrier is not None else _carrier(approved=False)
     phase_a_authority = _paid_pair(purpose)[1]
@@ -184,7 +186,7 @@ def _completion_summary(
         else phase_a_authority.authority_digest
     )
     body: dict[str, object] = {
-        "contract_version": "StoryboardPhaseACompletionSummary.v1",
+        "contract_version": f"StoryboardPhaseACompletionSummary.v{version}",
         "workspace_id": WORKSPACE_ID,
         "run_id": RUN_ID,
         "factory_revision": 7,
@@ -203,9 +205,22 @@ def _completion_summary(
         "completed_at_utc": "2026-08-14T05:40:00Z",
         "completion_receipt_digest": DIGEST_A,
     }
-    body["summary_digest"] = (
-        hiob_contracts.derive_storyboard_phase_a_completion_summary_digest_v1(body)
-    )
+    if version == 2:
+        body["voice_count"] = 16 if purpose == "storyboard_draft" else 0
+        body["voice_evidence_set_digest"] = (
+            DIGEST_D if purpose == "storyboard_draft" else None
+        )
+        body["summary_digest"] = (
+            hiob_contracts.derive_storyboard_phase_a_completion_summary_digest_v2(
+                body
+            )
+        )
+    else:
+        body["summary_digest"] = (
+            hiob_contracts.derive_storyboard_phase_a_completion_summary_digest_v1(
+                body
+            )
+        )
     return body
 
 
@@ -304,6 +319,7 @@ def _failed_voice_operation_v3(
     )
     body: dict[str, object] = {
         "contract_version": "ReelsFactoryFailedProviderOperation.v3",
+        "evidence_id": f"failed-voice-dispatch-{attempt_number}",
         "workspace_id": authority.workspace_id,
         "run_id": authority.run_id,
         "factory_revision": authority.factory_revision,
@@ -324,6 +340,15 @@ def _failed_voice_operation_v3(
         "provider_binding_receipt_digest": hiob_contracts.sha256_digest(
             {"provider_binding": operation_key}
         ),
+        "provider_result_id": f"typecast-result-{source_index}",
+        "provider_result_digest": hiob_contracts.sha256_digest(
+            {"typecast_result": source_index, "status": "failed"}
+        ),
+        "provider_result_status": "failed",
+        "reserved_at_utc": "2026-08-14T06:20:00Z",
+        "dispatched_at_utc": "2026-08-14T06:20:01Z",
+        "observed_at_utc": "2026-08-14T06:20:02Z",
+        "failed_at_utc": "2026-08-14T06:20:03Z",
     }
     body["binding_digest"] = (
         derive_reels_factory_failed_provider_operation_digest_v3(body)
@@ -396,6 +421,9 @@ def test_v3_storyboard_review_is_exact_and_digest_bound() -> None:
 
 def test_v3_post_phase_a_rejects_legacy_completion_summary() -> None:
     payload = _storyboard_review_view()
+    payload["receipts"]["storyboard_phase_a_completion_summary"] = (
+        _completion_summary(version=1)
+    )
     assert (
         payload["receipts"]["storyboard_phase_a_completion_summary"][
             "contract_version"
@@ -845,6 +873,161 @@ def test_v3_failed_voice_evidence_rejects_noncanonical_lane_and_timeline() -> No
         )
 
 
+def test_v3_failed_provider_capability_and_verified_receipt_edges() -> None:
+    pair = _paid_pair("storyboard_draft")
+    evidence = _durable_failed_voice_operation_v3(pair[1])
+    capability_type = hiob_contracts.VerifiedReelsFactoryFailedProviderOperationV3
+
+    with pytest.raises(TypeError, match="resolver-minted"):
+        capability_type(object(), _token=object())
+    unminted = object.__new__(capability_type)
+    with pytest.raises(TypeError, match="unminted"):
+        hiob_contracts.require_verified_reels_factory_failed_provider_operation_v3(
+            unminted
+        )
+
+    capability = hiob_contracts.ReelsFactoryFailedProviderOperationV3.from_verified(
+        evidence,
+        resolver=_FailedProviderOperationResolverV3(),
+    )
+    assert repr(capability) == (
+        "VerifiedReelsFactoryFailedProviderOperationV3(<sealed>)"
+    )
+    with pytest.raises(TypeError, match="immutable"):
+        capability.value = object()
+    with pytest.raises(TypeError, match="immutable"):
+        del capability.value
+    with pytest.raises(TypeError, match="copied"):
+        copy(capability)
+    with pytest.raises(TypeError, match="copied"):
+        deepcopy(capability)
+    with pytest.raises(TypeError, match="serializable"):
+        pickle.dumps(capability)
+
+    registry = (
+        hiob_contracts.storyboard_two_stage_v1
+        ._VERIFIED_FAILED_PROVIDER_OPERATION_REGISTRY_V3
+    )
+    verified = registry[capability]
+    registry[capability] = object()
+    with pytest.raises(TypeError, match="capability is invalid"):
+        hiob_contracts.require_verified_reels_factory_failed_provider_operation_v3(
+            capability
+        )
+    registry[capability] = verified
+
+    attempts = {
+        "script": 1,
+        "image": 16,
+        "video": 0,
+        "voice": 7,
+        "render": 0,
+    }
+    unknown_status = _failure_receipt_v3(
+        pair[1],
+        revision=8,
+        stage="voice",
+        provider_attempts=attempts,
+        storyboard_execution_manifest_digest=None,
+        provider_call="unknown",
+        failed_provider_operation=evidence,
+    )
+    with pytest.raises(ValidationError, match="result status"):
+        ReelsFactoryFailureReceiptV3.model_validate(unknown_status)
+
+    unknown_evidence = deepcopy(evidence)
+    unknown_evidence.update(
+        {
+            "provider_operation_id": None,
+            "provider_result_status": "unknown",
+            "provider_result_digest": hiob_contracts.sha256_digest(
+                {"typecast_result": 6, "status": "unknown"}
+            ),
+        }
+    )
+    unknown_evidence["binding_digest"] = (
+        derive_reels_factory_failed_provider_operation_digest_v3(unknown_evidence)
+    )
+    unknown_capability = (
+        hiob_contracts.ReelsFactoryFailedProviderOperationV3.from_verified(
+            unknown_evidence,
+            resolver=_FailedProviderOperationResolverV3(),
+        )
+    )
+    unknown_payload = _failure_receipt_v3(
+        pair[1],
+        revision=8,
+        stage="voice",
+        provider_attempts=attempts,
+        storyboard_execution_manifest_digest=None,
+        provider_call="unknown",
+        failed_provider_operation=unknown_evidence,
+    )
+    assert ReelsFactoryFailureReceiptV3.from_verified(
+        unknown_payload,
+        authority=pair[1],
+        failed_operation_proof=unknown_capability,
+    ).provider_call == "unknown"
+
+    provider_free = _failure_receipt_v3(
+        pair[1],
+        revision=1,
+        stage="authority",
+        provider_attempts={
+            "script": 0,
+            "image": 0,
+            "video": 0,
+            "voice": 0,
+            "render": 0,
+        },
+        storyboard_execution_manifest_digest=None,
+        provider_call="none",
+    )
+    assert ReelsFactoryFailureReceiptV3.from_verified(
+        provider_free,
+        authority=pair[1],
+        failed_operation_proof=None,
+    ).provider_call == "none"
+    with pytest.raises(ValueError, match="provider-free"):
+        ReelsFactoryFailureReceiptV3.from_verified(
+            provider_free,
+            authority=pair[1],
+            failed_operation_proof=capability,
+        )
+    with pytest.raises(ValueError, match="paid authority"):
+        ReelsFactoryFailureReceiptV3.from_verified(
+            provider_free,
+            authority=_paid_pair("storyboard_regen")[1],
+            failed_operation_proof=None,
+        )
+
+    payload = _failure_receipt_v3(
+        pair[1],
+        revision=8,
+        stage="voice",
+        provider_attempts=attempts,
+        storyboard_execution_manifest_digest=None,
+        failed_provider_operation=evidence,
+    )
+    alien = deepcopy(evidence)
+    alien["provider_result_id"] = "alien-result"
+    alien["binding_digest"] = (
+        derive_reels_factory_failed_provider_operation_digest_v3(alien)
+    )
+    alien_capability = (
+        hiob_contracts.ReelsFactoryFailedProviderOperationV3.from_verified(
+            alien,
+            resolver=_FailedProviderOperationResolverV3(),
+        )
+    )
+    with pytest.raises(ValueError, match="does not bind failure receipt"):
+        ReelsFactoryFailureReceiptV3.from_verified(
+            payload,
+            authority=pair[1],
+            failed_operation_proof=alien_capability,
+        )
+
+
 def test_v3_failed_provider_binding_rejects_identity_and_stage_drift() -> None:
     pair = _paid_pair("storyboard_draft")
     attempts = {
@@ -880,6 +1063,29 @@ def test_v3_failed_provider_binding_rejects_identity_and_stage_drift() -> None:
             wrong_provider
         )
 
+    singleton_retry = deepcopy(binding)
+    singleton_retry.update(
+        {
+            "operation": "render",
+            "source_index": None,
+            "attempt_number": 2,
+            "provider": "modal",
+            "model": "hephaestus-final-render-v2",
+        }
+    )
+    singleton_retry["operation_key"] = (
+        hiob_contracts.derive_reels_factory_provider_operation_key_v3(
+            singleton_retry
+        )
+    )
+    singleton_retry["binding_digest"] = (
+        derive_reels_factory_failed_provider_operation_digest_v3(singleton_retry)
+    )
+    with pytest.raises(ValidationError, match="singleton.*attempt_number"):
+        hiob_contracts.ReelsFactoryFailedProviderOperationV3.model_validate(
+            singleton_retry
+        )
+
     wrong_binding_digest = deepcopy(binding)
     wrong_binding_digest["binding_digest"] = DIGEST_D
     with pytest.raises(ValidationError, match="binding_digest"):
@@ -913,6 +1119,11 @@ def test_v3_failed_provider_binding_rejects_identity_and_stage_drift() -> None:
             "provider": "seedream",
             "model": "seedream-5-pro",
         }
+    )
+    image_binding["operation_key"] = (
+        hiob_contracts.derive_reels_factory_provider_operation_key_v3(
+            image_binding
+        )
     )
     image_binding["binding_digest"] = (
         derive_reels_factory_failed_provider_operation_digest_v3(image_binding)

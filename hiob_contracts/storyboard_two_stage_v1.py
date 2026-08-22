@@ -802,6 +802,19 @@ def derive_reels_factory_failed_provider_operation_digest_v3(
     return _derive_digest(value, "binding_digest")
 
 
+def derive_reels_factory_provider_operation_key_v3(
+    value: Mapping[str, Any] | BaseModel,
+) -> str:
+    data = _as_json_dict(value)
+    base = (
+        f"reels:{data['workspace_id']}:{data['run_id']}:"
+        f"factory:{data['factory_revision']}:{data['purpose']}:"
+        f"{data['operation']}"
+    )
+    source_index = data.get("source_index")
+    return f"{base}:{source_index}" if source_index is not None else base
+
+
 class FactoryPaidBudgetApprovalResolverV2(Protocol):
     """Durable check proving a structurally valid V2 receipt is still current."""
 
@@ -4254,11 +4267,12 @@ class ReelsFactoryProgressReceiptV3(BaseModel):
 
 
 class ReelsFactoryFailedProviderOperationV3(BaseModel):
-    """Exact provider-attempt identity embedded in a terminal V3 failure."""
+    """Durable dispatch/result evidence for one terminal provider attempt."""
 
     model_config = _FROZEN_STRICT
 
     contract_version: Literal["ReelsFactoryFailedProviderOperation.v3"]
+    evidence_id: NonBlankStr
     workspace_id: UuidStr
     run_id: UuidStr
     factory_revision: NonNegativeInt
@@ -4275,6 +4289,13 @@ class ReelsFactoryFailedProviderOperationV3(BaseModel):
     execution_request_digest: DigestStr
     provider_operation_id: NonBlankStr | None
     provider_binding_receipt_digest: DigestStr
+    provider_result_id: NonBlankStr
+    provider_result_digest: DigestStr
+    provider_result_status: Literal["failed", "unknown"]
+    reserved_at_utc: UtcTimestamp
+    dispatched_at_utc: UtcTimestamp
+    observed_at_utc: UtcTimestamp
+    failed_at_utc: UtcTimestamp
     binding_digest: DigestStr
 
     @model_validator(mode="after")
@@ -4284,16 +4305,157 @@ class ReelsFactoryFailedProviderOperationV3(BaseModel):
         indexed_operation = self.operation in {"image", "video", "voice"}
         if indexed_operation != (self.source_index is not None):
             raise ValueError("failed provider source_index does not match operation")
+        if self.operation in {"script", "render"} and self.attempt_number != 1:
+            raise ValueError("singleton provider lane requires attempt_number 1")
+        if self.operation_key != derive_reels_factory_provider_operation_key_v3(self):
+            raise ValueError("operation_key does not match canonical paid lane")
         expected_provider, expected_models, _unit, _rate, _max_units = (
             _FACTORY_COST_OPERATION_POLICY_V1[self.operation]
         )
         if self.provider != expected_provider or self.model not in expected_models:
             raise ValueError("failed provider identity does not match operation policy")
+        if not (
+            _parse_utc(self.reserved_at_utc)
+            <= _parse_utc(self.dispatched_at_utc)
+            <= _parse_utc(self.observed_at_utc)
+            <= _parse_utc(self.failed_at_utc)
+        ):
+            raise ValueError("failed provider timestamp order is invalid")
         if self.binding_digest != (
             derive_reels_factory_failed_provider_operation_digest_v3(self)
         ):
             raise ValueError("binding_digest does not match failed provider operation")
         return self
+
+    @classmethod
+    def from_verified(
+        cls,
+        value: Mapping[str, Any] | "ReelsFactoryFailedProviderOperationV3",
+        *,
+        resolver: "ReelsFactoryFailedProviderOperationResolverV3",
+    ) -> "VerifiedReelsFactoryFailedProviderOperationV3":
+        evidence = cls.model_validate(value)
+        if not resolver.is_verified_failed_provider_operation(
+            contract_version=evidence.contract_version,
+            evidence_id=evidence.evidence_id,
+            workspace_id=evidence.workspace_id,
+            run_id=evidence.run_id,
+            factory_revision=evidence.factory_revision,
+            purpose=evidence.purpose,
+            paid_budget_authority_digest=evidence.paid_budget_authority_digest,
+            cost_profile_digest=evidence.cost_profile_digest,
+            pricing_policy_revision=evidence.pricing_policy_revision,
+            operation=evidence.operation,
+            source_index=evidence.source_index,
+            attempt_number=evidence.attempt_number,
+            provider=evidence.provider,
+            model=evidence.model,
+            operation_key=evidence.operation_key,
+            execution_request_digest=evidence.execution_request_digest,
+            provider_operation_id=evidence.provider_operation_id,
+            provider_binding_receipt_digest=(
+                evidence.provider_binding_receipt_digest
+            ),
+            provider_result_id=evidence.provider_result_id,
+            provider_result_digest=evidence.provider_result_digest,
+            provider_result_status=evidence.provider_result_status,
+            reserved_at_utc=evidence.reserved_at_utc,
+            dispatched_at_utc=evidence.dispatched_at_utc,
+            observed_at_utc=evidence.observed_at_utc,
+            failed_at_utc=evidence.failed_at_utc,
+            binding_digest=evidence.binding_digest,
+        ):
+            raise ValueError("failed provider operation resolver did not verify evidence")
+        return VerifiedReelsFactoryFailedProviderOperationV3(
+            evidence,
+            _token=_VERIFIED_FAILED_PROVIDER_OPERATION_TOKEN_V3,
+        )
+
+
+class ReelsFactoryFailedProviderOperationResolverV3(Protocol):
+    """Durable store resolver for an observed provider failure."""
+
+    def is_verified_failed_provider_operation(
+        self,
+        *,
+        contract_version: str,
+        evidence_id: str,
+        workspace_id: str,
+        run_id: str,
+        factory_revision: int,
+        purpose: str,
+        paid_budget_authority_digest: str,
+        cost_profile_digest: str,
+        pricing_policy_revision: int,
+        operation: str,
+        source_index: int | None,
+        attempt_number: int,
+        provider: str,
+        model: str,
+        operation_key: str,
+        execution_request_digest: str,
+        provider_operation_id: str | None,
+        provider_binding_receipt_digest: str,
+        provider_result_id: str,
+        provider_result_digest: str,
+        provider_result_status: str,
+        reserved_at_utc: str,
+        dispatched_at_utc: str,
+        observed_at_utc: str,
+        failed_at_utc: str,
+        binding_digest: str,
+    ) -> bool: ...
+
+
+_VERIFIED_FAILED_PROVIDER_OPERATION_TOKEN_V3 = object()
+_VERIFIED_FAILED_PROVIDER_OPERATION_REGISTRY_V3: WeakKeyDictionary[
+    object, object
+] = WeakKeyDictionary()
+
+
+class VerifiedReelsFactoryFailedProviderOperationV3:
+    """Opaque resolver-minted proof of durable failed provider evidence."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, evidence: object, *, _token: object) -> None:
+        if _token is not _VERIFIED_FAILED_PROVIDER_OPERATION_TOKEN_V3:
+            raise TypeError("verified failed operation can only be resolver-minted")
+        _VERIFIED_FAILED_PROVIDER_OPERATION_REGISTRY_V3[self] = evidence
+
+    def __setattr__(self, _name: str, _value: object) -> None:
+        raise TypeError("verified failed operation evidence is immutable")
+
+    def __delattr__(self, _name: str) -> None:
+        raise TypeError("verified failed operation evidence is immutable")
+
+    def __copy__(self) -> object:
+        raise TypeError("verified failed operation evidence cannot be copied")
+
+    def __deepcopy__(self, _memo: dict[int, object]) -> object:
+        raise TypeError("verified failed operation evidence cannot be copied")
+
+    def __reduce_ex__(self, _protocol: int) -> object:
+        raise TypeError("verified failed operation evidence is not serializable")
+
+    def __repr__(self) -> str:
+        return "VerifiedReelsFactoryFailedProviderOperationV3(<sealed>)"
+
+
+def require_verified_reels_factory_failed_provider_operation_v3(
+    capability: object,
+) -> ReelsFactoryFailedProviderOperationV3:
+    if not isinstance(capability, VerifiedReelsFactoryFailedProviderOperationV3):
+        raise TypeError(
+            "failure recording requires VerifiedReelsFactoryFailedProviderOperationV3"
+        )
+    try:
+        evidence = _VERIFIED_FAILED_PROVIDER_OPERATION_REGISTRY_V3[capability]
+    except KeyError as exc:
+        raise TypeError("unminted failed provider operation capability") from exc
+    if not isinstance(evidence, ReelsFactoryFailedProviderOperationV3):
+        raise TypeError("failed provider operation capability is invalid")
+    return evidence
 
 
 class ReelsFactoryFailureReceiptV3(BaseModel):
@@ -4369,6 +4531,33 @@ class ReelsFactoryFailureReceiptV3(BaseModel):
             raise ValueError(
                 "confirmed provider failure requires provider operation id"
             )
+        expected_result_status = (
+            "failed" if self.provider_call == "confirmed" else "unknown"
+        )
+        if binding.provider_result_status != expected_result_status:
+            raise ValueError("provider result status does not match provider_call")
+
+    @classmethod
+    def from_verified(
+        cls,
+        value: Mapping[str, Any] | "ReelsFactoryFailureReceiptV3",
+        *,
+        authority: FactoryPaidBudgetAuthorityV2,
+        failed_operation_proof: object | None,
+    ) -> "ReelsFactoryFailureReceiptV3":
+        receipt = cls.model_validate(value)
+        if not receipt.structurally_binds(authority):
+            raise ValueError("failure receipt does not bind paid authority")
+        if receipt.provider_call == "none":
+            if failed_operation_proof is not None:
+                raise ValueError("provider-free failure cannot carry verified evidence")
+            return receipt
+        evidence = require_verified_reels_factory_failed_provider_operation_v3(
+            failed_operation_proof
+        )
+        if receipt.failed_provider_operation != evidence:
+            raise ValueError("verified failed operation does not bind failure receipt")
+        return receipt
 
     def structurally_binds(self, authority: FactoryPaidBudgetAuthorityV2) -> bool:
         structurally_bound = _v3_factory_receipt_structurally_binds(
@@ -4577,6 +4766,8 @@ __all__ = [
     "ReelsFactoryProgressReceiptV3",
     "ReelsFactoryFailureReceiptV3",
     "ReelsFactoryFailedProviderOperationV3",
+    "ReelsFactoryFailedProviderOperationResolverV3",
+    "VerifiedReelsFactoryFailedProviderOperationV3",
     "StoryboardExecutionManifestV1",
     "derive_storyboard_image_artifact_digest_v1",
     "derive_athena_frame_plan_receipt_digest_v1",
@@ -4617,6 +4808,8 @@ __all__ = [
     "derive_reels_factory_progress_receipt_digest_v3",
     "derive_reels_factory_failure_receipt_digest_v3",
     "derive_reels_factory_failed_provider_operation_digest_v3",
+    "derive_reels_factory_provider_operation_key_v3",
+    "require_verified_reels_factory_failed_provider_operation_v3",
     "derive_storyboard_draft_digest_v1",
     "derive_storyboard_approval_receipt_digest_v1",
     "derive_storyboard_execution_manifest_digest_v1",
