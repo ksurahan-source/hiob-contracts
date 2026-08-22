@@ -20,6 +20,12 @@ from tests.test_star_reels_view_v3 import (
     DIGEST_D,
     RUN_ID,
     WORKSPACE_ID,
+    _budget,
+    _carrier,
+    _completion_summary,
+    _paid_pair,
+    _progress_receipt_v3,
+    _receipts,
     _storyboard_review_view,
 )
 from tests.test_storyboard_two_stage_v1 import (
@@ -174,3 +180,75 @@ def test_scene_and_factory_summaries_carry_exact_approved_draft_lineage() -> Non
             summary.storyboard_approval_receipt_digest
             == manifest.storyboard_approval_receipt_digest
         )
+
+
+def _production_budget_payload() -> dict:
+    carrier = _carrier(approved=True)
+    return {
+        "contract_version": "StarReelsView.v3",
+        "section": "ProductionBudgetApproval",
+        "status": "awaiting_production_budget_approval",
+        "revision": 8,
+        "stage_output": carrier,
+        "budget": _budget("final_production"),
+        "review_digest": DIGEST_D,
+        "receipts": _receipts(
+            completion_summary=_completion_summary(carrier=_carrier(approved=False))
+        ),
+        "provider_call": "none",
+        "error": None,
+        "storyboard": carrier,
+    }
+
+
+def _run_status_payload() -> dict:
+    carrier = _carrier(approved=True, executable=True)
+    pair = _paid_pair("final_production")
+    budget = _budget("final_production")
+    budget["paid_budget_authority_digest"] = pair[1].authority_digest
+    progress = _progress_receipt_v3(
+        pair[1],
+        revision=9,
+        stage="video",
+        provider_attempts={
+            "script": 0,
+            "image": 0,
+            "video": 1,
+            "voice": 0,
+            "render": 0,
+        },
+        storyboard_execution_manifest_digest=DIGEST_A,
+    )
+    return {
+        "contract_version": "StarReelsView.v3",
+        "section": "RunStatus",
+        "status": "rendering",
+        "revision": 9,
+        "stage_output": None,
+        "budget": budget,
+        "review_digest": None,
+        "receipts": _receipts(
+            pair,
+            factory=progress,
+            completion_summary=_completion_summary(carrier=_carrier(approved=False)),
+        ),
+        "provider_call": "confirmed",
+        "error": None,
+        "storyboard": carrier,
+    }
+
+
+@pytest.mark.parametrize("payload_factory", [_production_budget_payload, _run_status_payload])
+def test_post_phase_a_views_reject_resealed_carrier_digest_drift(
+    payload_factory,
+) -> None:
+    payload = payload_factory()
+    StarReelsViewV3.model_validate(payload)
+    summary = payload["receipts"]["storyboard_phase_a_completion_summary"]
+    summary["output_storyboard_carrier_digest"] = DIGEST_A
+    summary["summary_digest"] = (
+        hiob_contracts.derive_storyboard_phase_a_completion_summary_digest_v2(summary)
+    )
+
+    with pytest.raises(ValidationError, match="carrier digest drifted"):
+        StarReelsViewV3.model_validate(payload)
