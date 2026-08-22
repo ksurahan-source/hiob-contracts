@@ -5620,10 +5620,10 @@ def test_historical_operation_scope_timeline_and_output_edges_are_covered() -> N
 
     with pytest.raises(ValueError, match="voice evidence"):
         evidence_type.model_construct(operation="voice", source_index=None)._bind_historical_operation_scope(
-            final_authority
+            draft_authority
         )
     evidence_type.model_construct(operation="voice", source_index=0)._bind_historical_operation_scope(
-        final_authority
+        draft_authority
     )
     with pytest.raises(ValueError, match="script evidence"):
         evidence_type.model_construct(operation="script", source_index=None)._bind_historical_operation_scope(
