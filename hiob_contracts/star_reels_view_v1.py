@@ -798,7 +798,6 @@ class _StoryboardPhaseACompletionReceiptBase(BaseModel):
         authority = self.paid_budget_authority
         image_set = self.output_image_set_receipt
         draft = self.output_storyboard_draft
-        requests = [receipt.request for receipt in image_set.provider_receipts]
         paid_receipts = [
             image_set.provider_receipts[index]
             for index in self.paid_source_beat_indices
@@ -1773,19 +1772,6 @@ class StarReelsViewV3(BaseModel):
             raise ValueError(
                 "Phase-A completion storyboard lineage does not bind current storyboard"
             )
-
-    def _bind_phase_a_review_authority(
-        self,
-        summary: StoryboardPhaseACompletionSummaryV2,
-        pointer: FactoryStoryboardCarrierV2,
-    ) -> None:
-        authority = self.receipts.paid_budget_authority
-        if (
-            summary.purpose != self.budget.purpose
-            or authority is None
-            or summary.paid_budget_authority_digest != authority.authority_digest
-        ):
-            raise ValueError("Phase-A completion does not bind image authority")
         unapproved_pointer = FactoryStoryboardCarrierV2(
             contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V2,
             workspace_id=pointer.workspace_id,
@@ -1803,6 +1789,19 @@ class StarReelsViewV3(BaseModel):
             derive_factory_storyboard_carrier_digest_v2(unapproved_pointer)
         ):
             raise ValueError("Phase-A completion carrier digest drifted")
+
+    def _bind_phase_a_review_authority(
+        self,
+        summary: StoryboardPhaseACompletionSummaryV2,
+        pointer: FactoryStoryboardCarrierV2,
+    ) -> None:
+        authority = self.receipts.paid_budget_authority
+        if (
+            summary.purpose != self.budget.purpose
+            or authority is None
+            or summary.paid_budget_authority_digest != authority.authority_digest
+        ):
+            raise ValueError("Phase-A completion does not bind image authority")
 
     def _bind_factory_receipt_provider_state(self) -> None:
         factory = self.receipts.factory

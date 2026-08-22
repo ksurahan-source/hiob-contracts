@@ -1,6 +1,5 @@
 """Fail-closed coverage for Star Reels view state projections."""
 
-from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
@@ -37,14 +36,12 @@ from tests.test_star_reels_view_v1 import (
 from tests.test_star_reels_view_v3 import (
     DIGEST_A,
     DIGEST_B,
-    DIGEST_C,
     DIGEST_D,
     _budget,
     _carrier,
     _completion_summary,
     _paid_pair,
     _progress_receipt_v3,
-    _receipts,
     _storyboard_review_view,
 )
 from tests.test_storyboard_two_stage_v1 import _phase_a_completion
@@ -677,10 +674,10 @@ def test_v3_phase_a_summary_and_provider_state_guards() -> None:
     newer_pointer = pointer.model_copy(
         update={"storyboard_revision": pointer.storyboard_revision + 1}
     )
+    with pytest.raises(ValueError, match="storyboard lineage"):
+        StarReelsViewV3._bind_phase_a_summary_lineage(summary, newer_pointer)
     with pytest.raises(ValueError, match="carrier digest drifted"):
-        base._bind_phase_a_review_authority(summary, newer_pointer)
-    with pytest.raises(ValueError, match="carrier digest drifted"):
-        base._bind_phase_a_review_authority(
+        StarReelsViewV3._bind_phase_a_summary_lineage(
             summary.model_copy(update={"output_storyboard_carrier_digest": DIGEST_A}),
             pointer,
         )
