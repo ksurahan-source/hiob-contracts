@@ -171,20 +171,19 @@ def test_current_v3_accepts_v2_carrier_and_rejects_v1_or_alien_scope() -> None:
     with pytest.raises(ValidationError, match="scope|authority"):
         StarReelsViewV3.model_validate(alien)
 
-    summary = value.receipts.storyboard_phase_a_completion_summary
-    assert summary is not None
-    drifted_summary = summary.model_copy(
-        update={"workspace_id": "00000000-0000-4000-8000-000000000099"}
+    drifted_summary = deepcopy(payload)
+    summary = drifted_summary["receipts"]["storyboard_phase_a_completion_summary"]
+    summary["workspace_id"] = "00000000-0000-4000-8000-000000000099"
+    summary_pointer = _scoped_carrier()
+    summary_pointer["workspace_id"] = summary["workspace_id"]
+    summary["output_storyboard_carrier_digest"] = (
+        hiob_contracts.derive_factory_storyboard_carrier_digest_v2(summary_pointer)
     )
-    drifted_view = value.model_copy(
-        update={
-            "receipts": value.receipts.model_copy(
-                update={"storyboard_phase_a_completion_summary": drifted_summary}
-            )
-        }
+    summary["summary_digest"] = (
+        hiob_contracts.derive_storyboard_phase_a_completion_summary_digest_v2(summary)
     )
-    with pytest.raises(ValueError, match="Phase-A scope"):
-        drifted_view._bind_storyboard_carrier_scope()
+    with pytest.raises(ValidationError, match="storyboard lineage"):
+        StarReelsViewV3.model_validate(drifted_summary)
 
 
 def test_scene_and_factory_summaries_carry_exact_approved_draft_lineage() -> None:

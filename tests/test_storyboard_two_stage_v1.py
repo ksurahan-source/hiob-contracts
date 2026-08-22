@@ -3874,7 +3874,7 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
         )
     )
     scene_lineage_drift["budget"]["storyboard_scene_video_set_summary"] = scene_body
-    with pytest.raises(ValidationError, match="ready summary"):
+    with pytest.raises(ValidationError, match="scene summary lineage|ready summary"):
         StarReelsViewV3.model_validate(scene_lineage_drift)
 
     alien_scene_scope = deepcopy(payload)

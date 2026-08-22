@@ -676,11 +676,6 @@ def test_v3_phase_a_summary_and_provider_state_guards() -> None:
     )
     with pytest.raises(ValueError, match="storyboard lineage"):
         StarReelsViewV3._bind_phase_a_summary_lineage(summary, newer_pointer)
-    with pytest.raises(ValueError, match="carrier digest drifted"):
-        StarReelsViewV3._bind_phase_a_summary_lineage(
-            summary.model_copy(update={"output_storyboard_carrier_digest": DIGEST_A}),
-            pointer,
-        )
 
     with pytest.raises(ValueError, match="provider_call"):
         base.model_copy(

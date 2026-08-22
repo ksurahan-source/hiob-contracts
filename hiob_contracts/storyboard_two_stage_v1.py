@@ -2495,6 +2495,19 @@ class StoryboardSceneVideoSetSummaryV1(BaseModel):
 
     @model_validator(mode="after")
     def _bind_safe_projection(self) -> "StoryboardSceneVideoSetSummaryV1":
+        lineage = (
+            self.storyboard_draft_id,
+            self.storyboard_draft_revision,
+            self.storyboard_draft_digest,
+            self.image_set_receipt_digest,
+            self.storyboard_approval_receipt_digest,
+        )
+        if any(value is not None for value in lineage) and not all(
+            value is not None for value in lineage
+        ):
+            raise ValueError(
+                "storyboard lineage fields must be all present or all absent"
+            )
         if [item.sequence_index for item in self.beat_projections] != list(range(16)):
             raise ValueError("safe beat projections must be ordered 0..15")
         if sorted(item.source_beat_index for item in self.beat_projections) != list(

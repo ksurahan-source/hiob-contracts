@@ -7,7 +7,7 @@ the projection itself as execution authority.
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -510,7 +510,7 @@ class FactoryStoryboardCarrierV2(BaseModel):
     factory_revision: NonNegativeInt
     plan_digest: DigestStr
     storyboard_draft_id: UuidStr
-    storyboard_revision: int = Field(ge=1)
+    storyboard_revision: NonNegativeInt = Field(ge=1)
     storyboard_digest: DigestStr
     image_set_receipt_digest: DigestStr
     approval_receipt_digest: DigestStr | None
@@ -1171,6 +1171,23 @@ class StoryboardPhaseACompletionSummaryV2(_StoryboardPhaseACompletionSummaryBase
                 raise ValueError("Phase-A V2 summary requires 16 bound voice claims")
         elif self.voice_count != 0 or self.voice_evidence_set_digest is not None:
             raise ValueError("regen V2 summary cannot carry voice claims")
+        unapproved_pointer = FactoryStoryboardCarrierV2(
+            contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V2,
+            workspace_id=self.workspace_id,
+            run_id=self.run_id,
+            factory_revision=self.factory_revision,
+            plan_digest=self.plan_digest,
+            storyboard_draft_id=self.output_storyboard_draft_id,
+            storyboard_revision=self.output_storyboard_revision,
+            storyboard_digest=self.output_storyboard_digest,
+            image_set_receipt_digest=self.output_image_set_receipt_digest,
+            approval_receipt_digest=None,
+            execution_manifest_digest=None,
+        )
+        if self.output_storyboard_carrier_digest != (
+            derive_factory_storyboard_carrier_digest_v2(unapproved_pointer)
+        ):
+            raise ValueError("Phase-A completion carrier digest drifted")
         if self.summary_digest != (
             derive_storyboard_phase_a_completion_summary_digest_v2(self)
         ):
@@ -1382,6 +1399,7 @@ class StarReelsViewV3(BaseModel):
         self._bind_storyboard_carrier_scope()
         self._bind_phase_a_completion_summary()
         self._bind_paid_budget_evidence()
+        self._bind_scene_summary_lineage()
         self._bind_factory_receipt_provider_state()
         return self
 
@@ -1400,14 +1418,6 @@ class StarReelsViewV3(BaseModel):
             )
         ):
             raise ValueError("scoped storyboard carrier does not bind active authority")
-        summary = self.receipts.storyboard_phase_a_completion_summary
-        if summary is not None and (
-            pointer.workspace_id != summary.workspace_id
-            or pointer.run_id != summary.run_id
-            or pointer.factory_revision != summary.factory_revision
-            or pointer.plan_digest != summary.plan_digest
-        ):
-            raise ValueError("scoped storyboard carrier does not bind Phase-A scope")
 
     def _require_valid_section_status_pair(self) -> None:
         valid_pair = (
@@ -1772,23 +1782,6 @@ class StarReelsViewV3(BaseModel):
             raise ValueError(
                 "Phase-A completion storyboard lineage does not bind current storyboard"
             )
-        unapproved_pointer = FactoryStoryboardCarrierV2(
-            contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V2,
-            workspace_id=pointer.workspace_id,
-            run_id=pointer.run_id,
-            factory_revision=pointer.factory_revision,
-            plan_digest=pointer.plan_digest,
-            storyboard_draft_id=pointer.storyboard_draft_id,
-            storyboard_revision=pointer.storyboard_revision,
-            storyboard_digest=pointer.storyboard_digest,
-            image_set_receipt_digest=pointer.image_set_receipt_digest,
-            approval_receipt_digest=None,
-            execution_manifest_digest=None,
-        )
-        if summary.output_storyboard_carrier_digest != (
-            derive_factory_storyboard_carrier_digest_v2(unapproved_pointer)
-        ):
-            raise ValueError("Phase-A completion carrier digest drifted")
 
     def _bind_phase_a_review_authority(
         self,
@@ -1802,6 +1795,29 @@ class StarReelsViewV3(BaseModel):
             or summary.paid_budget_authority_digest != authority.authority_digest
         ):
             raise ValueError("Phase-A completion does not bind image authority")
+
+    def _bind_scene_summary_lineage(self) -> None:
+        scene = self.budget.storyboard_scene_video_set_summary
+        if scene is None:
+            return
+        pointer = cast(FactoryStoryboardCarrierV2, self.storyboard)
+        if (
+            scene.workspace_id != pointer.workspace_id
+            or scene.run_id != pointer.run_id
+            or scene.factory_revision != pointer.factory_revision
+            or scene.plan_digest != pointer.plan_digest
+            or scene.storyboard_draft_id != pointer.storyboard_draft_id
+            or scene.storyboard_draft_revision != pointer.storyboard_revision
+            or scene.storyboard_draft_digest != pointer.storyboard_digest
+            or scene.image_set_receipt_digest != pointer.image_set_receipt_digest
+            or scene.storyboard_approval_receipt_digest
+            != pointer.approval_receipt_digest
+            or scene.storyboard_execution_manifest_digest
+            != pointer.execution_manifest_digest
+        ):
+            raise ValueError(
+                "scene summary lineage does not bind current production authority"
+            )
 
     def _bind_factory_receipt_provider_state(self) -> None:
         factory = self.receipts.factory
@@ -1828,16 +1844,6 @@ class StarReelsViewV3(BaseModel):
                 != self.budget.paid_budget_authority_digest
                 or factory.storyboard_execution_manifest_digest
                 != pointer.execution_manifest_digest
-                or scene_video_set.storyboard_draft_id
-                != pointer.storyboard_draft_id
-                or scene_video_set.storyboard_draft_revision
-                != pointer.storyboard_revision
-                or scene_video_set.storyboard_draft_digest
-                != pointer.storyboard_digest
-                or scene_video_set.image_set_receipt_digest
-                != pointer.image_set_receipt_digest
-                or scene_video_set.storyboard_approval_receipt_digest
-                != pointer.approval_receipt_digest
             ):
                 raise ValueError(
                     "sealed scene video budget does not match ready summary"
