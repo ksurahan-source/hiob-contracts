@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from hiob_contracts import (
-    FactoryStoryboardCarrierV1,
+    FactoryStoryboardCarrierV2,
     ProductElementLockDraftV1,
     ReelsFactoryCompletionSummaryV3,
     StarReelsBudgetV3,
@@ -478,7 +478,7 @@ def test_v3_storyboard_review_and_generation_guards() -> None:
     regen = StarReelsViewV3.model_validate(
         _storyboard_review_view(purpose="storyboard_regen")
     )
-    executable = FactoryStoryboardCarrierV1.model_validate(
+    executable = FactoryStoryboardCarrierV2.model_validate(
         _carrier(approved=True, executable=True)
     )
     with pytest.raises(ValueError, match="approval or execution manifest"):
@@ -492,12 +492,12 @@ def test_v3_storyboard_review_and_generation_guards() -> None:
 
     with pytest.raises(ValueError, match="current storyboard pointer"):
         base._bind_storyboard_ready_for_review(None)
-    approved = FactoryStoryboardCarrierV1.model_validate(_carrier(approved=True))
+    approved = FactoryStoryboardCarrierV2.model_validate(_carrier(approved=True))
     with pytest.raises(ValueError, match="cannot carry approval"):
         base.model_copy(update={"stage_output": approved})._bind_storyboard_ready_for_review(
             approved
         )
-    malformed_executable = FactoryStoryboardCarrierV1.model_construct(
+    malformed_executable = FactoryStoryboardCarrierV2.model_construct(
         **{
             **_carrier(approved=False),
             "execution_manifest_digest": DIGEST_A,
@@ -525,7 +525,7 @@ def test_v3_production_budget_and_run_status_guards() -> None:
     with pytest.raises(ValueError, match="requires storyboard approval"):
         gate._bind_production_budget_gate()
 
-    approved = FactoryStoryboardCarrierV1.model_validate(_carrier(approved=True))
+    approved = FactoryStoryboardCarrierV2.model_validate(_carrier(approved=True))
     gate = gate.model_copy(update={"storyboard": approved, "stage_output": approved})
     with pytest.raises(ValueError, match="review_digest"):
         gate.model_copy(update={"review_digest": DIGEST_A})._bind_production_budget_gate()
@@ -534,7 +534,7 @@ def test_v3_production_budget_and_run_status_guards() -> None:
 
     with pytest.raises(ValueError, match="must be final_production"):
         review._bind_two_stage_run()
-    executable = FactoryStoryboardCarrierV1.model_validate(
+    executable = FactoryStoryboardCarrierV2.model_validate(
         _carrier(approved=True, executable=True)
     )
     run = gate.model_copy(
@@ -597,7 +597,7 @@ def test_v3_paid_budget_authority_and_factory_guards() -> None:
     with pytest.raises(ValueError, match="revision does not match"):
         revision_drift._bind_paid_factory(draft_pair[1], base.storyboard)
 
-    final_pointer = FactoryStoryboardCarrierV1.model_validate(
+    final_pointer = FactoryStoryboardCarrierV2.model_validate(
         _carrier(approved=True, executable=True)
     )
     manifest_drift = _progress_receipt_v3(
@@ -677,7 +677,8 @@ def test_v3_phase_a_summary_and_provider_state_guards() -> None:
     newer_pointer = pointer.model_copy(
         update={"storyboard_revision": pointer.storyboard_revision + 1}
     )
-    assert base._bind_phase_a_review_authority(summary, newer_pointer) is None
+    with pytest.raises(ValueError, match="carrier digest drifted"):
+        base._bind_phase_a_review_authority(summary, newer_pointer)
     with pytest.raises(ValueError, match="carrier digest drifted"):
         base._bind_phase_a_review_authority(
             summary.model_copy(update={"output_storyboard_carrier_digest": DIGEST_A}),

@@ -2457,6 +2457,26 @@ class StoryboardSceneVideoSetSummaryV1(BaseModel):
     run_id: UuidStr
     factory_revision: NonNegativeInt
     plan_digest: DigestStr
+    storyboard_draft_id: UuidStr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    storyboard_draft_revision: RevisionInt | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    storyboard_draft_digest: DigestStr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    image_set_receipt_digest: DigestStr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    storyboard_approval_receipt_digest: DigestStr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     storyboard_execution_manifest_digest: DigestStr
     final_production_authority_digest: DigestStr
     storyboard_scene_count: StoryboardSceneCount
@@ -2535,6 +2555,13 @@ class StoryboardSceneVideoSetSummaryV1(BaseModel):
             "run_id": receipt.run_id,
             "factory_revision": receipt.factory_revision,
             "plan_digest": receipt.plan_digest,
+            "storyboard_draft_id": manifest.draft_id,
+            "storyboard_draft_revision": manifest.draft_revision,
+            "storyboard_draft_digest": manifest.storyboard_draft_digest,
+            "image_set_receipt_digest": manifest.image_set_receipt_digest,
+            "storyboard_approval_receipt_digest": (
+                manifest.storyboard_approval_receipt_digest
+            ),
             "storyboard_execution_manifest_digest": (
                 receipt.storyboard_execution_manifest_digest
             ),
@@ -2850,6 +2877,11 @@ class ReelsFactoryCompletionSummaryV3(BaseModel):
     factory_revision: NonNegativeInt
     plan_digest: DigestStr
     paid_budget_authority_digest: DigestStr
+    storyboard_draft_id: UuidStr
+    storyboard_draft_revision: RevisionInt
+    storyboard_draft_digest: DigestStr
+    image_set_receipt_digest: DigestStr
+    storyboard_approval_receipt_digest: DigestStr
     storyboard_execution_manifest_digest: DigestStr
     storyboard_scene_video_set_receipt_digest: DigestStr
     storyboard_scene_video_set_summary_digest: DigestStr
@@ -2907,6 +2939,13 @@ class ReelsFactoryCompletionSummaryV3(BaseModel):
             "factory_revision": receipt.factory_revision,
             "plan_digest": receipt.plan_digest,
             "paid_budget_authority_digest": receipt.paid_budget_authority_digest,
+            "storyboard_draft_id": manifest.draft_id,
+            "storyboard_draft_revision": manifest.draft_revision,
+            "storyboard_draft_digest": manifest.storyboard_draft_digest,
+            "image_set_receipt_digest": manifest.image_set_receipt_digest,
+            "storyboard_approval_receipt_digest": (
+                manifest.storyboard_approval_receipt_digest
+            ),
             "storyboard_execution_manifest_digest": (
                 receipt.storyboard_execution_manifest_digest
             ),

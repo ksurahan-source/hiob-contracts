@@ -10,7 +10,7 @@ import hiob_contracts
 from hiob_contracts import (
     FactoryPaidBudgetApprovalReceiptV2,
     FactoryPaidBudgetAuthorityV2,
-    FactoryStoryboardCarrierV1,
+    FactoryStoryboardCarrierV2,
     ReelsFactoryFailureReceiptV3,
     ReelsFactoryProgressReceiptV3,
     StarReelsBudgetV3,
@@ -32,6 +32,7 @@ DIGEST_C = "sha256:" + "c" * 64
 DIGEST_D = "sha256:" + "d" * 64
 WORKSPACE_ID = "00000000-0000-4000-8000-000000000001"
 RUN_ID = "00000000-0000-4000-8000-000000000002"
+DRAFT_ID = "00000000-0000-4000-8000-000000000003"
 
 
 def _budget(purpose: str) -> dict[str, object]:
@@ -79,7 +80,12 @@ def _budget(purpose: str) -> dict[str, object]:
 
 def _carrier(*, approved: bool, executable: bool = False) -> dict[str, object]:
     return {
-        "contract_version": "FactoryStoryboardCarrier.v1",
+        "contract_version": "FactoryStoryboardCarrier.v2",
+        "workspace_id": WORKSPACE_ID,
+        "run_id": RUN_ID,
+        "factory_revision": 7,
+        "plan_digest": DIGEST_C,
+        "storyboard_draft_id": DRAFT_ID,
         "storyboard_revision": 2,
         "storyboard_digest": DIGEST_B,
         "image_set_receipt_digest": DIGEST_C,
@@ -199,13 +205,16 @@ def _completion_summary(
         "output_storyboard_digest": output["storyboard_digest"],
         "output_image_set_receipt_digest": output["image_set_receipt_digest"],
         "output_storyboard_carrier_digest": (
-            hiob_contracts.derive_factory_storyboard_carrier_digest_v1(output)
+            hiob_contracts.derive_factory_storyboard_carrier_digest_v2(output)
+            if version == 2
+            else hiob_contracts.derive_factory_storyboard_carrier_digest_v1(output)
         ),
         "image_count": 16,
         "completed_at_utc": "2026-08-14T05:40:00Z",
         "completion_receipt_digest": DIGEST_A,
     }
     if version == 2:
+        body["output_storyboard_draft_id"] = output["storyboard_draft_id"]
         body["voice_count"] = 16 if purpose == "storyboard_draft" else 0
         body["voice_evidence_set_digest"] = (
             DIGEST_D if purpose == "storyboard_draft" else None
@@ -399,7 +408,7 @@ def _storyboard_review_view(*, purpose: str = "storyboard_draft") -> dict:
 def test_v3_storyboard_review_is_exact_and_digest_bound() -> None:
     value = StarReelsViewV3.model_validate(_storyboard_review_view())
 
-    assert isinstance(value.storyboard, FactoryStoryboardCarrierV1)
+    assert isinstance(value.storyboard, FactoryStoryboardCarrierV2)
     assert value.stage_output == value.storyboard
     assert value.review_digest == value.storyboard.storyboard_digest
     assert value.budget.purpose == "storyboard_draft"
@@ -528,7 +537,7 @@ def test_v3_production_gate_requires_approved_non_executable_pointer() -> None:
 def test_v3_carrier_rejects_execution_without_storyboard_approval() -> None:
     payload = _carrier(approved=False, executable=True)
     with pytest.raises(ValidationError, match="requires approval"):
-        FactoryStoryboardCarrierV1.model_validate(payload)
+        FactoryStoryboardCarrierV2.model_validate(payload)
 
 
 def test_v3_run_status_requires_approved_manifest_and_final_authority() -> None:

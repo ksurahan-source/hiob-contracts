@@ -474,6 +474,7 @@ class StarReelsViewV2(StarReelsViewV1):
 
 
 FACTORY_STORYBOARD_CARRIER_VERSION_V1 = "FactoryStoryboardCarrier.v1"
+FACTORY_STORYBOARD_CARRIER_VERSION_V2 = "FactoryStoryboardCarrier.v2"
 
 
 class FactoryStoryboardCarrierV1(BaseModel):
@@ -498,6 +499,33 @@ class FactoryStoryboardCarrierV1(BaseModel):
         return self
 
 
+class FactoryStoryboardCarrierV2(BaseModel):
+    """Current storyboard pointer sealed to its tenant and approved draft lineage."""
+
+    model_config = _STRICT_FROZEN
+
+    contract_version: Literal["FactoryStoryboardCarrier.v2"]
+    workspace_id: UuidStr
+    run_id: UuidStr
+    factory_revision: NonNegativeInt
+    plan_digest: DigestStr
+    storyboard_draft_id: UuidStr
+    storyboard_revision: int = Field(ge=1)
+    storyboard_digest: DigestStr
+    image_set_receipt_digest: DigestStr
+    approval_receipt_digest: DigestStr | None
+    execution_manifest_digest: DigestStr | None
+
+    @model_validator(mode="after")
+    def _require_approval_before_execution(self) -> "FactoryStoryboardCarrierV2":
+        if (
+            self.execution_manifest_digest is not None
+            and self.approval_receipt_digest is None
+        ):
+            raise ValueError("execution manifest requires approval receipt")
+        return self
+
+
 def derive_factory_storyboard_carrier_digest_v1(
     value: FactoryStoryboardCarrierV1 | dict[str, Any],
 ) -> str:
@@ -507,6 +535,20 @@ def derive_factory_storyboard_carrier_digest_v1(
     return canonical_contract_digest_v1(
         {
             "purpose": "factory-storyboard-carrier.v1",
+            "carrier": payload,
+        }
+    )
+
+
+def derive_factory_storyboard_carrier_digest_v2(
+    value: FactoryStoryboardCarrierV2 | dict[str, Any],
+) -> str:
+    payload = (
+        value.model_dump(mode="json") if isinstance(value, BaseModel) else dict(value)
+    )
+    return canonical_contract_digest_v1(
+        {
+            "purpose": "factory-storyboard-carrier.v2",
             "carrier": payload,
         }
     )
@@ -622,7 +664,7 @@ class _StoryboardPhaseACompletionReceiptBase(BaseModel):
     )
     output_image_set_receipt: StoryboardImageSetReceiptV1
     output_storyboard_draft: StoryboardDraftV1
-    output_storyboard_carrier: FactoryStoryboardCarrierV1
+    output_storyboard_carrier: FactoryStoryboardCarrierV1 | FactoryStoryboardCarrierV2
     completed_at_utc: UtcTimestamp
     receipt_digest: DigestStr
 
@@ -769,14 +811,30 @@ class _StoryboardPhaseACompletionReceiptBase(BaseModel):
             for receipt in paid_receipts
         ):
             raise ValueError("paid source receipts do not match Phase-A authority")
-        expected_carrier = FactoryStoryboardCarrierV1(
-            contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V1,
-            storyboard_revision=draft.revision,
-            storyboard_digest=draft.draft_digest,
-            image_set_receipt_digest=image_set.receipt_digest,
-            approval_receipt_digest=None,
-            execution_manifest_digest=None,
-        )
+        if self.contract_version == "StoryboardPhaseACompletionReceipt.v1":
+            expected_carrier: FactoryStoryboardCarrierV1 | FactoryStoryboardCarrierV2
+            expected_carrier = FactoryStoryboardCarrierV1(
+                contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V1,
+                storyboard_revision=draft.revision,
+                storyboard_digest=draft.draft_digest,
+                image_set_receipt_digest=image_set.receipt_digest,
+                approval_receipt_digest=None,
+                execution_manifest_digest=None,
+            )
+        else:
+            expected_carrier = FactoryStoryboardCarrierV2(
+                contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V2,
+                workspace_id=self.workspace_id,
+                run_id=self.run_id,
+                factory_revision=self.factory_revision,
+                plan_digest=self.plan_digest,
+                storyboard_draft_id=draft.draft_id,
+                storyboard_revision=draft.revision,
+                storyboard_digest=draft.draft_digest,
+                image_set_receipt_digest=image_set.receipt_digest,
+                approval_receipt_digest=None,
+                execution_manifest_digest=None,
+            )
         if self.output_storyboard_carrier != expected_carrier:
             raise ValueError(
                 "output storyboard carrier does not bind output storyboard"
@@ -853,6 +911,7 @@ class StoryboardPhaseACompletionReceiptV1(_StoryboardPhaseACompletionReceiptBase
     """Legacy server proof retained strictly for historical reads."""
 
     contract_version: Literal["StoryboardPhaseACompletionReceipt.v1"]
+    output_storyboard_carrier: FactoryStoryboardCarrierV1
 
     def binds_paid_operations(
         self,
@@ -880,6 +939,7 @@ class StoryboardPhaseACompletionReceiptV2(_StoryboardPhaseACompletionReceiptBase
     """
 
     contract_version: Literal["StoryboardPhaseACompletionReceipt.v2"]
+    output_storyboard_carrier: FactoryStoryboardCarrierV2
     paid_voice_operation_evidence_digests: tuple[DigestStr, ...] = Field(
         max_length=16
     )
@@ -1101,6 +1161,7 @@ class StoryboardPhaseACompletionSummaryV2(_StoryboardPhaseACompletionSummaryBase
     """Browser-safe proof that V2 completion included the exact voice claim set."""
 
     contract_version: Literal["StoryboardPhaseACompletionSummary.v2"]
+    output_storyboard_draft_id: UuidStr
     voice_count: Annotated[int, Field(ge=0, le=16)]
     voice_evidence_set_digest: DigestStr | None
 
@@ -1148,13 +1209,14 @@ class StoryboardPhaseACompletionSummaryV2(_StoryboardPhaseACompletionSummaryBase
                 completion.paid_budget_authority.max_total_cost_microunits
             ),
             "currency": completion.paid_budget_authority.currency,
+            "output_storyboard_draft_id": completion.output_storyboard_draft.draft_id,
             "output_storyboard_revision": completion.output_storyboard_draft.revision,
             "output_storyboard_digest": completion.output_storyboard_draft.draft_digest,
             "output_image_set_receipt_digest": (
                 completion.output_image_set_receipt.receipt_digest
             ),
             "output_storyboard_carrier_digest": (
-                derive_factory_storyboard_carrier_digest_v1(
+                derive_factory_storyboard_carrier_digest_v2(
                     completion.output_storyboard_carrier
                 )
             ),
@@ -1286,14 +1348,14 @@ class StarReelsViewV3(BaseModel):
     ]
     revision: int = Field(ge=0)
     stage_output: (
-        ProductElementLockDraftV1 | FactoryStoryboardCarrierV1 | dict[str, Any] | None
+        ProductElementLockDraftV1 | FactoryStoryboardCarrierV2 | dict[str, Any] | None
     )
     budget: StarReelsBudgetV3
     review_digest: DigestStr | None
     receipts: _StarReelsViewReceiptsV3
     provider_call: Literal["none", "confirmed", "unknown"]
     error: NonBlankStr | None
-    storyboard: FactoryStoryboardCarrierV1 | None
+    storyboard: FactoryStoryboardCarrierV2 | None
 
     @field_validator("stage_output", mode="before")
     @classmethod
@@ -1303,8 +1365,8 @@ class StarReelsViewV3(BaseModel):
         contract_version = value.get("contract_version")
         if contract_version == "ProductElementLockDraft.v1":
             return ProductElementLockDraftV1.model_validate(value)
-        if contract_version == FACTORY_STORYBOARD_CARRIER_VERSION_V1:
-            return FactoryStoryboardCarrierV1.model_validate(value)
+        if contract_version == FACTORY_STORYBOARD_CARRIER_VERSION_V2:
+            return FactoryStoryboardCarrierV2.model_validate(value)
         return value
 
     @model_validator(mode="after")
@@ -1318,10 +1380,35 @@ class StarReelsViewV3(BaseModel):
             self._bind_production_budget_gate()
         else:
             self._bind_two_stage_run()
+        self._bind_storyboard_carrier_scope()
         self._bind_phase_a_completion_summary()
         self._bind_paid_budget_evidence()
         self._bind_factory_receipt_provider_state()
         return self
+
+    def _bind_storyboard_carrier_scope(self) -> None:
+        pointer = self.storyboard
+        if pointer is None:
+            return
+        authority = self.receipts.paid_budget_authority
+        if authority is not None and (
+            pointer.workspace_id != authority.workspace_id
+            or pointer.run_id != authority.run_id
+            or pointer.factory_revision != authority.factory_revision
+            or (
+                authority.plan_digest is not None
+                and pointer.plan_digest != authority.plan_digest
+            )
+        ):
+            raise ValueError("scoped storyboard carrier does not bind active authority")
+        summary = self.receipts.storyboard_phase_a_completion_summary
+        if summary is not None and (
+            pointer.workspace_id != summary.workspace_id
+            or pointer.run_id != summary.run_id
+            or pointer.factory_revision != summary.factory_revision
+            or pointer.plan_digest != summary.plan_digest
+        ):
+            raise ValueError("scoped storyboard carrier does not bind Phase-A scope")
 
     def _require_valid_section_status_pair(self) -> None:
         valid_pair = (
@@ -1415,7 +1502,7 @@ class StarReelsViewV3(BaseModel):
 
     def _bind_storyboard_generating(
         self,
-        pointer: FactoryStoryboardCarrierV1 | None,
+        pointer: FactoryStoryboardCarrierV2 | None,
     ) -> None:
         if self.budget.purpose == "storyboard_draft":
             if (
@@ -1443,7 +1530,7 @@ class StarReelsViewV3(BaseModel):
 
     def _bind_storyboard_ready_for_review(
         self,
-        pointer: FactoryStoryboardCarrierV1 | None,
+        pointer: FactoryStoryboardCarrierV2 | None,
     ) -> None:
         if pointer is None or self.stage_output != pointer:
             raise ValueError(
@@ -1489,7 +1576,7 @@ class StarReelsViewV3(BaseModel):
 
     def _bind_two_stage_pointer(
         self,
-        pointer: FactoryStoryboardCarrierV1 | None,
+        pointer: FactoryStoryboardCarrierV2 | None,
     ) -> None:
         if (
             pointer is None
@@ -1582,7 +1669,7 @@ class StarReelsViewV3(BaseModel):
     def _bind_paid_authority_storyboard(
         self,
         authority: FactoryPaidBudgetAuthorityV2,
-        pointer: FactoryStoryboardCarrierV1 | None,
+        pointer: FactoryStoryboardCarrierV2 | None,
     ) -> None:
         if authority.purpose == "storyboard_regen":
             if pointer is None:
@@ -1602,7 +1689,7 @@ class StarReelsViewV3(BaseModel):
     def _bind_paid_factory(
         self,
         authority: FactoryPaidBudgetAuthorityV2,
-        pointer: FactoryStoryboardCarrierV1 | None,
+        pointer: FactoryStoryboardCarrierV2 | None,
     ) -> None:
         factory = self.receipts.factory
         if isinstance(
@@ -1633,6 +1720,13 @@ class StarReelsViewV3(BaseModel):
                 or factory.paid_budget_authority_digest != authority.authority_digest
                 or factory.storyboard_execution_manifest_digest
                 != pointer.execution_manifest_digest
+                or factory.storyboard_draft_id != pointer.storyboard_draft_id
+                or factory.storyboard_draft_revision != pointer.storyboard_revision
+                or factory.storyboard_draft_digest != pointer.storyboard_digest
+                or factory.image_set_receipt_digest
+                != pointer.image_set_receipt_digest
+                or factory.storyboard_approval_receipt_digest
+                != pointer.approval_receipt_digest
             ):
                 raise ValueError("factory success does not bind final paid authority")
 
@@ -1663,22 +1757,27 @@ class StarReelsViewV3(BaseModel):
     @staticmethod
     def _bind_phase_a_summary_lineage(
         summary: StoryboardPhaseACompletionSummaryV2,
-        pointer: FactoryStoryboardCarrierV1,
+        pointer: FactoryStoryboardCarrierV2,
     ) -> None:
         if (
-            summary.output_image_set_receipt_digest != pointer.image_set_receipt_digest
-            or pointer.storyboard_revision < summary.output_storyboard_revision
+            summary.workspace_id != pointer.workspace_id
+            or summary.run_id != pointer.run_id
+            or summary.factory_revision != pointer.factory_revision
+            or summary.plan_digest != pointer.plan_digest
+            or summary.output_storyboard_draft_id != pointer.storyboard_draft_id
+            or summary.output_storyboard_revision != pointer.storyboard_revision
+            or summary.output_storyboard_digest != pointer.storyboard_digest
+            or summary.output_image_set_receipt_digest
+            != pointer.image_set_receipt_digest
         ):
-            raise ValueError("Phase-A completion does not bind storyboard lineage")
-        if pointer.storyboard_revision == summary.output_storyboard_revision and (
-            pointer.storyboard_digest != summary.output_storyboard_digest
-        ):
-            raise ValueError("Phase-A completion does not bind current storyboard")
+            raise ValueError(
+                "Phase-A completion storyboard lineage does not bind current storyboard"
+            )
 
     def _bind_phase_a_review_authority(
         self,
         summary: StoryboardPhaseACompletionSummaryV2,
-        pointer: FactoryStoryboardCarrierV1,
+        pointer: FactoryStoryboardCarrierV2,
     ) -> None:
         authority = self.receipts.paid_budget_authority
         if (
@@ -1687,10 +1786,13 @@ class StarReelsViewV3(BaseModel):
             or summary.paid_budget_authority_digest != authority.authority_digest
         ):
             raise ValueError("Phase-A completion does not bind image authority")
-        if pointer.storyboard_revision != summary.output_storyboard_revision:
-            return
-        unapproved_pointer = FactoryStoryboardCarrierV1(
-            contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V1,
+        unapproved_pointer = FactoryStoryboardCarrierV2(
+            contract_version=FACTORY_STORYBOARD_CARRIER_VERSION_V2,
+            workspace_id=pointer.workspace_id,
+            run_id=pointer.run_id,
+            factory_revision=pointer.factory_revision,
+            plan_digest=pointer.plan_digest,
+            storyboard_draft_id=pointer.storyboard_draft_id,
             storyboard_revision=pointer.storyboard_revision,
             storyboard_digest=pointer.storyboard_digest,
             image_set_receipt_digest=pointer.image_set_receipt_digest,
@@ -1698,7 +1800,7 @@ class StarReelsViewV3(BaseModel):
             execution_manifest_digest=None,
         )
         if summary.output_storyboard_carrier_digest != (
-            derive_factory_storyboard_carrier_digest_v1(unapproved_pointer)
+            derive_factory_storyboard_carrier_digest_v2(unapproved_pointer)
         ):
             raise ValueError("Phase-A completion carrier digest drifted")
 
@@ -1727,6 +1829,16 @@ class StarReelsViewV3(BaseModel):
                 != self.budget.paid_budget_authority_digest
                 or factory.storyboard_execution_manifest_digest
                 != pointer.execution_manifest_digest
+                or scene_video_set.storyboard_draft_id
+                != pointer.storyboard_draft_id
+                or scene_video_set.storyboard_draft_revision
+                != pointer.storyboard_revision
+                or scene_video_set.storyboard_draft_digest
+                != pointer.storyboard_digest
+                or scene_video_set.image_set_receipt_digest
+                != pointer.image_set_receipt_digest
+                or scene_video_set.storyboard_approval_receipt_digest
+                != pointer.approval_receipt_digest
             ):
                 raise ValueError(
                     "sealed scene video budget does not match ready summary"
@@ -1742,6 +1854,7 @@ class StarReelsViewV3(BaseModel):
 
 __all__ = [
     "FactoryStoryboardCarrierV1",
+    "FactoryStoryboardCarrierV2",
     "StoryboardPhaseACompletionReceiptV1",
     "StoryboardPhaseACompletionSummaryV1",
     "StoryboardPhaseACompletionReceiptV2",
@@ -1753,6 +1866,7 @@ __all__ = [
     "StarReelsViewV3",
     "_StarReelsBudgetMultiBeatV1",
     "derive_factory_storyboard_carrier_digest_v1",
+    "derive_factory_storyboard_carrier_digest_v2",
     "derive_storyboard_phase_a_completion_receipt_digest_v1",
     "derive_storyboard_phase_a_completion_summary_digest_v1",
     "derive_storyboard_phase_a_completion_receipt_digest_v2",

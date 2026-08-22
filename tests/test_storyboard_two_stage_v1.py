@@ -21,6 +21,7 @@ from hiob_contracts import (
     FactoryPaidBudgetResolutionV2,
     FactoryCostProfileV1,
     FactoryStoryboardCarrierV1,
+    FactoryStoryboardCarrierV2,
     ReelsFactoryReceiptV3,
     StarReelsViewV3,
     StoryboardSceneFanInManifestV1,
@@ -987,6 +988,30 @@ def _storyboard_carrier(
             "image_set_receipt_digest": image_set.receipt_digest,
             "approval_receipt_digest": None,
             "execution_manifest_digest": None,
+        }
+    )
+
+
+def _storyboard_carrier_v2(
+    draft: StoryboardDraftV1,
+    image_set: StoryboardImageSetReceiptV1,
+    *,
+    approval_receipt_digest: str | None = None,
+    execution_manifest_digest: str | None = None,
+) -> FactoryStoryboardCarrierV2:
+    return FactoryStoryboardCarrierV2.model_validate(
+        {
+            "contract_version": "FactoryStoryboardCarrier.v2",
+            "workspace_id": draft.workspace_id,
+            "run_id": draft.run_id,
+            "factory_revision": draft.factory_revision,
+            "plan_digest": draft.plan_digest,
+            "storyboard_draft_id": draft.draft_id,
+            "storyboard_revision": draft.revision,
+            "storyboard_digest": draft.draft_digest,
+            "image_set_receipt_digest": image_set.receipt_digest,
+            "approval_receipt_digest": approval_receipt_digest,
+            "execution_manifest_digest": execution_manifest_digest,
         }
     )
 
@@ -3785,15 +3810,11 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
         authority=verified,
         operation_proofs=verified_requests,
     )
-    carrier = FactoryStoryboardCarrierV1.model_validate(
-        {
-            "contract_version": "FactoryStoryboardCarrier.v1",
-            "storyboard_revision": draft.revision,
-            "storyboard_digest": draft.draft_digest,
-            "image_set_receipt_digest": image_set.receipt_digest,
-            "approval_receipt_digest": approval.receipt_digest,
-            "execution_manifest_digest": manifest.manifest_digest,
-        }
+    carrier = _storyboard_carrier_v2(
+        draft,
+        image_set,
+        approval_receipt_digest=approval.receipt_digest,
+        execution_manifest_digest=manifest.manifest_digest,
     )
     payload: dict[str, Any] = {
         "contract_version": "StarReelsView.v3",
@@ -3841,6 +3862,34 @@ def test_star_reels_view_v3_ready_requires_scene_video_set_receipt_chain() -> No
     missing_set["budget"]["storyboard_scene_video_set_summary"] = None
     with pytest.raises(ValidationError, match="scene video budget"):
         StarReelsViewV3.model_validate(missing_set)
+
+    scene_lineage_drift = deepcopy(payload)
+    scene_body = scene_summary.model_dump(mode="json")
+    scene_body["storyboard_draft_digest"] = sha256_digest(
+        {"alien": "storyboard"}
+    )
+    scene_body["summary_digest"] = (
+        hiob_contracts.derive_storyboard_scene_video_set_summary_digest_v1(
+            scene_body
+        )
+    )
+    scene_lineage_drift["budget"]["storyboard_scene_video_set_summary"] = scene_body
+    with pytest.raises(ValidationError, match="ready summary"):
+        StarReelsViewV3.model_validate(scene_lineage_drift)
+
+    factory_lineage_drift = deepcopy(payload)
+    factory_body = factory.model_dump(mode="json")
+    factory_body["storyboard_draft_id"] = (
+        "00000000-0000-4000-8000-000000000099"
+    )
+    factory_body["summary_digest"] = (
+        hiob_contracts.derive_reels_factory_completion_summary_digest_v3(
+            factory_body
+        )
+    )
+    factory_lineage_drift["receipts"]["factory"] = factory_body
+    with pytest.raises(ValidationError, match="factory success"):
+        StarReelsViewV3.model_validate(factory_lineage_drift)
 
 
 def test_registry_and_root_exports_are_additive_and_v1_remains_unchanged() -> None:
@@ -4240,6 +4289,10 @@ def _phase_a_v2_completion_fixture(
     body.update(
         {
             "contract_version": "StoryboardPhaseACompletionReceipt.v2",
+            "output_storyboard_carrier": _storyboard_carrier_v2(
+                legacy.output_storyboard_draft,
+                legacy.output_image_set_receipt,
+            ),
             "paid_voice_operation_evidence_digests": voice_digests,
             "paid_voice_operation_bindings": voice_bindings,
             "voice_evidence_set_digest": (
@@ -4621,6 +4674,10 @@ def test_phase_a_v2_voice_and_regen_failure_edges_are_fail_closed() -> None:
     regen_body.update(
         {
             "contract_version": "StoryboardPhaseACompletionReceipt.v2",
+            "output_storyboard_carrier": _storyboard_carrier_v2(
+                legacy_regen.output_storyboard_draft,
+                legacy_regen.output_image_set_receipt,
+            ),
             "paid_voice_operation_evidence_digests": [],
             "paid_voice_operation_bindings": [],
             "voice_evidence_set_digest": None,

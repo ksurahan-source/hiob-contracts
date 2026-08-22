@@ -61,6 +61,10 @@ def test_v1_remains_exact_historical_shape_and_v2_requires_every_scope_field() -
         FactoryStoryboardCarrierV1.model_validate(
             {**historical, "workspace_id": WORKSPACE_ID}
         )
+    with pytest.raises(ValidationError, match="requires approval"):
+        FactoryStoryboardCarrierV1.model_validate(
+            {**historical, "execution_manifest_digest": DIGEST_A}
+        )
 
     scoped = FactoryStoryboardCarrierV2.model_validate(_scoped_carrier())
     assert scoped.storyboard_draft_id == DRAFT_ID
@@ -138,6 +142,21 @@ def test_current_v3_accepts_v2_carrier_and_rejects_v1_or_alien_scope() -> None:
     alien["stage_output"] = alien["storyboard"]
     with pytest.raises(ValidationError, match="scope|authority"):
         StarReelsViewV3.model_validate(alien)
+
+    summary = value.receipts.storyboard_phase_a_completion_summary
+    assert summary is not None
+    drifted_summary = summary.model_copy(
+        update={"workspace_id": "00000000-0000-4000-8000-000000000099"}
+    )
+    drifted_view = value.model_copy(
+        update={
+            "receipts": value.receipts.model_copy(
+                update={"storyboard_phase_a_completion_summary": drifted_summary}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="Phase-A scope"):
+        drifted_view._bind_storyboard_carrier_scope()
 
 
 def test_scene_and_factory_summaries_carry_exact_approved_draft_lineage() -> None:
