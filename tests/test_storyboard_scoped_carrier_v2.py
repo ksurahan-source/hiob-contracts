@@ -74,6 +74,13 @@ def test_v1_remains_exact_historical_shape_and_v2_requires_every_scope_field() -
 
     scoped = FactoryStoryboardCarrierV2.model_validate(_scoped_carrier())
     assert scoped.storyboard_draft_id == DRAFT_ID
+    assert FactoryStoryboardCarrierV2.model_validate(
+        {**_scoped_carrier(), "storyboard_revision": 9_007_199_254_740_991}
+    ).storyboard_revision == 9_007_199_254_740_991
+    with pytest.raises(ValidationError, match="less than or equal"):
+        FactoryStoryboardCarrierV2.model_validate(
+            {**_scoped_carrier(), "storyboard_revision": 9_007_199_254_740_992}
+        )
     for field in (
         "workspace_id",
         "run_id",
@@ -195,6 +202,27 @@ def test_scene_and_factory_summaries_carry_exact_approved_draft_lineage() -> Non
             summary.storyboard_approval_receipt_digest
             == manifest.storyboard_approval_receipt_digest
         )
+
+
+def test_scene_summary_optional_lineage_is_all_or_none() -> None:
+    partial = _valid_final_storyboard_chain()["scene_summary"].model_dump(mode="json")
+    for field in (
+        "storyboard_draft_revision",
+        "storyboard_draft_digest",
+        "image_set_receipt_digest",
+        "storyboard_approval_receipt_digest",
+    ):
+        partial.pop(field)
+    partial["summary_digest"] = (
+        hiob_contracts.derive_storyboard_scene_video_set_summary_digest_v1(partial)
+    )
+
+    with pytest.raises(ValidationError, match="lineage.*all present"):
+        hiob_contracts.StoryboardSceneVideoSetSummaryV1.model_validate(partial)
+    assert not hiob_contracts.validate_payload(
+        "StoryboardSceneVideoSetSummary",
+        partial,
+    ).ok
 
 
 def _production_budget_payload() -> dict:
