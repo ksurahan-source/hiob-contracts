@@ -3751,7 +3751,7 @@ class FactoryPaidOperationHistoricalEvidenceV2(BaseModel):
             self._bind_historical_video_scope(authority)
             return
         if self.operation == "voice":
-            if authority.purpose != "final_production" or self.source_index is None:
+            if authority.purpose != "storyboard_draft" or self.source_index is None:
                 raise ValueError("historical voice evidence is outside paid scope")
             return
         if self.operation == "script":
