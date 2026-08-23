@@ -4603,12 +4603,12 @@ class ReelsFactoryFailureReceiptV3(BaseModel):
         if receipt.provider_call == "none":
             if failed_operation_proof is not None:
                 raise ValueError("provider-free failure cannot carry verified evidence")
-            return receipt
-        evidence = require_verified_reels_factory_failed_provider_operation_v3(
-            failed_operation_proof
-        )
-        if receipt.failed_provider_operation != evidence:
-            raise ValueError("verified failed operation does not bind failure receipt")
+        else:
+            evidence = require_verified_reels_factory_failed_provider_operation_v3(
+                failed_operation_proof
+            )
+            if receipt.failed_provider_operation != evidence:
+                raise ValueError("verified failed operation does not bind failure receipt")
         return receipt
 
     def structurally_binds(self, authority: FactoryPaidBudgetAuthorityV2) -> bool:
