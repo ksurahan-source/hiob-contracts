@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 _ALL_BEAT_VIDEO_MODULE = "hiob_contracts.all_beat_video"
 _STORYBOARD_TWO_STAGE_MODULE = "hiob_contracts.storyboard_two_stage_v1"
+_STAR_REELS_VIEW_MODULE = "hiob_contracts.star_reels_view_v1"
 _EDGE_TARGET_INPUTS_MODULE = "hiob_contracts.edge_target_inputs"
 _PLANET_ENVELOPES_MODULE = "hiob_contracts.planet_envelopes"
 
@@ -122,6 +123,10 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         _STORYBOARD_TWO_STAGE_MODULE,
         "ReelsFactoryFailureReceiptV3",
     ),
+    "ReelsFactoryFailedProviderOperationV3": (
+        _STORYBOARD_TWO_STAGE_MODULE,
+        "ReelsFactoryFailedProviderOperationV3",
+    ),
     "StoryboardImageArtifactRef": (
         _STORYBOARD_TWO_STAGE_MODULE,
         "StoryboardImageArtifactRefV1",
@@ -143,12 +148,24 @@ _REGISTRY: dict[str, tuple[str, str]] = {
         "StoryboardImageSetReceiptV1",
     ),
     "StoryboardPhaseACompletionReceipt": (
-        "hiob_contracts.star_reels_view_v1",
+        _STAR_REELS_VIEW_MODULE,
         "StoryboardPhaseACompletionReceiptV1",
     ),
+    "StoryboardPhaseACompletionReceiptV2": (
+        _STAR_REELS_VIEW_MODULE,
+        "StoryboardPhaseACompletionReceiptV2",
+    ),
     "StoryboardPhaseACompletionSummary": (
-        "hiob_contracts.star_reels_view_v1",
+        _STAR_REELS_VIEW_MODULE,
         "StoryboardPhaseACompletionSummaryV1",
+    ),
+    "StoryboardPhaseACompletionSummaryV2": (
+        _STAR_REELS_VIEW_MODULE,
+        "StoryboardPhaseACompletionSummaryV2",
+    ),
+    "StoryboardPhaseAVoiceOperationBindingV2": (
+        _STAR_REELS_VIEW_MODULE,
+        "StoryboardPhaseAVoiceOperationBindingV2",
     ),
     "StoryboardScene": (
         _STORYBOARD_TWO_STAGE_MODULE,

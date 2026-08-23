@@ -11,14 +11,14 @@ JanusBrief → BeatPlan[] → {MediaArtifact, AudioClip}[]
 ### 2단계 스토리보드 생산
 
 ```text
-Phase A 유료 승인 → 대본 1개 + 스틸 이미지 16개
+Phase A 유료 승인 → 대본 1개 + 스틸 이미지 16개 + 보이스 16개
   → 에디터 확인·재배치·장면 그룹화 → 현재 초안 승인
-  → Phase B 유료 승인 → 장면 수만큼 영상 + 비트 보이스 16개 + 렌더 1개
+  → Phase B 유료 승인 → 장면 수만큼 영상 + 렌더 1개
 ```
 
 비트는 보이스와 자막을 각각 봉인하는 16개 의미 단위이고, 장면은 영상 생성 단위이다. 연속한 여러 비트가 하나의 장면을 공유할 수 있으므로 최종 영상 호출 수는 1~16개이며, 각 장면은 첫 카드의 승인된 이미지·프롬프트·프레이밍·모션만 사용한다. 나머지 카드의 보이스·자막은 독립된 타임라인 진실로 유지되며 제공자 프롬프트에 합쳐지지 않는다.
 
-유료 실행 권한은 현재 USD 원가 프로필까지 검증한 `FactoryPaidBudgetResolutionV2`만 발급한다. 새 호출은 비직렬화 요청 권한, 완료된 호출의 장애 복구는 서버 전용 historical evidence로만 검증한다. 장면 영상 영수증은 사전검증된 4초·24fps·720×1280·무음 요청 전체를 포함하고, 장면 세트→자막·음성 팬인→최종 영수증까지 같은 증거 사슬을 대조한다.
+유료 실행 권한은 현재 USD 원가 프로필까지 검증한 `FactoryPaidBudgetResolutionV2`만 발급한다. 새 호출은 비직렬화 요청 권한, 완료된 호출의 장애 복구는 서버 전용 historical evidence로만 검증한다. `StoryboardPhaseACompletionReceipt.v2`는 각 source의 정확한 카드 `voice_text`, 봉인된 `OrpheusVoiceMaterializationInput.v1`, audio digest, provider result id/digest와 resolver-verified evidence를 16개 typed binding으로 봉인한다. V3의 모든 post-Phase-A 상태는 V2 summary만 허용한다. V1 완료/summary는 기존 기록 조회용으로 계속 파싱하지만 summary를 새로 만들거나 V3 상태 전진 또는 provider 권한에 사용할 수 없다. `ReelsFactoryFailureReceipt.v3`의 보이스 실패는 canonical lane, 정확한 누적 시도 번호, provider binding, result id/digest/status, `reserved ≤ dispatched ≤ observed ≤ failed` 시간을 담고 durable resolver가 검증한 capability로만 새 영수증을 만든다. 장면 영상 영수증은 사전검증된 4초·24fps·720×1280·무음 요청 전체를 포함하고, 장면 세트→자막·음성 팬인→최종 영수증까지 같은 증거 사슬을 대조한다.
 
 전체 Phase A/장면/팬인 영수증은 서버 전용이다. `StarReelsView.v3`에는 비용 상한, 16→N 장면 투영, 최종 HTTPS 결과만 담은 redacted summary를 노출한다. 이 저장소는 계약 SOURCE를 제공하며, provider 결과 outbox·DB resolver·실행 어댑터 연결은 별도 WIRED/LIVE 증거가 필요하다.
 
