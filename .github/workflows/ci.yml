@@ -54,5 +54,17 @@ jobs:
         run: npm run build
         working-directory: ts
       - name: SonarQube Cloud scan
-        if: ${{ env.SONAR_TOKEN != '' }}
+        if: ${{ vars.HIOB_SONAR_ENABLED == 'true' && env.SONAR_TOKEN != '' }}
         uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+      - name: Upload source quality evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contracts-source-quality-${{ github.sha }}
+          path: |
+            coverage.xml
+            ts/coverage/lcov.info
+          if-no-files-found: error
+      - name: Record unavailable Sonar gate
+        if: ${{ vars.HIOB_SONAR_ENABLED != 'true' || env.SONAR_TOKEN == '' }}
+        run: echo 'SONAR BLOCKED / disabled. Required Python and TypeScript tests and coverage remain the source gate; this run does not prove a Sonar Quality Gate.' >> "$GITHUB_STEP_SUMMARY"
