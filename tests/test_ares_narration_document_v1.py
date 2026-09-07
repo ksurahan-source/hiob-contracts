@@ -68,3 +68,8 @@ def test_resealed_invalid_selection_is_rejected(change):
 def test_payload_digest_is_required_even_for_otherwise_valid_document():
     raw = document(); raw['source_request_digest'] = 'sha256:'+'b'*64
     with pytest.raises(ValueError): parse(raw)
+
+
+def test_segments_are_not_coerced_from_an_unordered_collection():
+    raw=document();raw['segments']={'unordered':True}
+    with pytest.raises(ValueError): parse(seal(raw,'document_digest'))
