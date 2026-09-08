@@ -72,3 +72,56 @@ def test_unverified_observation_cannot_become_a_customer_testimonial():
     raw['observation_kind'] = 'verified_customer'
     with pytest.raises(ValidationError):
         EnsembleBriefV1.model_validate(raw)
+
+
+def brief_value():
+    return dict(contract_version='EnsembleBrief.v1',target_duration_ms=54000,cast_count=4,
+        product_name='아이세이프',product_facts=[dict(fact_id='f1',text='수경용 안티포그')],
+        intake_13q={},observation='친구를 기다린다',observation_kind='creator_hypothesis',observation_source='',
+        emotional_hypothesis='함께 준비한다',hook_strategy='relationship',creative_notes='')
+
+
+@pytest.mark.parametrize('change',[
+    lambda p:p['product_facts'].append(dict(fact_id='f1',text='서로 다른 주장')),
+    lambda p:p.update(observation_kind='external_observation'),
+    lambda p:p.update(intake_13q={str(i):'answer' for i in range(14)}),
+    lambda p:p.update(intake_13q={'pain':'a'*4001}),
+])
+def test_brief_rejects_ambiguous_sources_and_unbounded_intake(change):
+    raw=brief_value();change(raw)
+    with pytest.raises(ValidationError): EnsembleBriefV1.model_validate(raw)
+
+
+@pytest.mark.parametrize('change',[
+    lambda p:p['scenes'][0].update(cast_ids=['c1','c2','c3','c1']),
+    lambda p:p['scenes'][1].update(scene_id='s1'),
+    lambda p:p['scenes'][0].update(cast_ids=['c1','c2','c3','unknown']),
+    lambda p:[scene.update(setting='변화 없는 하나의 장소') for scene in p['scenes']],
+])
+def test_scene_identity_and_situation_invariants(change):
+    raw=story_value();change(raw)
+    with pytest.raises(ValidationError): EnsembleStoryV1.model_validate(raw)
+
+
+def test_review_binding_requires_same_cast_target_and_known_product_facts():
+    story=EnsembleStoryV1.model_validate(story_value())
+    brief=EnsembleBriefV1.model_validate(brief_value())
+    assert story.bind_brief(brief) is story
+    for patch in ({'cast_count':3},{'target_duration_ms':60000}):
+        with pytest.raises(ValueError,match='approved brief'):
+            story.bind_brief(EnsembleBriefV1.model_validate({**brief_value(),**patch}))
+    raw=story_value();raw['scenes'][0]['product_fact_ids']=['not_evidenced']
+    with pytest.raises(ValueError,match='approved source'):
+        EnsembleStoryV1.model_validate(raw).bind_brief(brief)
+
+
+@pytest.mark.parametrize('target',[45000,60000])
+def test_three_person_story_and_both_duration_boundaries(target):
+    raw=story_value();raw['cast'].pop();raw['target_duration_ms']=target
+    for scene in raw['scenes']:
+        scene['cast_ids'].remove('c4')
+        for line in scene['dialogue']:
+            if line['character_id']=='c4':line['character_id']='c2'
+    raw['scenes'][-1]['duration_ms']+=target-54000
+    raw['scenes'][-1]['source_duration_sec']=(raw['scenes'][-1]['duration_ms']+999)//1000
+    assert len(EnsembleStoryV1.model_validate(raw).cast)==3
