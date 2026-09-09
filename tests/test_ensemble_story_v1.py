@@ -155,3 +155,21 @@ def test_selected_narrator_cannot_be_unused_metadata():
     raw=story_value();raw['narrator']={'role':'guide','voice':'changu'}
     with pytest.raises(ValidationError,match='planned narration scene'):
         EnsembleStoryV1.model_validate(raw)
+
+
+def test_narration_plan_rejects_missing_sentence_before_paid_generation():
+    raw = story_value()
+    raw['narrator'] = {'role': 'guide', 'voice': 'changu'}
+    raw['scenes'][0].update(audio_mode='narration', narration='  ', dialogue=[])
+    with pytest.raises(ValidationError, match='planned sentence'):
+        EnsembleStoryV1.model_validate(raw)
+
+
+def test_narrator_does_not_allow_unused_on_screen_characters():
+    raw = story_value()
+    raw['narrator'] = {'role': 'guide', 'voice': 'changu'}
+    for scene in raw['scenes']:
+        scene.update(cast_ids=['c1'], audio_mode='narration',
+                     narration='수경 때문에 또 멈췄네요.', dialogue=[])
+    with pytest.raises(ValidationError, match='visible action'):
+        EnsembleStoryV1.model_validate(raw)
