@@ -125,3 +125,28 @@ def test_three_person_story_and_both_duration_boundaries(target):
     raw['scenes'][-1]['duration_ms']+=target-54000
     raw['scenes'][-1]['source_duration_sec']=(raw['scenes'][-1]['duration_ms']+999)//1000
     assert len(EnsembleStoryV1.model_validate(raw).cast)==3
+
+def test_single_protagonist_can_act_silently_under_an_independent_narrator():
+    raw=story_value();raw['cast']=raw['cast'][:1];raw['narrator']={'role':'guide','voice':'changu'}
+    for scene in raw['scenes']:
+        scene.update(cast_ids=['c1'],dialogue=[],audio_mode='narration',narration='수경 때문에 또 멈췄네요.')
+    plan=EnsembleStoryV1.model_validate(raw)
+    brief=EnsembleBriefV1.model_validate({**brief_value(),'cast_count':1,'narrator':raw['narrator']})
+    assert plan.bind_brief(brief) is plan
+    assert plan.scenes[0].audio_mode=='narration'
+    assert plan.model_dump(mode='json')['narrator']['voice']=='changu'
+    raw['scenes'][0]['dialogue']=[dict(character_id='c1',text='같이 가자.',start_ms=1000,end_ms=2500)]
+    with pytest.raises(ValidationError,match='audio mode'):
+        EnsembleStoryV1.model_validate(raw)
+
+
+def test_external_narration_requires_a_selected_narrator_and_product_cutaway_needs_evidence():
+    raw=story_value();raw['scenes'][0].update(audio_mode='narration',narration='또 멈췄네요.',dialogue=[])
+    with pytest.raises(ValidationError,match='narrator'):
+        EnsembleStoryV1.model_validate(raw)
+    raw['narrator']={'role':'guide','voice':'changu'}
+    raw['scenes'][0].update(cast_ids=[],product_role='guide',product_fact_ids=['f1'])
+    assert not EnsembleStoryV1.model_validate(raw).scenes[0].cast_ids
+    raw['scenes'][0]['product_role']='none'
+    with pytest.raises(ValidationError,match='cutaway'):
+        EnsembleStoryV1.model_validate(raw)
