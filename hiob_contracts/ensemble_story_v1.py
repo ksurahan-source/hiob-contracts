@@ -5,7 +5,7 @@ directly; there is deliberately no projection into the legacy 16-beat format.
 """
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator, model_serializer
 
 Text = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)]
 Id = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,39}$")]
@@ -14,16 +14,31 @@ Id = Annotated[str, StringConstraints(pattern=r"^[a-z][a-z0-9_]{0,39}$")]
 class StrictValue(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    @model_serializer(mode='wrap')
+    def preserve_legacy_shape(self, serialize):
+        value = serialize(self)
+        # Existing immutable story receipts must retain their exact JSON shape.
+        for key, default in [('narrator', None), ('audio_mode', 'dialogue'), ('narration', '')]:
+            if key in value and value[key] == default:
+                value.pop(key)
+        return value
+
 
 class ProductFact(StrictValue):
     fact_id: Id
     text: Text
 
 
+class GuideNarrator(StrictValue):
+    role: Literal['guide']
+    voice: Literal['changu', 'gongchul']
+
+
 class EnsembleBriefV1(StrictValue):
     contract_version: Literal["EnsembleBrief.v1"]
     target_duration_ms: int = Field(ge=45000, le=60000, strict=True)
-    cast_count: Literal[3, 4]
+    cast_count: Literal[1, 2, 3, 4]
+    narrator: GuideNarrator | None = None
     product_name: Text
     product_facts: list[ProductFact] = Field(min_length=1, max_length=20)
     intake_13q: dict[str, str]
@@ -58,7 +73,7 @@ class EnsembleCharacter(StrictValue):
 
 
 class EnsembleCastV1(StrictValue):
-    cast: list[EnsembleCharacter] = Field(min_length=3, max_length=4)
+    cast: list[EnsembleCharacter] = Field(min_length=1, max_length=4)
 
     @model_validator(mode="after")
     def unique_people(self):
@@ -85,7 +100,9 @@ class DialogueTurn(StrictValue):
 class EnsembleScene(StrictValue):
     scene_id: Id
     setting: Text
-    cast_ids: list[Id] = Field(min_length=1, max_length=4)
+    cast_ids: list[Id] = Field(max_length=4)
+    audio_mode: Literal['dialogue', 'narration', 'silent'] = 'dialogue'
+    narration: str = Field(default='', max_length=300)
     action: Text
     emotional_change: Text
     product_role: Literal["none", "incidental", "question", "guide"]
@@ -98,6 +115,12 @@ class EnsembleScene(StrictValue):
 
     @model_validator(mode="after")
     def timing(self):
+        if (self.audio_mode != 'dialogue' and self.dialogue) or (self.narration.strip() and self.audio_mode != 'narration'):
+            raise ValueError('audio mode conflicts with native dialogue or external narration')
+        if self.audio_mode == 'narration' and not self.narration.strip():
+            raise ValueError('narration audio mode requires its planned sentence')
+        if not self.cast_ids and (self.product_role == 'none' or not self.product_fact_ids):
+            raise ValueError('product cutaway requires product facts')
         if len(set(self.cast_ids)) != len(self.cast_ids):
             raise ValueError("scene cast must be unique")
         if self.trim_start_ms + self.duration_ms > self.source_duration_sec * 1000:
@@ -130,6 +153,7 @@ class EnsembleNarrativeV1(StrictValue):
 class EnsembleStoryV1(EnsembleNarrativeV1, EnsembleCastV1):
     contract_version: Literal["EnsembleStory.v1"]
     target_duration_ms: int = Field(ge=45000, le=60000, strict=True)
+    narrator: GuideNarrator | None = None
 
     @property
     def source_duration_sec(self) -> int:
@@ -143,18 +167,26 @@ class EnsembleStoryV1(EnsembleNarrativeV1, EnsembleCastV1):
         if len({scene.scene_id for scene in self.scenes}) != len(self.scenes):
             raise ValueError("scene IDs must be unique")
         speakers = set()
+        visible = set()
         for scene in self.scenes:
             if not set(scene.cast_ids) <= ids:
                 raise ValueError("scene contains an unknown character")
             speakers.update(turn.character_id for turn in scene.dialogue)
-        if speakers != ids:
+            visible.update(scene.cast_ids)
+            if scene.audio_mode == 'narration' and self.narrator is None:
+                raise ValueError('external narration requires a selected guide narrator')
+        if self.narrator is None and speakers != ids:
             raise ValueError("every character must contribute dialogue")
+        if self.narrator is not None and visible != ids:
+            raise ValueError('every character must contribute visible action')
+        if self.narrator is not None and not any(scene.audio_mode == 'narration' for scene in self.scenes):
+            raise ValueError('selected narrator requires a planned narration scene')
         if len({scene.setting for scene in self.scenes}) < 2:
             raise ValueError("story needs a situation change")
         return self
 
     def bind_brief(self, brief: EnsembleBriefV1) -> "EnsembleStoryV1":
-        if len(self.cast) != brief.cast_count or self.target_duration_ms != brief.target_duration_ms:
+        if len(self.cast) != brief.cast_count or self.target_duration_ms != brief.target_duration_ms or self.narrator != brief.narrator:
             raise ValueError("story does not match the approved brief")
         facts = {fact.fact_id for fact in brief.product_facts}
         if any(not set(scene.product_fact_ids) <= facts for scene in self.scenes):
