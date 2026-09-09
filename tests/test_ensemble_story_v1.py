@@ -150,3 +150,8 @@ def test_external_narration_requires_a_selected_narrator_and_product_cutaway_nee
     raw['scenes'][0]['product_role']='none'
     with pytest.raises(ValidationError,match='cutaway'):
         EnsembleStoryV1.model_validate(raw)
+
+def test_selected_narrator_cannot_be_unused_metadata():
+    raw=story_value();raw['narrator']={'role':'guide','voice':'changu'}
+    with pytest.raises(ValidationError,match='planned narration scene'):
+        EnsembleStoryV1.model_validate(raw)

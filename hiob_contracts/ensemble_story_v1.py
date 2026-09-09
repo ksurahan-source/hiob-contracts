@@ -179,6 +179,8 @@ class EnsembleStoryV1(EnsembleNarrativeV1, EnsembleCastV1):
             raise ValueError("every character must contribute dialogue")
         if self.narrator is not None and visible != ids:
             raise ValueError('every character must contribute visible action')
+        if self.narrator is not None and not any(scene.audio_mode == 'narration' for scene in self.scenes):
+            raise ValueError('selected narrator requires a planned narration scene')
         if len({scene.setting for scene in self.scenes}) < 2:
             raise ValueError("story needs a situation change")
         return self
