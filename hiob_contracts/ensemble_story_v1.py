@@ -18,7 +18,8 @@ class StrictValue(BaseModel):
     def preserve_legacy_shape(self, serialize):
         value = serialize(self)
         # Existing immutable story receipts must retain their exact JSON shape.
-        for key, default in [('narrator', None), ('audio_mode', 'dialogue'), ('narration', '')]:
+        for key, default in [('narrator', None), ('audio_mode', 'dialogue'), ('narration', ''),
+                             ('creative_context', None), ('creative_direction', None), ('intent', None)]:
             if key in value and value[key] == default:
                 value.pop(key)
         return value
@@ -32,6 +33,62 @@ class ProductFact(StrictValue):
 class GuideNarrator(StrictValue):
     role: Literal['guide']
     voice: Literal['changu', 'gongchul']
+
+
+class CreativeContext(StrictValue):
+    vertical: Text
+    audience: Text
+    awareness: Literal['unaware', 'problem_aware', 'solution_aware', 'product_aware']
+    desire: Text
+    hesitation: Text
+    desired_action: Text
+
+
+class CreativeDirection(StrictValue):
+    direction_id: Id
+    title: Text
+    customer_situation: Text
+    motivation: Text
+    narrative_approach: Text
+    rationale: Text
+    opening: Text
+    product_entry: Text
+    proof_plan: Text
+    product_fact_ids: list[Id] = Field(max_length=20)
+    missing_evidence: list[Text] = Field(max_length=6)
+    cta: Text
+    recommended_cast_count: int = Field(ge=1, le=4, strict=True)
+    character_roles: list[Text] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode='after')
+    def role_count(self):
+        if len(self.character_roles) != self.recommended_cast_count:
+            raise ValueError('direction character roles must match its recommended cast')
+        if len(set(self.product_fact_ids)) != len(self.product_fact_ids):
+            raise ValueError('direction product fact IDs must be unique')
+        return self
+
+
+class CreativeDirections(StrictValue):
+    directions: list[CreativeDirection] = Field(min_length=2, max_length=3)
+    recommended_direction_id: Id
+
+    @model_validator(mode='after')
+    def distinct_directions(self):
+        ids = [item.direction_id for item in self.directions]
+        if len(set(ids)) != len(ids) or self.recommended_direction_id not in ids:
+            raise ValueError('directions require unique IDs and a valid recommendation')
+        approaches = [item.narrative_approach.casefold() for item in self.directions]
+        if len(set(approaches)) != len(approaches):
+            raise ValueError('directions must offer distinct narrative approaches')
+        return self
+
+
+class SceneIntent(StrictValue):
+    before: Text
+    after: Text
+    observable_action: Text
+    reason_to_continue: Text
 
 
 class EnsembleBriefV1(StrictValue):
@@ -49,6 +106,8 @@ class EnsembleBriefV1(StrictValue):
     emotional_hypothesis: Text
     hook_strategy: Literal["relationship", "product_question", "situation"]
     creative_notes: str = Field(max_length=6000)
+    creative_context: CreativeContext | None = None
+    creative_direction: CreativeDirection | None = None
 
     @model_validator(mode="after")
     def source_scope(self):
@@ -59,6 +118,11 @@ class EnsembleBriefV1(StrictValue):
             raise ValueError("external observation requires its source URL")
         if len(self.intake_13q) > 13 or any(len(v) > 4000 for v in self.intake_13q.values()):
             raise ValueError("13Q input is too large")
+        if self.creative_direction:
+            if self.creative_context is None:
+                raise ValueError('creative direction requires customer context')
+            if not set(self.creative_direction.product_fact_ids) <= set(ids):
+                raise ValueError('direction cites an unknown product fact')
         return self
 
 
@@ -105,7 +169,9 @@ class EnsembleScene(StrictValue):
     narration: str = Field(default='', max_length=300)
     action: Text
     emotional_change: Text
-    product_role: Literal["none", "incidental", "question", "guide"]
+    intent: SceneIntent | None = None
+    product_role: Literal["none", "incidental", "question", "guide", 'demonstration',
+                          'comparison', 'self_expression', 'workflow', 'trust']
     product_fact_ids: list[Id] = Field(max_length=20)
     source_duration_sec: int = Field(ge=4, le=30, strict=True)
     trim_start_ms: int = Field(ge=0, strict=True)
@@ -154,6 +220,7 @@ class EnsembleStoryV1(EnsembleNarrativeV1, EnsembleCastV1):
     contract_version: Literal["EnsembleStory.v1"]
     target_duration_ms: int = Field(ge=45000, le=60000, strict=True)
     narrator: GuideNarrator | None = None
+    creative_direction: CreativeDirection | None = None
 
     @property
     def source_duration_sec(self) -> int:
@@ -169,6 +236,8 @@ class EnsembleStoryV1(EnsembleNarrativeV1, EnsembleCastV1):
         speakers = set()
         visible = set()
         for scene in self.scenes:
+            if self.creative_direction and scene.intent is None:
+                raise ValueError('a directed story requires observable intent for every scene')
             if not set(scene.cast_ids) <= ids:
                 raise ValueError("scene contains an unknown character")
             speakers.update(turn.character_id for turn in scene.dialogue)
@@ -186,6 +255,8 @@ class EnsembleStoryV1(EnsembleNarrativeV1, EnsembleCastV1):
         return self
 
     def bind_brief(self, brief: EnsembleBriefV1) -> "EnsembleStoryV1":
+        if self.creative_direction != brief.creative_direction:
+            raise ValueError('story does not match the selected creative direction')
         if len(self.cast) != brief.cast_count or self.target_duration_ms != brief.target_duration_ms or self.narrator != brief.narrator:
             raise ValueError("story does not match the approved brief")
         facts = {fact.fact_id for fact in brief.product_facts}
