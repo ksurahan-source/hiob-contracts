@@ -63,3 +63,17 @@ def test_direction_requires_observable_intent_for_every_scene():
 def test_product_roles_support_more_than_problem_and_guide(role):
     value=story_value();value['scenes'][0]['product_role']=role
     assert EnsembleStoryV1.model_validate(value).scenes[0].product_role==role
+
+
+def test_direction_selection_requires_context_and_consistent_recommendations():
+    from hiob_contracts.ensemble_story_v1 import CreativeDirection, CreativeDirections
+    with pytest.raises(ValueError,match='context'):
+        EnsembleBriefV1.model_validate({**brief_value(),'creative_direction':direction_value()})
+    for patch in ({'recommended_cast_count':1},{'product_fact_ids':['f1','f1']}):
+        with pytest.raises(ValueError):CreativeDirection.model_validate({**direction_value(),**patch})
+    other={**direction_value(),'direction_id':'d2','narrative_approach':'공간에서 발견하는 취향'}
+    value={'directions':[direction_value(),other],'recommended_direction_id':'d1'}
+    assert CreativeDirections.model_validate(value).recommended_direction_id=='d1'
+    for patch in ({'recommended_direction_id':'missing'},{'directions':[direction_value(),direction_value()]},
+                  {'directions':[direction_value(),{**other,'narrative_approach':direction_value()['narrative_approach']}]}):
+        with pytest.raises(ValueError):CreativeDirections.model_validate({**value,**patch})
